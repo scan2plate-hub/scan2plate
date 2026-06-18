@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scan2Plate - Scan, Order & Relax</title>
+  <link rel="stylesheet" href="./css/style.css" />
+  <style>
+    :root{
+      --brand:#d88a1d;
+      --brand-dark:#111111;
+      --muted:#666;
+      --bg-soft:#fffaf3;
+      --card:#ffffff;
+      --line:#ececec;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:Arial, Helvetica, sans-serif;
+      color:#111;
+      background:#fff;
+    }
+
+    .hidden{ display:none !important; }
+
+    .container{
+      width:min(1180px, 92%);
+      margin:0 auto;
+    }
+
+    .topbar{
+      border-bottom:1px solid var(--line);
+      background:#fff;
+      position:sticky;
+      top:0;
+      z-index:20;
+    }
+
+    .nav{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:20px;
+      padding:16px 0;
+    }
+
+    .logo-wrap{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+
+    .logo-wrap img{
+      width:52px;
+      height:52px;
+      object-fit:contain;
+      display:block;
+      border-radius:12px;
+    }
+
+    .logo-text strong{
+      display:block;
+      font-size:20px;
+      line-height:1.1;
+    }
+
+    .logo-text span{
+      color:#666;
+      font-size:14px;
+    }
+
+    .nav-links{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:12px 18px;
+      border-radius:14px;
+      text-decoration:none;
+      font-weight:700;
+      border:1px solid transparent;
+      cursor:pointer;
+    }
+
+    .btn-dark{
+      background:#111;
+      color:#fff;
+    }
+
+    .btn-outline{
+      background:#fff;
+      color:#111;
+      border:1px solid #ddd;
+    }
+
+    .hero{
+      padding:56px 0 26px;
+      background:linear-gradient(135deg,#fffaf3 0%,#ffffff 50%,#f8fbf9 100%);
+    }
+
+    .hero-grid{
+      display:grid;
+      grid-template-columns:1.05fr .95fr;
+      gap:36px;
+      align-items:center;
+    }
+
+    .badge{
+      display:inline-block;
+      background:#fff1db;
+      color:#b96f09;
+      padding:10px 16px;
+      border-radius:999px;
+      font-size:14px;
+      font-weight:700;
+      margin-bottom:18px;
+    }
+
+    .hero h1{
+      margin:0 0 14px;
+      font-size:58px;
+      line-height:1.02;
+      letter-spacing:-1.5px;
+    }
+
+    .hero h1 span{ color:var(--brand); }
+
+    .hero p{
+      font-size:18px;
+      color:#555;
+      line-height:1.7;
+      margin:0 0 20px;
+    }
+
+    .hero-cta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      margin-bottom:24px;
+    }
+
+    .mini-grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:14px;
+    }
+
+    .mini-card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 10px 22px rgba(0,0,0,.05);
+    }
+
+    .mini-card strong{
+      display:block;
+      margin-bottom:6px;
+      font-size:16px;
+    }
+
+    .mini-card span{
+      color:#666;
+      font-size:14px;
+      line-height:1.5;
+    }
+
+    .hero-visual{
+      position:relative;
+      background:#fff;
+      border-radius:28px;
+      padding:16px;
+      box-shadow:0 16px 40px rgba(0,0,0,.08);
+    }
+
+    .hero-visual img{
+      width:100%;
+      border-radius:22px;
+      display:block;
+      object-fit:cover;
+    }
+
+    .float-card{
+      position:absolute;
+      background:#fff;
+      border-radius:16px;
+      padding:12px 14px;
+      box-shadow:0 12px 28px rgba(0,0,0,.14);
+      max-width:210px;
+    }
+
+    .float-card strong{
+      display:block;
+      font-size:14px;
+      margin-bottom:4px;
+    }
+
+    .float-card span{
+      color:#666;
+      font-size:12px;
+      line-height:1.4;
+    }
+
+    .float-left{ left:-18px; bottom:22px; }
+    .float-right{ right:-18px; top:26px; }
+
+    .section{
+      padding:34px 0;
+    }
+
+    .section-head{
+      text-align:center;
+      max-width:760px;
+      margin:0 auto 26px;
+    }
+
+    .section-head h2{
+      margin:12px 0 10px;
+      font-size:40px;
+    }
+
+    .section-head p{
+      color:#666;
+      line-height:1.7;
+      font-size:17px;
+    }
+
+    .features{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:18px;
+    }
+
+    .feature-box{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:22px;
+      padding:22px;
+      box-shadow:0 10px 24px rgba(0,0,0,.05);
+    }
+
+    .feature-box h3{
+      margin:0 0 8px;
+      font-size:24px;
+    }
+
+    .feature-box p{
+      margin:0;
+      color:#666;
+      line-height:1.6;
+    }
+
+    .plans{
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:22px;
+      max-width:920px;
+      margin:0 auto;
+    }
+
+    .plan-card{
+      position:relative;
+      border:1px solid var(--line);
+      border-radius:24px;
+      background:#fff;
+      padding:28px;
+      box-shadow:0 14px 30px rgba(0,0,0,.05);
+    }
+
+    .plan-card.featured{
+      border:2px solid var(--brand);
+      transform:translateY(-4px);
+    }
+
+    .plan-tag{
+      position:absolute;
+      top:-12px;
+      right:20px;
+      background:var(--brand);
+      color:#fff;
+      padding:7px 12px;
+      font-size:12px;
+      border-radius:999px;
+      font-weight:700;
+    }
+
+    .plan-card h3{
+      margin:0 0 10px;
+      font-size:28px;
+    }
+
+    .price{
+      font-size:42px;
+      font-weight:800;
+      margin-bottom:14px;
+    }
+
+    .price span{
+      font-size:18px;
+      color:#666;
+      font-weight:500;
+    }
+
+    .plan-card ul{
+      margin:0 0 20px;
+      padding-left:18px;
+      color:#555;
+      line-height:1.9;
+    }
+
+    .footer{
+      border-top:1px solid var(--line);
+      padding:22px 0;
+      color:#666;
+      margin-top:14px;
+    }
+
+    .footer-row{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+
+    /* Customer ordering area */
+    .order-shell{
+      padding:28px 0 40px;
+      background:#fffaf3;
+      min-height:calc(100vh - 86px);
+    }
+
+    .order-grid{
+      display:grid;
+      grid-template-columns:1.2fr .8fr;
+      gap:22px;
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:20px;
+      box-shadow:0 10px 22px rgba(0,0,0,.04);
+    }
+
+    .menu-grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:16px;
+      margin-top:18px;
+    }
+
+    .menu-item{
+      border:1px solid #eee;
+      border-radius:18px;
+      overflow:hidden;
+      background:#fff;
+    }
+
+    .menu-item img{
+      width:100%;
+      height:150px;
+      object-fit:cover;
+      display:block;
+      background:#f7f7f7;
+    }
+
+    .menu-item-body{
+      padding:14px;
+    }
+
+    .menu-item h3{
+      margin:0 0 6px;
+      font-size:18px;
+    }
+
+    .muted{ color:#666; }
+    .small{ font-size:13px; }
+
+    .chips{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+
+    .chip{
+      border:1px solid #ddd;
+      background:#fff;
+      border-radius:999px;
+      padding:9px 14px;
+      cursor:pointer;
+      font-weight:700;
+    }
+
+    .chip.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+
+    .price-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-top:12px;
+    }
+
+    .qty-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-top:10px;
+    }
+
+    .qty-box{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .qty-btn{
+      width:30px;
+      height:30px;
+      border:none;
+      border-radius:8px;
+      background:#111;
+      color:#fff;
+      cursor:pointer;
+    }
+
+    .field{
+      width:100%;
+      padding:13px 14px;
+      border-radius:14px;
+      border:1px solid #ddd;
+      outline:none;
+      margin-bottom:12px;
+    }
+
+    .success-box{
+      margin-top:16px;
+      padding:14px;
+      border-radius:16px;
+      background:#edf9ef;
+      border:1px solid #cfe8d3;
+      color:#225d2f;
+    }
+
+    @media (max-width: 1000px){
+      .hero-grid,
+      .mini-grid,
+      .features,
+      .plans,
+      .order-grid,
+      .menu-grid{
+        grid-template-columns:1fr;
+      }
+
+      .hero h1{
+        font-size:42px;
+      }
+
+      .float-left,
+      .float-right{
+        position:static;
+        margin-top:12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container nav">
+      <div class="logo-wrap">
+        <img src="./logo.PNG" alt="Scan2Plate logo" />
+        <div class="logo-text">
+          <strong>Scan2Plate</strong>
+          <span>Scan, Order & Relax</span>
+        </div>
+      </div>
+
+      <div class="nav-links">
+        <a href="#plans" class="btn btn-outline" id="menuTopBtn">Plans</a>
+        <a href="./track.html" class="btn btn-outline">Track Order</a>
+        <a href="./admin-login.html" class="btn btn-dark">Restaurant Login</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- LANDING PAGE -->
+  <main id="landingPage">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="badge">Scan Based Ordering System</span>
+          <h1>Scan2Plate helps restaurants <span>scan, order & relax</span></h1>
+          <p>
+            Smart QR ordering software for restaurants, cafés and food courts.
+            Customers scan table QR, place orders instantly, kitchen gets live updates,
+            and billing + WhatsApp works in one clean flow.
+          </p>
+
+          <div class="hero-cta">
+            <a href="./admin-login.html" class="btn btn-dark">Restaurant Login</a>
+            <a href="#plans" class="btn btn-outline">View Plans</a>
+          </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <strong>QR Ordering</strong>
+              <span>Customers scan table QR and order instantly.</span>
+            </div>
+            <div class="mini-card">
+              <strong>Kitchen Flow</strong>
+              <span>Accept, reject, preparing, ready and ETA updates.</span>
+            </div>
+            <div class="mini-card">
+              <strong>Billing + WhatsApp</strong>
+              <span>Bill links, payment status and customer alerts.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <img src="./assets/scan2plate-hero.jpg" alt="Scan2Plate preview">
+          <div class="float-card float-left">
+            <strong>Scan QR To Order</strong>
+            <span>No waiting • Live menu • Faster service</span>
+          </div>
+          <div class="float-card float-right">
+            <strong>WhatsApp Updates</strong>
+            <span>Customers get order and bill links instantly</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="badge">Features</span>
+          <h2>Everything needed to run smart restaurant ordering</h2>
+          <p>From QR scan to kitchen control to billing and payment status, Scan2Plate keeps the full restaurant flow connected.</p>
+        </div>
+
+        <div class="features">
+          <div class="feature-box">
+            <h3>No Waiting</h3>
+            <p>Customers order directly from their table without waiting for a waiter to take order.</p>
+          </div>
+          <div class="feature-box">
+            <h3>No Fake Orders</h3>
+            <p>Table-based QR flow helps restaurants reduce random and fake order confusion.</p>
+          </div>
+          <div class="feature-box">
+            <h3>Live Kitchen + Billing</h3>
+            <p>Kitchen accepts or rejects orders, admin updates payment and customer gets clear bill status.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="plans">
+      <div class="container">
+        <div class="section-head">
+          <span class="badge">Plans</span>
+          <h2>Simple plans for restaurants</h2>
+          <p>Choose a plan based on restaurant size and required features.</p>
+        </div>
+
+        <div class="plans">
+          <div class="plan-card">
+            <h3>Basic</h3>
+            <div class="price">₹1999 <span>/ month</span></div>
+            <ul>
+              <li>QR menu ordering</li>
+              <li>Kitchen dashboard</li>
+              <li>Order tracking</li>
+              <li>Basic billing</li>
+            </ul>
+            <a href="./restaurant-login.html" class="btn btn-outline">Get Started</a>
+          </div>
+
+          <div class="plan-card featured">
+            <div class="plan-tag">Popular</div>
+            <h3>Advance</h3>
+            <div class="price">₹2999 <span>/ month</span></div>
+            <ul>
+              <li>Everything in Basic</li>
+              <li>WhatsApp alerts</li>
+              <li>Super admin support</li>
+              <li>Manual order billing</li>
+              <li>Reports and payment updates</li>
+            </ul>
+            <a href="./restaurant-login.html" class="btn btn-dark">Choose Advance</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="container footer-row">
+        <div>Powered by <strong>Scan2Plate</strong></div>
+        <div>Scan based ordering for restaurants</div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- CUSTOMER ORDER PAGE -->
+  <main id="customerPage" class="order-shell hidden">
+    <div class="container">
+      <div class="order-grid">
+        <section class="card">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+            <div>
+              <h2 id="restaurantTitle" style="margin:0 0 6px">Restaurant Menu</h2>
+              <div class="muted">Table: <strong id="tableNoText">01</strong></div>
+            </div>
+            <input id="searchBox" class="field" placeholder="Search menu..." style="max-width:260px;margin:0" />
+          </div>
+
+          <div id="categoryChips" class="chips"></div>
+          <div id="menuGrid" class="menu-grid"></div>
+        </section>
+
+        <aside class="card">
+          <h3 style="margin-top:0">Place Order</h3>
+          <input id="customerName" class="field" placeholder="Customer name" />
+          <input id="customerPhone" class="field" placeholder="Phone number" />
+          <textarea id="customerNote" class="field" placeholder="Special note" rows="3"></textarea>
+
+          <div id="cartList"></div>
+
+          <div style="border-top:1px solid #eee;margin-top:14px;padding-top:14px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span>Items total</span>
+              <strong id="itemsTotal">₹0</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span>Tax</span>
+              <strong id="taxTotal">₹0</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:18px">
+              <span>Grand total</span>
+              <strong id="grandTotal">₹0</strong>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button id="placeOrderBtn" class="btn btn-dark" style="flex:1">Place Order</button>
+            <button id="clearCartBtn" class="btn btn-outline">Clear</button>
+          </div>
+
+          <div id="orderSuccess" class="success-box hidden"></div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import {
+      db,
+      collection,
+      query,
+      getDocs,
+      addDoc,
+      serverTimestamp
+    } from "./js/firebase.js";
+
+    const params = new URLSearchParams(window.location.search);
+    const restaurantId = params.get("restaurantId");
+    const table = params.get("table") || "01";
+
+    const landingPage = document.getElementById("landingPage");
+    const customerPage = document.getElementById("customerPage");
+
+    if (restaurantId) {
+      landingPage.classList.add("hidden");
+      customerPage.classList.remove("hidden");
+      bootCustomerPage();
+    }
+
+    function money(v){
+      return new Intl.NumberFormat("en-IN", {
+        style:"currency",
+        currency:"INR",
+        maximumFractionDigits:0
+      }).format(Number(v || 0));
+    }
+
+    async function bootCustomerPage(){
+      const restaurantTitle = document.getElementById("restaurantTitle");
+      const tableNoText = document.getElementById("tableNoText");
+      const categoryChips = document.getElementById("categoryChips");
+      const menuGrid = document.getElementById("menuGrid");
+      const cartList = document.getElementById("cartList");
+      const itemsTotalEl = document.getElementById("itemsTotal");
+      const taxTotalEl = document.getElementById("taxTotal");
+      const grandTotalEl = document.getElementById("grandTotal");
+      const searchBox = document.getElementById("searchBox");
+      const placeOrderBtn = document.getElementById("placeOrderBtn");
+      const clearCartBtn = document.getElementById("clearCartBtn");
+      const orderSuccess = document.getElementById("orderSuccess");
+      const customerName = document.getElementById("customerName");
+      const customerPhone = document.getElementById("customerPhone");
+      const customerNote = document.getElementById("customerNote");
+
+      tableNoText.textContent = table;
+
+      let menu = [];
+      let activeCategory = "All";
+      let cart = [];
+
+      async function loadMenu(){
+        const snap = await getDocs(
+          query(collection(db, "restaurants", restaurantId, "menu"))
+        );
+
+        menu = snap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })).filter(item => item.available !== false);
+
+        restaurantTitle.textContent = `${restaurantId} Menu`;
+        renderCategories();
+        renderMenu();
+      }
+
+      function renderCategories(){
+        const cats = ["All", ...new Set(menu.map(i => i.category || "Other"))];
+        categoryChips.innerHTML = cats.map(cat => `
+          <button class="chip ${cat === activeCategory ? "active" : ""}" data-cat="${cat}">
+            ${cat}
+          </button>
+        `).join("");
+
+        categoryChips.querySelectorAll(".chip").forEach(btn => {
+          btn.onclick = () => {
+            activeCategory = btn.dataset.cat;
+            renderCategories();
+            renderMenu();
+          };
+        });
+      }
+
+      function filteredMenu(){
+        const q = (searchBox.value || "").trim().toLowerCase();
+        return menu.filter(item => {
+          const catOk = activeCategory === "All" || (item.category || "Other") === activeCategory;
+          const text = `${item.name || ""} ${item.category || ""}`.toLowerCase();
+          return catOk && (!q || text.includes(q));
+        });
+      }
+
+      function renderMenu(){
+        const items = filteredMenu();
+
+        menuGrid.innerHTML = items.map(item => `
+          <div class="menu-item">
+            <img src="${item.imageUrl || "./assets/placeholder-food.jpg"}" alt="${item.name || "item"}">
+            <div class="menu-item-body">
+              <h3>${item.name || ""}</h3>
+              <div class="muted small">${item.category || "Other"}</div>
+              <div class="price-row">
+                <strong>${money(item.price)}</strong>
+                <button class="btn btn-dark add-btn" data-id="${item.id}">Add</button>
+              </div>
+            </div>
+          </div>
+        `).join("");
+
+        menuGrid.querySelectorAll(".add-btn").forEach(btn => {
+          btn.onclick = () => addToCart(btn.dataset.id);
+        });
+      }
+
+      function addToCart(id){
+        const item = menu.find(x => x.id === id);
+        if (!item) return;
+
+        const found = cart.find(x => x.id === id);
+        if (found) found.qty += 1;
+        else {
+          cart.push({
+            id:item.id,
+            name:item.name,
+            price:Number(item.price || 0),
+            qty:1
+          });
+        }
+        renderCart();
+      }
+
+      function updateQty(id, delta){
+        const found = cart.find(x => x.id === id);
+        if (!found) return;
+        found.qty += delta;
+        if (found.qty <= 0) cart = cart.filter(x => x.id !== id);
+        renderCart();
+      }
+
+      function renderCart(){
+        if (!cart.length){
+          cartList.innerHTML = `<p class="muted">Cart is empty.</p>`;
+        } else {
+          cartList.innerHTML = cart.map(item => `
+            <div style="border:1px solid #eee;border-radius:16px;padding:12px;margin-bottom:10px">
+              <strong>${item.name}</strong>
+              <div class="qty-row">
+                <span class="muted">${money(item.price)} each</span>
+                <div class="qty-box">
+                  <button class="qty-btn" data-id="${item.id}" data-type="minus">-</button>
+                  <strong>${item.qty}</strong>
+                  <button class="qty-btn" data-id="${item.id}" data-type="plus">+</button>
+                </div>
+              </div>
+            </div>
+          `).join("");
+
+          cartList.querySelectorAll(".qty-btn").forEach(btn => {
+            btn.onclick = () => updateQty(btn.dataset.id, btn.dataset.type === "plus" ? 1 : -1);
+          });
+        }
+
+        const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
+        const tax = itemsTotal * 0.05;
+        const grand = itemsTotal + tax;
+
+        itemsTotalEl.textContent = money(itemsTotal);
+        taxTotalEl.textContent = money(tax);
+        grandTotalEl.textContent = money(grand);
+      }
+
+      clearCartBtn.onclick = () => {
+        cart = [];
+        renderCart();
+      };
+
+      placeOrderBtn.onclick = async () => {
+        if (!customerName.value.trim() || !customerPhone.value.trim()){
+          alert("Enter customer name and phone.");
+          return;
+        }
+        if (!cart.length){
+          alert("Add items first.");
+          return;
+        }
+
+        const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
+        const tax = itemsTotal * 0.05;
+        const grandTotal = itemsTotal + tax;
+        const orderId = "ORD" + Date.now();
+
+        await addDoc(collection(db, "orders"), {
+          orderId,
+          restaurantId,
+          tableNo: table,
+          customerName: customerName.value.trim(),
+          customerPhone: customerPhone.value.trim(),
+          note: customerNote.value.trim(),
+          items: cart,
+          itemsTotal,
+          tax,
+          grandTotal,
+          status:"pending",
+          paymentStatus:"unpaid",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        orderSuccess.classList.remove("hidden");
+        orderSuccess.innerHTML = `
+          Order placed successfully.<br>
+          <strong>Order ID:</strong> ${orderId}<br>
+          <a href="./track.html?orderId=${encodeURIComponent(orderId)}">Track order</a>
+        `;
+
+        cart = [];
+        renderCart();
+      };
+
+      searchBox.addEventListener("input", renderMenu);
+      renderCart();
+      await loadMenu();
+    }
+  </script>
+</body>
+</html>
