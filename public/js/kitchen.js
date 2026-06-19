@@ -1,0 +1,642 @@
+import { db, auth } from "./firebase.js";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  updateDoc,
+  serverTimestamp,
+  getDoc
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  qs,
+  escapeHtml,
+  fmtCurrency,
+  notifyBackend,
+  getRestaurantContext
+} from "./common.js";
+
+const newWrap       = qs("#newOrders");
+const preparingWrap = qs("#preparingOrders");
+const readyWrap     = qs("#readyOrders");
+const logoutBtn     = qs("#logoutBtn");
+
+const audioNewOrder = new Audio("./assets/notification.mp3");
+audioNewOrder.loop = true;
+audioNewOrder.preload = "auto";
+
+const audioNewItems = new Audio("./assets/notification.mp3");
+audioNewItems.loop = true;
+audioNewItems.preload = "auto";
+audioNewItems.playbackRate = 1.2;
+
+let audioUnlocked        = false;
+let firstLoadDone        = false;
+let isPlaying            = false;
+let activeAlertType      = "";
+const orderAlertMap      = new Map();
+// Stores item snapshot at the moment each order was accepted/last-seen
+// key = Firestore doc id, value = Map<itemName, qty>
+const acceptedSnapshots  = new Map();
+let currentRenderedOrders = [];
+let kitchenTimerInterval = null;
+
+const ctx = getRestaurantContext();
+const restaurantId =
+  ctx.restaurantId ||
+  localStorage.getItem("scan2plate_last_restaurant_id") ||
+  "";
+
+if (!restaurantId) {
+  alert("Restaurant ID not found. Please login again.");
+  window.location.href = "./admin-login.html";
+  throw new Error("Missing restaurantId");
+}
+
+let cafeSettings = {
+  kitchenWhatsApp: "",
+  restaurantName:  "Restaurant"
+};
+
+function isPlanExpired(data = {}) {
+  const status = String(data.status || "").toLowerCase();
+  const expiryRaw = data.planExpiryDate || data.expiryDate;
+  const expiry = expiryRaw?.toDate ? expiryRaw.toDate() : expiryRaw ? new Date(expiryRaw) : null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  if (expiry) expiry.setHours(0,0,0,0);
+  return ["expired", "suspended"].includes(status) || String(data.subscriptionStatus || "").toLowerCase() === "expired" || (expiry && !Number.isNaN(expiry.getTime()) && expiry < today);
+}
+
+function showKitchenPlanLock(message) {
+  const lock = document.createElement("div");
+  lock.style.cssText = "position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:linear-gradient(135deg,#21170f,#3a2515);color:#fff;text-align:center;";
+  lock.innerHTML = `<div style="max-width:460px;padding:34px;border-radius:24px;background:#fffaf3;color:#23170e;box-shadow:0 25px 70px rgba(0,0,0,.3)"><div style="font-size:38px;color:#e07c1a;margin-bottom:12px">♨</div><h1 style="margin:0 0 10px;font-size:27px">Kitchen dashboard unavailable</h1><p style="margin:0;color:#735e4a;line-height:1.6">${escapeHtml(message)}</p><a href="./admin-dashboard.html" style="display:inline-block;margin-top:20px;padding:12px 16px;border-radius:11px;background:#e07c1a;color:#fff;font-weight:800">Back to Admin</a></div>`;
+  document.body.appendChild(lock);
+}
+
+/* ─────────────────────────────────────────
+   LOGOUT
+───────────────────────────────────────── */
+logoutBtn?.addEventListener("click", async () => {
+  try { await signOut(auth); } catch (err) { console.error(err); }
+  localStorage.removeItem("scan2plate_user");
+  localStorage.removeItem("scan2serve_user");
+  localStorage.removeItem("scan2plate_last_restaurant_id");
+  window.location.href = "./admin-login.html";
+});
+
+/* ─────────────────────────────────────────
+   AUDIO UNLOCK
+───────────────────────────────────────── */
+async function unlockAudio() {
+  if (audioUnlocked) return;
+  try {
+    audioNewOrder.muted = true;
+    await audioNewOrder.play();
+    audioNewOrder.pause();
+    audioNewOrder.currentTime = 0;
+    audioNewOrder.muted = false;
+
+    audioNewItems.muted = true;
+    await audioNewItems.play();
+    audioNewItems.pause();
+    audioNewItems.currentTime = 0;
+    audioNewItems.muted = false;
+
+    audioUnlocked = true;
+  } catch (err) {
+    console.log("Audio locked until user interaction");
+  }
+}
+
+document.addEventListener("click",      unlockAudio, { once: true });
+document.addEventListener("touchstart", unlockAudio, { once: true });
+document.addEventListener("keydown",    unlockAudio, { once: true });
+
+/* ─────────────────────────────────────────
+   ALERT BANNER
+───────────────────────────────────────── */
+function ensureAlertBanner() {
+  let banner = document.getElementById("kitchenAlertBanner");
+  if (banner) return banner;
+
+  banner = document.createElement("div");
+  banner.id = "kitchenAlertBanner";
+  banner.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px;";
+
+  banner.innerHTML = `
+    <div style="width:min(92vw,700px);background:#fff;border-radius:28px;padding:28px 22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.28);">
+      <div id="kitchenAlertEmoji" style="font-size:56px;line-height:1;margin-bottom:14px;">🔔</div>
+      <div id="kitchenAlertTitle" style="font-size:30px;font-weight:800;margin-bottom:10px;">New Order</div>
+      <div id="kitchenAlertText" style="font-size:18px;color:#555;margin-bottom:18px;">Please check kitchen dashboard now.</div>
+      <button id="dismissKitchenAlertBtn" style="border:none;background:#111;color:#fff;padding:14px 24px;border-radius:14px;font-size:16px;font-weight:700;cursor:pointer;">Dismiss Alert</button>
+    </div>`;
+
+  document.body.appendChild(banner);
+  document.getElementById("dismissKitchenAlertBtn")?.addEventListener("click", stopAlert);
+  return banner;
+}
+
+function showFullScreenAlert(type = "new_order") {
+  const banner = ensureAlertBanner();
+  const emoji  = document.getElementById("kitchenAlertEmoji");
+  const title  = document.getElementById("kitchenAlertTitle");
+  const text   = document.getElementById("kitchenAlertText");
+
+  if (type === "new_items") {
+    if (emoji) emoji.textContent = "🆕";
+    if (title) title.textContent = "New Items Added";
+    if (text)  text.textContent  = "An existing order has been updated. Please check now.";
+  } else {
+    if (emoji) emoji.textContent = "🔔";
+    if (title) title.textContent = "New Order Arrived";
+    if (text)  text.textContent  = "A new customer order is waiting in kitchen dashboard.";
+  }
+
+  banner.style.display = "flex";
+}
+
+function hideFullScreenAlert() {
+  const banner = document.getElementById("kitchenAlertBanner");
+  if (banner) banner.style.display = "none";
+}
+
+function vibrateAlert(type = "new_order") {
+  if (!navigator.vibrate) return;
+  navigator.vibrate(type === "new_items" ? [200, 120, 200] : [350, 180, 350, 180, 350]);
+}
+
+function startAlert(type = "new_order") {
+  if (isPlaying && activeAlertType === type) return;
+  stopAlert(false);
+  activeAlertType = type;
+  try {
+    const audio = type === "new_items" ? audioNewItems : audioNewOrder;
+    audio.currentTime = 0;
+    audio.play().catch(err => console.log("Audio blocked:", err));
+    isPlaying = true;
+    showFullScreenAlert(type);
+    vibrateAlert(type);
+    document.title = type === "new_items" ? "🆕 Items Updated!" : "🚨 NEW ORDER!";
+  } catch (err) { console.log(err); }
+}
+
+function stopAlert(resetTitle = true) {
+  try {
+    audioNewOrder.pause(); audioNewOrder.currentTime = 0;
+    audioNewItems.pause(); audioNewItems.currentTime = 0;
+  } catch (err) { console.log(err); }
+  isPlaying = false;
+  activeAlertType = "";
+  hideFullScreenAlert();
+  if (resetTitle) document.title = "Kitchen Dashboard";
+}
+
+/* ─────────────────────────────────────────
+   KOT PRINTER  ← NEW
+   items = array of { name, qty, price }
+   label = optional banner e.g. "NEW ITEMS ADDED"
+───────────────────────────────────────── */
+function printKOT(orderData, items, label = "") {
+  const now  = new Date();
+  const name = cafeSettings.restaurantName || "Restaurant";
+
+  const rows = (items || []).map(i => `
+    <tr>
+      <td style="padding:5px 0;">${escapeHtml(String(i.name || ""))}</td>
+      <td style="padding:5px 0;text-align:center;font-weight:800;">${Number(i.qty || 0)}</td>
+      <td style="padding:5px 0;text-align:right;">${fmtCurrency(Number(i.price || 0) * Number(i.qty || 0))}</td>
+    </tr>`).join("");
+
+  const w = window.open("", "_blank", "width=400,height=640");
+  if (!w) { alert("Allow popups to print KOT."); return; }
+
+  w.document.write(`<!DOCTYPE html>
+<html><head><title>KOT</title>
+<style>
+  body{font-family:"Courier New",monospace;font-size:13px;padding:14px;max-width:300px;margin:0 auto;}
+  h2{text-align:center;margin:0 0 4px;font-size:16px;}
+  .center{text-align:center;}
+  hr{border:none;border-top:1px dashed #333;margin:8px 0;}
+  table{width:100%;border-collapse:collapse;}
+  thead th{font-size:11px;text-transform:uppercase;text-align:left;padding:4px 0;border-bottom:1px dashed #333;}
+  thead th:nth-child(2){text-align:center;}
+  thead th:nth-child(3){text-align:right;}
+  .label{background:#111;color:#fff;text-align:center;padding:7px;font-weight:800;font-size:13px;border-radius:4px;margin-bottom:8px;letter-spacing:1px;}
+  .meta td{padding:3px 0;font-size:12px;}
+  .meta td:first-child{color:#555;width:80px;}
+</style></head><body>
+  <h2>${escapeHtml(name)}</h2>
+  <div class="center" style="font-size:11px;margin-bottom:6px;">KITCHEN ORDER TICKET</div>
+  <hr>
+  ${label ? `<div class="label">${escapeHtml(label)}</div>` : ""}
+  <table class="meta">
+    <tr><td>KOT #</td><td><strong>${escapeHtml(orderData.orderId || "")}</strong></td></tr>
+    <tr><td>Table</td><td><strong>${escapeHtml(orderData.tableNo || "-")}</strong></td></tr>
+    <tr><td>Customer</td><td>${escapeHtml(orderData.customerName || "Walk-in")}</td></tr>
+    <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
+    <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
+  </table>
+  <hr>
+  <table>
+    <thead><tr><th>Item</th><th>Qty</th><th>Amt</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <hr>
+  <div class="center" style="font-size:11px;margin-top:6px;">--- END OF KOT ---</div>
+</body></html>`);
+
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); w.close(); }, 450);
+}
+
+/* ─────────────────────────────────────────
+   SETTINGS
+───────────────────────────────────────── */
+async function loadSettings() {
+  try {
+    const snap = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
+    if (snap.exists()) cafeSettings = { ...cafeSettings, ...snap.data() };
+  } catch (err) { console.error("loadSettings error", err); }
+}
+
+/* ─────────────────────────────────────────
+   TIMER HELPERS
+───────────────────────────────────────── */
+function tsToDate(ts) {
+  if (!ts) return new Date();
+  if (ts.toDate) return ts.toDate();
+  if (typeof ts === "number") return new Date(ts);
+  return new Date(ts);
+}
+
+function tsToMs(ts) {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  if (typeof ts.seconds === "number") return ts.seconds * 1000;
+  if (ts instanceof Date) return ts.getTime();
+  const p = new Date(ts).getTime();
+  return Number.isNaN(p) ? 0 : p;
+}
+
+function getTimerStartMs(x) { return tsToMs(x.etaStartedAt) || 0; }
+
+function getRemainingSeconds(x) {
+  const status     = String(x.status || "").toLowerCase();
+  const etaMinutes = Number(x.etaMinutes || 10);
+  const startMs    = getTimerStartMs(x);
+  if (!startMs || !["accepted","preparing","ready"].includes(status)) return null;
+  const endMs = startMs + etaMinutes * 60 * 1000;
+  return Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+}
+
+function formatRemaining(seconds) {
+  if (seconds === null) return "Not Started";
+  const safe = Math.max(0, Number(seconds || 0));
+  return `${String(Math.floor(safe / 60)).padStart(2,"0")}:${String(safe % 60).padStart(2,"0")}`;
+}
+
+function getTimerBadgeStyle(seconds) {
+  const base = "padding:4px 10px;border-radius:999px;font-weight:700;font-size:13px;";
+  if (seconds === null) return base + "background:#f1f3f5;color:#495057;border:1px solid #dee2e6;";
+  if (seconds <= 0)     return base + "background:#ffe3e3;color:#c92a2a;border:1px solid #ffc9c9;";
+  if (seconds <= 300)   return base + "background:#fff3bf;color:#e67700;border:1px solid #ffec99;";
+  return base + "background:#ebfbee;color:#2b8a3e;border:1px solid #c3e6cb;";
+}
+
+function refreshCountdowns() {
+  currentRenderedOrders.forEach(d => {
+    const x       = d.data();
+    const timerEl = document.querySelector(`[data-timer-id="${d.id}"]`);
+    if (!timerEl) return;
+    const remaining = getRemainingSeconds(x);
+    timerEl.textContent = remaining === null ? "Not Started" : remaining > 0 ? formatRemaining(remaining) : "Time Over";
+    timerEl.setAttribute("style", getTimerBadgeStyle(remaining));
+  });
+}
+
+function startKitchenCountdown() {
+  if (kitchenTimerInterval) clearInterval(kitchenTimerInterval);
+  refreshCountdowns();
+  kitchenTimerInterval = setInterval(refreshCountdowns, 1000);
+}
+
+/* ─────────────────────────────────────────
+   ALERT KEY
+───────────────────────────────────────── */
+function getAlertKey(x) {
+  return JSON.stringify({
+    status:        String(x.status || "pending").toLowerCase(),
+    hasNewItems:   x.hasNewItems === true,
+    updatedSec:    x.updatedAt?.seconds || x.createdAt?.seconds || 0,
+    etaMinutes:    Number(x.etaMinutes || 10),
+    etaStartedSec: x.etaStartedAt?.seconds || 0
+  });
+}
+
+/* ─────────────────────────────────────────
+   CARD HTML
+───────────────────────────────────────── */
+function cardHtml(d) {
+  const x         = d.data();
+  const items     = (x.items || []).map(i => `${escapeHtml(i.name)} x ${i.qty}`).join(", ");
+  const eta       = Number(x.etaMinutes || 10);
+  const hasNew    = x.hasNewItems === true;
+  const newText   = escapeHtml(x.newlyAddedItemsText || "");
+  const newNote   = escapeHtml(x.newlyAddedNote || "");
+  const remaining = getRemainingSeconds(x);
+
+  return `
+    <div class="card" style="margin-bottom:12px;padding:14px">
+      <strong>${escapeHtml(x.orderId || d.id)}</strong><br>
+      ${escapeHtml(x.customerName || "Guest")} • Table ${escapeHtml(x.tableNo || "--")}<br>
+      <span class="muted small">${tsToDate(x.createdAt).toLocaleString()}</span><br>
+      <span>${items}</span><br>
+      <strong>${fmtCurrency(x.grandTotal || 0)}</strong><br>
+      <span>Phone: ${escapeHtml(x.customerPhone || "-")}</span><br>
+      <span>Status: ${escapeHtml(x.status || "pending")}</span><br>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
+        <span>ETA: ${eta} min</span>
+        <span data-timer-id="${d.id}" style="${getTimerBadgeStyle(remaining)}">
+          ${remaining === null ? "Not Started" : remaining > 0 ? formatRemaining(remaining) : "Time Over"}
+        </span>
+      </div>
+
+      ${hasNew ? `
+        <div style="margin-top:10px;padding:10px 12px;border-radius:14px;background:#fff7e6;border:1px solid #f4d9a6">
+          <div style="font-weight:800;color:#b96f09;font-size:13px;margin-bottom:6px;">🆕 New items added</div>
+          ${newText ? `<div style="font-size:14px;color:#333;margin-bottom:${newNote ? "6px" : "0"}">${newText}</div>` : ""}
+          ${newNote ? `<div style="font-size:13px;color:#666"><strong>Note:</strong> ${newNote}</div>` : ""}
+        </div>` : ""}
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+        <button class="btn btn-outline" data-status="${d.id}" data-val="accepted">Accept</button>
+        <button class="btn btn-outline" data-status="${d.id}" data-val="preparing">Preparing</button>
+        <button class="btn btn-outline" data-status="${d.id}" data-val="ready">Ready</button>
+        <button class="btn btn-danger"  data-status="${d.id}" data-val="rejected">Reject</button>
+        <button class="btn btn-dark"    data-addtime="${d.id}">+10 min</button>
+        ${hasNew
+          ? `<button class="btn btn-green" data-clearnew="${d.id}" data-orderid="${escapeHtml(d.id)}">Seen Update</button>`
+          : ""}
+        <button class="btn btn-outline" data-printall="${d.id}" title="Print full KOT">🖨️ Print KOT</button>
+      </div>
+    </div>`;
+}
+
+/* ─────────────────────────────────────────
+   BACKEND NOTIFY
+───────────────────────────────────────── */
+async function sendOrderUpdate(orderDoc, nextStatus, nextEta) {
+  try {
+    const x = orderDoc.data();
+    await notifyBackend({
+      restaurantId,
+      restaurantName: cafeSettings.restaurantName || "Restaurant",
+      orderId:       x.orderId || orderDoc.id,
+      tableNo:       x.tableNo || "",
+      customerName:  x.customerName || "Guest",
+      customerPhone: x.whatsappConsent === false ? "" : (x.customerPhone || ""),
+      kitchenPhone:  cafeSettings.kitchenWhatsApp || "",
+      items:         x.items || [],
+      grandTotal:    Number(x.grandTotal || 0),
+      status:        nextStatus || x.status || "pending",
+      etaMinutes:    Number(nextEta ?? x.etaMinutes ?? 10),
+      billUrl:       `${location.origin}/bill.html?orderId=${encodeURIComponent(x.orderId || "")}`
+    });
+  } catch (err) { console.error("sendOrderUpdate error", err); }
+}
+
+/* ─────────────────────────────────────────
+   BIND ACTIONS  ← KOT PRINT ADDED HERE
+───────────────────────────────────────── */
+function bindActions(orderDocs, root = document) {
+
+  /* ── Status buttons (Accept / Preparing / Ready / Reject) ── */
+  root.querySelectorAll("[data-status]").forEach(btn => {
+    btn.onclick = async () => {
+      stopAlert();
+
+      const docId      = btn.dataset.status;
+      const nextStatus = btn.dataset.val;
+      const found      = orderDocs.find(d => d.id === docId);
+      if (!found) return;
+
+      const current = found.data();
+      const eta     = Number(current.etaMinutes || 10);
+
+      const payload = {
+        status:              nextStatus,
+        hasNewItems:         false,
+        newlyAddedItems:     [],
+        newlyAddedItemsText: "",
+        newlyAddedNote:      "",
+        updatedAt:           serverTimestamp()
+      };
+
+      // Start timer only first time on accept
+      if (nextStatus === "accepted" && !current.etaStartedAt) {
+        payload.etaStartedAt = serverTimestamp();
+      }
+
+      await updateDoc(doc(db, "orders", docId), payload);
+      await sendOrderUpdate(found, nextStatus, eta);
+
+      // ── PRINT KOT when order is ACCEPTED + save item snapshot ──
+      if (nextStatus === "accepted") {
+        printKOT(current, current.items || []);
+        // Save snapshot of all items at accept time so Seen Update can diff later
+        const snapshot = new Map();
+        (current.items || []).forEach(i => snapshot.set(String(i.name || ""), Number(i.qty || 0)));
+        acceptedSnapshots.set(docId, snapshot);
+      }
+    };
+  });
+
+  /* ── +10 min ── */
+  root.querySelectorAll("[data-addtime]").forEach(btn => {
+    btn.onclick = async () => {
+      stopAlert();
+      const docId  = btn.dataset.addtime;
+      const found  = orderDocs.find(d => d.id === docId);
+      if (!found) return;
+
+      const current        = found.data();
+      const nextEtaMinutes = Number(current.etaMinutes || 10) + 10;
+
+      await updateDoc(doc(db, "orders", docId), {
+        etaMinutes:          nextEtaMinutes,
+        hasNewItems:         false,
+        newlyAddedItems:     [],
+        newlyAddedItemsText: "",
+        newlyAddedNote:      "",
+        updatedAt:           serverTimestamp()
+      });
+
+      await sendOrderUpdate(found, current.status || "pending", nextEtaMinutes);
+    };
+  });
+
+  /* ── Seen Update → print KOT for NEW/CHANGED ITEMS ONLY ── */
+  root.querySelectorAll("[data-clearnew]").forEach(btn => {
+    btn.onclick = async () => {
+      stopAlert();
+
+      const docId = btn.dataset.clearnew;
+      const found = orderDocs.find(d => d.id === docId);
+      if (!found) return;
+
+      const current     = found.data();
+      const currItems   = current.items || [];
+
+      // ── STRATEGY 1: Use local acceptedSnapshots (most accurate) ──
+      // This tracks exactly what was in the order when Accept was clicked
+      const prevSnapshot = acceptedSnapshots.get(docId); // Map<name, qty> or undefined
+
+      let deltaItems = [];
+
+      if (prevSnapshot) {
+        // Compare current items against the snapshot taken at Accept time
+        currItems.forEach(item => {
+          const prevQty = prevSnapshot.get(String(item.name || "")) ?? 0;
+          const currQty = Number(item.qty || 0);
+          if (currQty > prevQty) {
+            // New item or increased qty — only print the DIFFERENCE
+            deltaItems.push({ ...item, qty: currQty - prevQty });
+          } else if (prevQty === 0 && currQty > 0) {
+            // Completely new item not in snapshot
+            deltaItems.push({ ...item });
+          }
+        });
+      }
+
+      // ── STRATEGY 2: Fallback to Firestore newlyAddedItems field ──
+      if (deltaItems.length === 0 && (current.newlyAddedItems || []).length > 0) {
+        deltaItems = current.newlyAddedItems;
+      }
+
+      // ── STRATEGY 3: Last resort — print all items with UPDATED label ──
+      const itemsToPrint = deltaItems.length > 0 ? deltaItems : currItems;
+      const kotLabel     = deltaItems.length > 0 ? "NEW ITEMS ADDED" : "UPDATED ORDER";
+
+      // Print KOT with only the new/changed items
+      printKOT(current, itemsToPrint, kotLabel);
+
+      // Update snapshot to current state so next Seen Update diffs correctly
+      const newSnapshot = new Map();
+      currItems.forEach(i => newSnapshot.set(String(i.name || ""), Number(i.qty || 0)));
+      acceptedSnapshots.set(docId, newSnapshot);
+
+      // Clear hasNewItems flag in Firestore
+      await updateDoc(doc(db, "orders", docId), {
+        hasNewItems:         false,
+        newlyAddedItems:     [],
+        newlyAddedItemsText: "",
+        newlyAddedNote:      "",
+        updatedAt:           serverTimestamp()
+      });
+    };
+  });
+
+  /* ── Manual Print KOT button (full order) ── */
+  root.querySelectorAll("[data-printall]").forEach(btn => {
+    btn.onclick = () => {
+      const docId = btn.dataset.printall;
+      const found = orderDocs.find(d => d.id === docId);
+      if (!found) return;
+      const current = found.data();
+      printKOT(current, current.items || []);
+    };
+  });
+}
+
+/* ─────────────────────────────────────────
+   RENDER ORDERS
+───────────────────────────────────────── */
+function renderOrders(orderDocs) {
+  const scoped = orderDocs.filter(d => {
+    const x = d.data();
+    return (
+      String(x.restaurantId || "") === restaurantId &&
+      !["cancelled","rejected","delivered","served"].includes(String(x.status || "").toLowerCase())
+    );
+  });
+
+  currentRenderedOrders = scoped;
+
+  const newOrders       = scoped.filter(d => ["pending","accepted"].includes(String(d.data().status || "pending").toLowerCase()));
+  const preparingOrders = scoped.filter(d => String(d.data().status || "").toLowerCase() === "preparing");
+  const readyOrders     = scoped.filter(d => String(d.data().status || "").toLowerCase() === "ready");
+
+  newWrap.innerHTML       = newOrders.length       ? newOrders.map(cardHtml).join("")       : `<div class="empty-box">No new orders.</div>`;
+  preparingWrap.innerHTML = preparingOrders.length ? preparingOrders.map(cardHtml).join("") : `<div class="empty-box">No preparing orders.</div>`;
+  readyWrap.innerHTML     = readyOrders.length     ? readyOrders.map(cardHtml).join("")     : `<div class="empty-box">No ready orders.</div>`;
+
+  bindActions(scoped, document);
+  startKitchenCountdown();
+}
+
+/* ─────────────────────────────────────────
+   REAL-TIME LISTENER
+───────────────────────────────────────── */
+const kitchenRestaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
+const kitchenRestaurant = kitchenRestaurantSnap.exists() ? kitchenRestaurantSnap.data() : {};
+if (String(kitchenRestaurant.plan || "").toLowerCase() === "basic") {
+  showKitchenPlanLock("Kitchen dashboard is available only in Advance plan.");
+} else if (isPlanExpired(kitchenRestaurant)) {
+  showKitchenPlanLock("Your plan has expired. Please renew to continue.");
+} else {
+await loadSettings();
+
+onSnapshot(
+  collection(db, "orders"),
+  snap => {
+    const activeDocs = snap.docs.filter(d => {
+      const x = d.data();
+      return (
+        String(x.restaurantId || "") === restaurantId &&
+        !["delivered","cancelled","rejected","served"].includes(String(x.status || "pending").toLowerCase())
+      );
+    });
+
+    let shouldAlert = false;
+    let alertType   = "new_order";
+
+    activeDocs.forEach(d => {
+      const x          = d.data();
+      const currentKey = getAlertKey(x);
+      const oldKey     = orderAlertMap.get(d.id);
+
+      if (firstLoadDone) {
+        if (!oldKey) {
+          shouldAlert = true;
+          alertType   = "new_order";
+        } else if (oldKey !== currentKey) {
+          if (x.hasNewItems === true) {
+            shouldAlert = true;
+            alertType   = "new_items";
+          } else if (String(x.status || "").toLowerCase() === "pending") {
+            shouldAlert = true;
+            alertType   = "new_order";
+          }
+        }
+      }
+
+      orderAlertMap.set(d.id, currentKey);
+    });
+
+    // Prune stale entries
+    const liveIds = new Set(activeDocs.map(d => d.id));
+    [...orderAlertMap.keys()].forEach(id => {
+      if (!liveIds.has(id)) orderAlertMap.delete(id);
+    });
+
+    if (shouldAlert) startAlert(alertType);
+
+    firstLoadDone = true;
+    renderOrders(snap.docs);
+  },
+  err => console.error(err)
+);
+}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff Login - Scan2Plate</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <section class="login-wrap">
+    <div class="card login-card">
+      <div class="center" style="margin-bottom:16px">
+        <div class="logo" style="justify-content:center">
+          <div class="logo-badge"><img src="logo.PNG" alt=""></div>
+          <div></div>
+        </div>
+        <p class="muted">Login for admin, staff, or kitchen</p>
+      </div>
+
+      <form id="loginForm">
+        <div>
+          <label class="label">Email</label>
+          <input class="input" id="email" type="email" placeholder="admin@scan2plate.com" />
+        </div>
+
+        <div style="margin-top:12px">
+          <label class="label">Password</label>
+          <input class="input" id="password" type="password" placeholder="Enter password" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px">
+          Login
+        </button>
+      </form>
+
+      <p class="notice" style="margin-top:14px">
+       
+      </p>
+
+      <div class="center" style="margin-top:12px">
+        <a href="./index.html" class="muted">Back to customer page</a>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="./js/login.js"></script>
+</body>
+</html>

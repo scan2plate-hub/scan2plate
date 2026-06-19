@@ -1,0 +1,5 @@
+.DS_Store
+.vscode/
+backend/.env
+public/.DS_Store
+public/js/.DS_Store

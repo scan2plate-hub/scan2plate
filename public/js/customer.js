@@ -1,0 +1,591 @@
+import { db } from './firebase.js';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  serverTimestamp,
+  query,
+  where,
+  orderBy
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  qs,
+  fmtCurrency,
+  getParam,
+  saveLocal,
+  readLocal,
+  uid,
+  toast,
+  escapeHtml,
+  notifyBackend,
+  getRestaurantIdFromUrlOrStorage
+} from './common.js';
+
+const landingHero = qs('#landingHero');
+const customerApp = qs('#customerApp');
+const menuGrid = qs('#menuGrid');
+const categoryChips = qs('#categoryChips');
+const cartList = qs('#cartList');
+const searchBox = qs('#searchBox');
+const customerName = qs('#customerName');
+const customerPhone = qs('#customerPhone');
+const customerNote = qs('#customerNote');
+const itemsTotalEl = qs('#itemsTotal');
+const taxTotalEl = qs('#taxTotal');
+const grandTotalEl = qs('#grandTotal');
+const placeOrderBtn = qs('#placeOrderBtn');
+const clearCartBtn = qs('#clearCartBtn');
+const orderSuccess = qs('#orderSuccess');
+const restaurantNameEl = qs('#restaurantName');
+const tableBadge = qs('#tableBadge');
+const whatsappConsent = qs('#whatsappConsent');
+const brandNameTop = qs('#brandNameTop');
+
+const restaurantId = getRestaurantIdFromUrlOrStorage();
+const tableNo = getParam('table') || '01';
+
+let settings = {
+  restaurantName: 'Restaurant',
+  taxPercent: 5,
+  kitchenWhatsApp: '',
+  phone: '',
+  backendUrl: '',
+  logoUrl: '',
+  address: '',
+  plan: 'advance',
+  restaurantLat: null,
+  restaurantLng: null,
+  allowedOrderRadiusMeters: 150
+};
+
+let menu = [];
+let activeCategory = 'All';
+let cart = readLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, []);
+
+if (brandNameTop) brandNameTop.textContent = 'Scan2Plate';
+
+if (restaurantId) {
+  localStorage.setItem('scan2plate_last_restaurant_id', restaurantId);
+  landingHero?.classList.add('hidden');
+  customerApp?.classList.remove('hidden');
+} else {
+  customerApp?.classList.add('hidden');
+}
+
+if (customerName) customerName.value = readLocal('scan2plate_customer_name', '');
+if (customerPhone) customerPhone.value = readLocal('scan2plate_customer_phone', '');
+if (customerNote) customerNote.value = readLocal('scan2plate_customer_note', '');
+if (whatsappConsent) whatsappConsent.checked = readLocal('scan2plate_whatsapp_consent', true);
+if (tableBadge) tableBadge.textContent = `Table: ${tableNo}`;
+
+customerName?.addEventListener('input', () => saveLocal('scan2plate_customer_name', customerName.value));
+customerPhone?.addEventListener('input', () => {
+  customerPhone.value = customerPhone.value.replace(/\D/g, '').slice(0, 10);
+  saveLocal('scan2plate_customer_phone', customerPhone.value);
+});
+customerNote?.addEventListener('input', () => saveLocal('scan2plate_customer_note', customerNote.value));
+whatsappConsent?.addEventListener('change', () => saveLocal('scan2plate_whatsapp_consent', whatsappConsent.checked));
+searchBox?.addEventListener('input', renderMenu);
+clearCartBtn?.addEventListener('click', () => {
+  cart = [];
+  syncCart();
+});
+placeOrderBtn?.addEventListener('click', placeOrder);
+
+if (restaurantId) {
+  await loadSettings();
+  await loadMenu();
+  renderCart();
+}
+
+function getOrderSectionCard() {
+  return placeOrderBtn?.closest('.card') || qs('#orderCard') || null;
+}
+
+function applyPlanMode() {
+  const plan = String(settings.plan || 'advance').toLowerCase();
+  const isBasic = plan === 'basic';
+  const orderCard = getOrderSectionCard();
+
+  if (!orderCard) return;
+
+  if (isBasic) {
+    orderCard.innerHTML = `
+      <div style="text-align:center;padding:10px 4px">
+        <div style="font-size:40px;margin-bottom:12px">📋</div>
+        <h3 style="margin:0 0 10px">Digital Menu Only</h3>
+        <p class="muted" style="margin:0;line-height:1.6">
+          This restaurant is currently using the Basic plan.<br>
+          Please call waiter to place your order.
+        </p>
+      </div>
+    `;
+  }
+}
+
+async function loadSettings() {
+  try {
+    const restaurantSnap = await getDoc(doc(db, 'restaurants', restaurantId));
+    const scoped = await getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'general'));
+    const root = await getDoc(doc(db, 'settings', 'general'));
+
+    const restaurantData = restaurantSnap.exists() ? restaurantSnap.data() : {};
+    const rootData = root.exists() ? root.data() : {};
+    const scopedData = scoped.exists() ? scoped.data() : {};
+
+    settings = {
+      ...settings,
+      ...rootData,
+      ...restaurantData,
+      ...scopedData,
+      plan: String(restaurantData.plan || scopedData.plan || settings.plan || 'advance').toLowerCase()
+    };
+  } catch (e) {
+    console.error('Settings load error:', e);
+  }
+
+  localStorage.setItem('scan2plate_settings', JSON.stringify(settings));
+  localStorage.setItem('scan2plate_backend_url', settings.backendUrl || '');
+
+  if (restaurantNameEl) {
+    restaurantNameEl.textContent = settings.restaurantName || settings.name || 'Order from your table in seconds';
+  }
+
+  applyPlanMode();
+}
+
+async function loadMenu() {
+  try {
+    let snap = await getDocs(
+      query(collection(db, 'restaurants', restaurantId, 'menu'), orderBy('sortOrder'))
+    ).catch(() => null);
+
+    if (!snap || snap.empty) {
+      snap = await getDocs(collection(db, 'restaurants', restaurantId, 'menu'));
+    }
+
+    if (snap.empty) {
+      snap = await getDocs(collection(db, 'menu'));
+    }
+
+    menu = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(item => item.available !== false)
+      .sort(
+        (a, b) =>
+          Number(a.sortOrder || 9999) - Number(b.sortOrder || 9999) ||
+          String(a.name || '').localeCompare(String(b.name || ''))
+      );
+
+    renderCategories();
+    renderMenu();
+  } catch (e) {
+    console.error('Menu load error:', e);
+    if (menuGrid) {
+      menuGrid.innerHTML = `<div class="card"><p class="muted">Failed to load menu.</p></div>`;
+    }
+  }
+}
+
+function renderCategories() {
+  if (!categoryChips) return;
+
+  const cats = ['All', ...new Set(menu.map(item => item.category || 'Other'))];
+
+  categoryChips.innerHTML = cats
+    .map(
+      cat => `<button class="chip ${cat === activeCategory ? 'active' : ''}" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`
+    )
+    .join('');
+
+  categoryChips.querySelectorAll('.chip').forEach(btn => {
+    btn.onclick = () => {
+      activeCategory = btn.dataset.cat;
+      renderCategories();
+      renderMenu();
+    };
+  });
+}
+
+function filteredMenu() {
+  const q = searchBox ? searchBox.value.trim().toLowerCase() : '';
+
+  return menu.filter(item => {
+    const catOk = activeCategory === 'All' || (item.category || 'Other') === activeCategory;
+    const qOk =
+      !q ||
+      String(item.name || '').toLowerCase().includes(q) ||
+      String(item.category || '').toLowerCase().includes(q) ||
+      String(item.description || '').toLowerCase().includes(q);
+
+    return catOk && qOk;
+  });
+}
+
+function itemMedia(item) {
+  const src = item.imageUrl || item.image || '';
+  return src
+    ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(item.name || 'Food')}" class="food-img" loading="lazy" />`
+    : `<div class="menu-img">${escapeHtml((item.name || 'F').charAt(0))}</div>`;
+}
+
+function renderMenu() {
+  if (!menuGrid) return;
+
+  const items = filteredMenu();
+
+  menuGrid.innerHTML = items.length
+    ? items
+        .map(
+          item => `
+      <div class="card menu-item">
+        ${itemMedia(item)}
+        <div>
+          <h3>${escapeHtml(item.name || '')}</h3>
+          <div class="muted small">${escapeHtml(item.category || 'Other')}</div>
+          <p class="muted small">${escapeHtml(item.description || 'Freshly prepared item')}</p>
+        </div>
+        <div class="price-row">
+          <strong>${fmtCurrency(Number(item.price || 0))}</strong>
+          <button class="btn btn-primary" data-id="${escapeHtml(item.id)}">Add</button>
+        </div>
+      </div>
+    `
+        )
+        .join('')
+    : `<div class="card"><p class="muted">No menu items found.</p></div>`;
+
+  menuGrid.querySelectorAll('button[data-id]').forEach(btn => {
+    btn.onclick = () => addToCart(btn.dataset.id);
+  });
+}
+
+function addToCart(id) {
+  if (String(settings.plan || '').toLowerCase() === 'basic') return;
+
+  const item = menu.find(x => x.id === id);
+  if (!item) return;
+
+  const found = cart.find(x => x.id === id);
+
+  if (found) {
+    found.qty += 1;
+  } else {
+    cart.push({
+      id: item.id,
+      name: item.name || '',
+      price: Number(item.price || 0),
+      qty: 1,
+      category: item.category || '',
+      imageUrl: item.imageUrl || item.image || ''
+    });
+  }
+
+  syncCart();
+}
+
+function updateQty(id, delta) {
+  const item = cart.find(x => x.id === id);
+  if (!item) return;
+
+  item.qty += delta;
+
+  if (item.qty <= 0) {
+    cart = cart.filter(x => x.id !== id);
+  }
+
+  syncCart();
+}
+
+function syncCart() {
+  saveLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, cart);
+  renderCart();
+}
+
+function renderCart() {
+  if (!cartList) return;
+
+  cartList.innerHTML = cart.length
+    ? cart
+        .map(
+          item => `
+      <div class="cart-item">
+        <div class="cart-row">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="muted small">${fmtCurrency(item.price)} each</div>
+          </div>
+          <div class="qty-box">
+            <button class="qty-btn" data-act="minus" data-id="${escapeHtml(item.id)}">-</button>
+            <strong>${item.qty}</strong>
+            <button class="qty-btn" data-act="plus" data-id="${escapeHtml(item.id)}">+</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <span class="muted small">Subtotal</span>
+          <strong>${fmtCurrency(item.price * item.qty)}</strong>
+        </div>
+      </div>
+    `
+        )
+        .join('')
+    : `<p class="muted">Your cart is empty.</p>`;
+
+  cartList.querySelectorAll('.qty-btn').forEach(btn => {
+    btn.onclick = () => updateQty(btn.dataset.id, btn.dataset.act === 'plus' ? 1 : -1);
+  });
+
+  const itemsTotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
+  const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
+  const grand = itemsTotal + tax;
+
+  if (itemsTotalEl) itemsTotalEl.textContent = fmtCurrency(itemsTotal);
+  if (taxTotalEl) taxTotalEl.textContent = fmtCurrency(tax);
+  if (grandTotalEl) grandTotalEl.textContent = fmtCurrency(grand);
+}
+
+async function findOpenOrder() {
+  if (!customerPhone?.value.trim()) return null;
+
+  const normalizedPhone = `+91${customerPhone.value.trim().replace(/\D/g, '').slice(0, 10)}`;
+  const snap = await getDocs(collection(db, 'orders'));
+
+  return (
+    snap.docs.find(d => {
+      const x = d.data();
+      return (
+        String(x.restaurantId || '') === restaurantId &&
+        String(x.tableNo || '') === tableNo &&
+        String(x.customerPhone || '') === normalizedPhone &&
+        String(x.paymentStatus || 'unpaid').toLowerCase() !== 'paid' &&
+        !['cancelled', 'rejected'].includes(String(x.status || '').toLowerCase())
+      );
+    }) || null
+  );
+}
+
+function mergeItems(existing = [], incoming = []) {
+  const map = new Map();
+
+  [...existing, ...incoming].forEach(i => {
+    const key = i.id || i.name;
+    if (!map.has(key)) {
+      map.set(key, { ...i, qty: Number(i.qty || 0) });
+    } else {
+      map.get(key).qty += Number(i.qty || 0);
+    }
+  });
+
+  return [...map.values()];
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+  const earthRadiusMeters = 6371000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusMeters * c;
+}
+
+function getCustomerPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('unsupported'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0
+    });
+  });
+}
+
+async function verifyCustomerLocation() {
+  const restaurantLat = Number(settings.restaurantLat);
+  const restaurantLng = Number(settings.restaurantLng);
+  const allowedOrderRadiusMeters = Number(settings.allowedOrderRadiusMeters || 150);
+
+  if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) {
+    throw new Error('Restaurant location is not configured. Please contact restaurant staff.');
+  }
+
+  let position;
+  try {
+    position = await getCustomerPosition();
+  } catch (error) {
+    throw new Error('Location permission is required to place order and prevent fake orders.');
+  }
+
+  const customerLat = Number(position.coords.latitude);
+  const customerLng = Number(position.coords.longitude);
+  const customerDistanceMeters = Math.round(
+    getDistanceMeters(customerLat, customerLng, restaurantLat, restaurantLng)
+  );
+
+  if (customerDistanceMeters > allowedOrderRadiusMeters) {
+    throw new Error('You are outside restaurant ordering range. Please place order only from inside the restaurant.');
+  }
+
+  return {
+    customerLat,
+    customerLng,
+    customerDistanceMeters,
+    locationVerified: true
+  };
+}
+
+async function placeOrder() {
+  if (String(settings.plan || '').toLowerCase() === 'basic') {
+    return toast('This restaurant is using digital menu only.');
+  }
+
+  if (!customerName?.value.trim() || !customerPhone?.value.trim()) {
+    return toast('Please enter customer name and phone number.');
+  }
+
+  customerPhone.value = customerPhone.value.replace(/\D/g, '').slice(0, 10);
+
+  if (customerPhone.value.length !== 10) {
+    return toast('Please enter a valid 10 digit phone number.');
+  }
+
+  if (!cart.length) {
+    return toast('Cart is empty. Please add items first.');
+  }
+
+  if (placeOrderBtn) placeOrderBtn.disabled = true;
+
+  try {
+    const locationProof = await verifyCustomerLocation();
+    const openOrder = await findOpenOrder();
+    let orderId;
+    const noteVal = customerNote?.value.trim() || '';
+    const etaMinutes = 10;
+    const fullPhone = `+91${customerPhone.value.trim()}`;
+
+    if (openOrder) {
+      const current = openOrder.data();
+      const items = mergeItems(current.items || [], cart);
+      const itemsTotal = items.reduce((s, x) => s + Number(x.price || 0) * Number(x.qty || 0), 0);
+      const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
+      const grandTotal = itemsTotal + tax;
+
+      orderId = current.orderId;
+
+      await updateDoc(doc(db, 'orders', openOrder.id), {
+        customerName: customerName.value.trim(),
+        customerPhone: fullPhone,
+        note: noteVal,
+        whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
+        items,
+        itemsTotal,
+        tax,
+        grandTotal,
+        status: current.status || 'pending',
+        etaMinutes,
+        ...locationProof,
+        updatedAt: serverTimestamp(),
+        lastAddedAt: serverTimestamp()
+      });
+
+      await notifyBackend({
+        restaurantId,
+        restaurantName: settings.restaurantName || 'Restaurant',
+        orderId,
+        tableNo,
+        customerName: customerName.value.trim(),
+        customerPhone: whatsappConsent?.checked ? fullPhone : '',
+        kitchenPhone: settings.kitchenWhatsApp || '',
+        items,
+        grandTotal,
+        status: 'updated',
+        etaMinutes,
+        billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`
+      });
+    } else {
+      orderId = uid('ORD');
+
+      const itemsTotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
+      const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
+      const grandTotal = itemsTotal + tax;
+
+      const payload = {
+        orderId,
+        restaurantId,
+        restaurantName: settings.restaurantName || 'Restaurant',
+        tableNo,
+        customerName: customerName.value.trim(),
+        customerPhone: fullPhone,
+        note: noteVal,
+        whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
+        items: cart,
+        itemsTotal,
+        tax,
+        grandTotal,
+        status: 'pending',
+        paymentStatus: 'unpaid',
+        source: 'qr-order',
+        etaMinutes,
+        etaStartedAt: null,
+        ...locationProof,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      await addDoc(collection(db, 'orders'), payload);
+
+      await notifyBackend({
+        restaurantId,
+        restaurantName: settings.restaurantName || 'Restaurant',
+        orderId,
+        tableNo,
+        customerName: customerName.value.trim(),
+        customerPhone: whatsappConsent?.checked ? fullPhone : '',
+        kitchenPhone: settings.kitchenWhatsApp || '',
+        items: cart,
+        grandTotal,
+        status: 'pending',
+        etaMinutes,
+        billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`
+      });
+    }
+
+    if (orderSuccess) {
+      orderSuccess.classList.remove('hidden');
+      orderSuccess.innerHTML = `
+        Order saved successfully.<br>
+        <b>Order ID:</b> ${escapeHtml(orderId)}<br>
+        <a href="./track.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Track this order</a>
+        |
+        <a href="./bill.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Open bill</a>
+      `;
+    }
+
+    cart = [];
+    syncCart();
+
+    setTimeout(() => {
+      window.location.href = `./track.html?orderId=${encodeURIComponent(orderId)}`;
+    }, 800);
+  } catch (e) {
+    console.error('Place order error:', e);
+    toast(e?.message || 'Failed to place order. Check Firestore rules, restaurant ID, and backend URL.');
+  }
+
+  if (placeOrderBtn) placeOrderBtn.disabled = false;
+}

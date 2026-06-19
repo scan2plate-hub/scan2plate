@@ -1,0 +1,1 @@
+Added Super Admin files and updated login.js for restaurant expiry checking. Create super_admins/{uid} in Firestore and Firebase Auth users manually for restaurant admins.

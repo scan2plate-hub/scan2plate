@@ -1,0 +1,6 @@
+import { auth, db } from "./firebase.js";
+import { signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { qs, toast } from "./common.js";
+const email = qs("#email"); const password = qs("#password"); const loginBtn = qs("#loginBtn"); const msg = qs("#msg");
+loginBtn?.addEventListener("click", async ()=>{try{const userEmail=email?.value.trim(); const userPassword=password?.value.trim(); if(!userEmail||!userPassword){toast("Enter email and password"); return;} const cred=await signInWithEmailAndPassword(auth,userEmail,userPassword); const superSnap=await getDoc(doc(db,"super_admins",cred.user.uid)); if(!superSnap.exists()){await auth.signOut(); toast("You are not authorized as super admin"); return;} localStorage.setItem("scan2serve_super_admin", JSON.stringify({uid:cred.user.uid, role:"super_admin", ...superSnap.data()})); window.location.href="./super-admin-dashboard.html";}catch(e){console.error(e); if(msg){msg.classList.remove("hidden"); msg.textContent=e.message||"Login failed";}}});

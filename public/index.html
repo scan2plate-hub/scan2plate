@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scan2Plate - Scan, Order & Relax</title>
+  <link rel="stylesheet" href="./css/style.css" />
+  <style>
+    :root{
+      --brand:#d88a1d;
+      --brand-dark:#111111;
+      --muted:#666;
+      --bg-soft:#fffaf3;
+      --card:#ffffff;
+      --line:#ececec;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:Arial, Helvetica, sans-serif;
+      color:#111;
+      background:#fff;
+    }
+
+    .hidden{ display:none !important; }
+
+    .container{
+      width:min(1180px, 92%);
+      margin:0 auto;
+    }
+
+    .topbar{
+      border-bottom:1px solid var(--line);
+      background:#fff;
+      position:sticky;
+      top:0;
+      z-index:20;
+    }
+
+    .nav{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:20px;
+      padding:16px 0;
+    }
+
+    .logo-wrap{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+
+    .logo-wrap img{
+      width:52px;
+      height:52px;
+      object-fit:contain;
+      display:block;
+      border-radius:12px;
+    }
+
+    .logo-text strong{
+      display:block;
+      font-size:20px;
+      line-height:1.1;
+    }
+
+    .logo-text span{
+      color:#666;
+      font-size:14px;
+    }
+
+    .nav-links{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:12px 18px;
+      border-radius:14px;
+      text-decoration:none;
+      font-weight:700;
+      border:1px solid transparent;
+      cursor:pointer;
+    }
+
+    .btn-dark{
+      background:#111;
+      color:#fff;
+    }
+
+    .btn-outline{
+      background:#fff;
+      color:#111;
+      border:1px solid #ddd;
+    }
+
+    .hero{
+      padding:56px 0 26px;
+      background:linear-gradient(135deg,#fffaf3 0%,#ffffff 50%,#f8fbf9 100%);
+    }
+
+    .hero-grid{
+      display:grid;
+      grid-template-columns:1.05fr .95fr;
+      gap:36px;
+      align-items:center;
+    }
+
+    .badge{
+      display:inline-block;
+      background:#fff1db;
+      color:#b96f09;
+      padding:10px 16px;
+      border-radius:999px;
+      font-size:14px;
+      font-weight:700;
+      margin-bottom:18px;
+    }
+
+    .hero h1{
+      margin:0 0 14px;
+      font-size:58px;
+      line-height:1.02;
+      letter-spacing:-1.5px;
+    }
+
+    .hero h1 span{ color:var(--brand); }
+
+    .hero p{
+      font-size:18px;
+      color:#555;
+      line-height:1.7;
+      margin:0 0 20px;
+    }
+
+    .hero-cta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      margin-bottom:24px;
+    }
+
+    .mini-grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:14px;
+    }
+
+    .mini-card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 10px 22px rgba(0,0,0,.05);
+    }
+
+    .mini-card strong{
+      display:block;
+      margin-bottom:6px;
+      font-size:16px;
+    }
+
+    .mini-card span{
+      color:#666;
+      font-size:14px;
+      line-height:1.5;
+    }
+
+    .hero-visual{
+      position:relative;
+      background:#fff;
+      border-radius:28px;
+      padding:16px;
+      box-shadow:0 16px 40px rgba(0,0,0,.08);
+    }
+
+    .hero-visual img{
+      width:100%;
+      border-radius:22px;
+      display:block;
+      object-fit:cover;
+    }
+
+    .float-card{
+      position:absolute;
+      background:#fff;
+      border-radius:16px;
+      padding:12px 14px;
+      box-shadow:0 12px 28px rgba(0,0,0,.14);
+      max-width:210px;
+    }
+
+    .float-card strong{
+      display:block;
+      font-size:14px;
+      margin-bottom:4px;
+    }
+
+    .float-card span{
+      color:#666;
+      font-size:12px;
+      line-height:1.4;
+    }
+
+    .float-left{ left:-18px; bottom:22px; }
+    .float-right{ right:-18px; top:26px; }
+
+    .section{
+      padding:34px 0;
+    }
+
+    .section-head{
+      text-align:center;
+      max-width:760px;
+      margin:0 auto 26px;
+    }
+
+    .section-head h2{
+      margin:12px 0 10px;
+      font-size:40px;
+    }
+
+    .section-head p{
+      color:#666;
+      line-height:1.7;
+      font-size:17px;
+    }
+
+    .features{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:18px;
+    }
+
+    .feature-box{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:22px;
+      padding:22px;
+      box-shadow:0 10px 24px rgba(0,0,0,.05);
+    }
+
+    .feature-box h3{
+      margin:0 0 8px;
+      font-size:24px;
+    }
+
+    .feature-box p{
+      margin:0;
+      color:#666;
+      line-height:1.6;
+    }
+
+    .plans{
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:22px;
+      max-width:920px;
+      margin:0 auto;
+    }
+
+    .plan-card{
+      position:relative;
+      border:1px solid var(--line);
+      border-radius:24px;
+      background:#fff;
+      padding:28px;
+      box-shadow:0 14px 30px rgba(0,0,0,.05);
+    }
+
+    .plan-card.featured{
+      border:2px solid var(--brand);
+      transform:translateY(-4px);
+    }
+
+    .plan-tag{
+      position:absolute;
+      top:-12px;
+      right:20px;
+      background:var(--brand);
+      color:#fff;
+      padding:7px 12px;
+      font-size:12px;
+      border-radius:999px;
+      font-weight:700;
+    }
+
+    .plan-card h3{
+      margin:0 0 10px;
+      font-size:28px;
+    }
+
+    .price{
+      font-size:42px;
+      font-weight:800;
+      margin-bottom:14px;
+    }
+
+    .price span{
+      font-size:18px;
+      color:#666;
+      font-weight:500;
+    }
+
+    .plan-card ul{
+      margin:0 0 20px;
+      padding-left:18px;
+      color:#555;
+      line-height:1.9;
+    }
+
+    .footer{
+      border-top:1px solid var(--line);
+      padding:22px 0;
+      color:#666;
+      margin-top:14px;
+    }
+
+    .footer-row{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+
+    /* Customer ordering area */
+    .order-shell{
+      padding:28px 0 40px;
+      background:#fffaf3;
+      min-height:calc(100vh - 86px);
+    }
+
+    .order-grid{
+      display:grid;
+      grid-template-columns:1.2fr .8fr;
+      gap:22px;
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:20px;
+      box-shadow:0 10px 22px rgba(0,0,0,.04);
+    }
+
+    .menu-grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:16px;
+      margin-top:18px;
+    }
+
+    .menu-item{
+      border:1px solid #eee;
+      border-radius:18px;
+      overflow:hidden;
+      background:#fff;
+    }
+
+    .menu-item img{
+      width:100%;
+      height:150px;
+      object-fit:cover;
+      display:block;
+      background:#f7f7f7;
+    }
+
+    .menu-item-body{
+      padding:14px;
+    }
+
+    .menu-item h3{
+      margin:0 0 6px;
+      font-size:18px;
+    }
+
+    .muted{ color:#666; }
+    .small{ font-size:13px; }
+
+    .chips{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+
+    .chip{
+      border:1px solid #ddd;
+      background:#fff;
+      border-radius:999px;
+      padding:9px 14px;
+      cursor:pointer;
+      font-weight:700;
+    }
+
+    .chip.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+
+    .price-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-top:12px;
+    }
+
+    .qty-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-top:10px;
+    }
+
+    .qty-box{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .qty-btn{
+      width:30px;
+      height:30px;
+      border:none;
+      border-radius:8px;
+      background:#111;
+      color:#fff;
+      cursor:pointer;
+    }
+
+    .field{
+      width:100%;
+      padding:13px 14px;
+      border-radius:14px;
+      border:1px solid #ddd;
+      outline:none;
+      margin-bottom:12px;
+    }
+
+    .success-box{
+      margin-top:16px;
+      padding:14px;
+      border-radius:16px;
+      background:#edf9ef;
+      border:1px solid #cfe8d3;
+      color:#225d2f;
+    }
+    .plan-menu-notice{display:none;margin-top:10px;padding:11px 13px;border-radius:12px;background:#fff4e6;border:1px solid #f4d4ad;color:#91540c;font-size:13px;line-height:1.45}.plan-menu-notice.show{display:block}.plan-menu-badge{display:none;width:max-content;margin:8px 0 0;padding:6px 10px;border-radius:999px;background:#fff0dd;color:#a95c06;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.plan-menu-badge.show{display:inline-block}body.digital-menu-only .cart-panel,body.digital-menu-only .floating-cart-bar{display:none!important}
+
+    
+    .cart-panel-head,
+    .floating-cart-bar{ display:none; }
+
+    body.customer-menu-mode .nav-links{ display:none; }
+
+    @media (max-width: 760px){
+      body.customer-menu-mode .topbar{ z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.06); }
+      body.customer-menu-mode .nav{ width:min(100% - 24px, 1180px); padding:9px 0; }
+      body.customer-menu-mode .logo-wrap{ gap:9px; min-width:0; }
+      body.customer-menu-mode .logo-wrap img{ width:38px; height:38px; border-radius:10px; }
+      body.customer-menu-mode .logo-text strong{ font-size:16px; }
+      body.customer-menu-mode .logo-text span{ font-size:12px; }
+
+      .order-shell{ min-height:calc(100vh - 57px); padding:10px 0 104px; background:#f7f3ec; }
+      .order-shell .container{ width:100%; margin:0; }
+      .order-grid{ display:block; }
+      .order-grid > section.card{ border:0; border-radius:0; box-shadow:none; padding:12px; background:#f7f3ec; }
+      .order-grid > section.card > div:first-child{ display:flex !important; align-items:flex-start !important; gap:10px !important; padding:6px 2px 10px; }
+      #restaurantTitle{ margin:0 0 4px !important; font-size:20px; line-height:1.15; }
+      #tableNoText{ display:inline-flex; align-items:center; border-radius:999px; padding:6px 10px; background:#111; color:#fff; font-size:12px; white-space:nowrap; }
+      #searchBox{ position:sticky; top:57px; z-index:35; max-width:none !important; width:100%; margin:0 0 8px !important; padding:12px 14px; border-radius:16px; background:#fff; box-shadow:0 10px 22px rgba(0,0,0,.06); }
+      .chips{ flex-wrap:nowrap; gap:8px; margin:0 -12px 2px; padding:4px 12px 10px; overflow-x:auto; scrollbar-width:none; }
+      .chips::-webkit-scrollbar{ display:none; }
+      .chip{ flex:0 0 auto; padding:8px 12px; font-size:12px; background:#fff; border-color:rgba(17,17,17,.08); }
+      .menu-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:8px; }
+      .menu-item{ display:flex; flex-direction:column; min-width:0; border:1px solid rgba(17,17,17,.07); border-radius:18px; box-shadow:0 10px 22px rgba(0,0,0,.06); }
+      .menu-item img{ height:102px; }
+      .menu-item-body{ display:flex; flex:1; flex-direction:column; padding:10px; }
+      .menu-item h3{ display:-webkit-box; min-height:34px; margin:0 0 4px; overflow:hidden; font-size:14px; line-height:1.2; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; }
+      .menu-item .small{ font-size:11px; }
+      .price-row{ align-items:flex-end; margin-top:auto; gap:8px; }
+      .price-row strong{ font-size:15px; white-space:nowrap; }
+      .price-row .btn{ min-height:34px; padding:8px 11px; border-radius:11px; font-size:12px; }
+      .cart-desktop-title{ display:none; }
+      .cart-panel{ position:fixed; inset:auto 0 0; z-index:90; max-height:86vh; overflow:auto; border:0; border-radius:24px 24px 0 0; padding:14px 14px calc(16px + env(safe-area-inset-bottom)); box-shadow:0 -18px 44px rgba(0,0,0,.2); transform:translateY(105%); transition:transform .22s ease; }
+      body.cart-open .cart-panel{ transform:translateY(0); }
+      body.cart-open::after{ content:""; position:fixed; inset:0; z-index:80; background:rgba(0,0,0,.38); }
+      .cart-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+      .cart-panel-head h3{ margin:0; }
+      .cart-close-btn{ width:34px; height:34px; border:0; border-radius:999px; background:#f2f2f2; color:#111; font-size:20px; line-height:1; }
+      .floating-cart-bar{ position:fixed; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:70; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 10px 10px 14px; border-radius:18px; background:#111; color:#fff; box-shadow:0 16px 38px rgba(0,0,0,.28); }
+      .floating-cart-bar.hidden{ display:none !important; }
+      .floating-cart-bar strong{ display:block; font-size:14px; }
+      .floating-cart-bar span{ display:block; margin-top:2px; color:rgba(255,255,255,.72); font-size:12px; }
+      .floating-cart-bar .btn{ flex:0 0 auto; padding:10px 14px; border-radius:13px; background:#fff; color:#111; font-size:13px; }
+    }
+
+    @media (max-width: 380px){
+      .menu-grid{ grid-template-columns:1fr; }
+      .menu-item{ display:grid; grid-template-columns:92px 1fr; }
+      .menu-item img{ height:100%; min-height:112px; }
+    }
+
+    @media (max-width: 1000px){
+      .hero-grid,
+      .mini-grid,
+      .features,
+      .plans,
+      .order-grid,
+      .menu-grid{
+        grid-template-columns:1fr;
+      }
+
+      .hero h1{
+        font-size:42px;
+      }
+
+      .float-left,
+      .float-right{
+        position:static;
+        margin-top:12px;
+      }
+    }
+
+    /* Premium landing page — scoped so the QR customer menu remains unchanged. */
+    body:not(.customer-menu-mode){
+      background:#fffdf9;
+      overflow-x:hidden;
+    }
+    body:not(.customer-menu-mode) .container{width:min(1200px, calc(100% - 40px));}
+    body:not(.customer-menu-mode) .topbar{
+      border-bottom:1px solid rgba(25,18,10,.08);
+      background:rgba(255,253,249,.88);
+      backdrop-filter:blur(18px);
+    }
+    body:not(.customer-menu-mode) .nav{min-height:80px;padding:12px 0;}
+    body:not(.customer-menu-mode) .logo-wrap img{width:46px;height:46px;border-radius:14px;box-shadow:0 7px 18px rgba(216,138,29,.18);}
+    body:not(.customer-menu-mode) .logo-text strong{font-size:21px;letter-spacing:-.6px;}
+    body:not(.customer-menu-mode) .logo-text span{font-size:12px;color:#806f5b;font-weight:600;}
+    body:not(.customer-menu-mode) .nav-links{gap:8px;align-items:center;}
+    body:not(.customer-menu-mode) .nav-links .btn{padding:10px 14px;border-radius:11px;font-size:13px;}
+    body:not(.customer-menu-mode) .btn{transition:transform .2s ease,box-shadow .2s ease,background .2s ease;}
+    body:not(.customer-menu-mode) .btn:hover{transform:translateY(-2px);}
+    body:not(.customer-menu-mode) .btn-dark{
+      background:linear-gradient(135deg,#16120e,#35220e);
+      box-shadow:0 10px 20px rgba(26,17,8,.2);
+    }
+    body:not(.customer-menu-mode) .btn-outline{background:rgba(255,255,255,.8);border-color:#eadfd3;}
+    #landingPage .hero{
+      position:relative;
+      isolation:isolate;
+      overflow:hidden;
+      padding:84px 0 72px;
+      background:radial-gradient(circle at 8% 8%,rgba(255,186,85,.32),transparent 28%),radial-gradient(circle at 92% 30%,rgba(245,137,30,.17),transparent 30%),linear-gradient(135deg,#fff8ed 0%,#fffdf9 49%,#fff6e9 100%);
+    }
+    #landingPage .hero::before,#landingPage .hero::after{content:"";position:absolute;z-index:-1;border-radius:50%;filter:blur(2px);}
+    #landingPage .hero::before{width:340px;height:340px;left:-190px;bottom:-210px;background:#ffbd66;opacity:.25;}
+    #landingPage .hero::after{width:270px;height:270px;right:-110px;top:-120px;background:#f6a735;opacity:.14;}
+    #landingPage .hero-grid{gap:64px;}
+    #landingPage .badge{margin-bottom:20px;padding:8px 13px;background:rgba(255,244,225,.94);border:1px solid rgba(216,138,29,.18);color:#9b5e0b;font-size:12px;letter-spacing:.05em;text-transform:uppercase;}
+    #landingPage .hero h1{max-width:690px;margin-bottom:20px;font-size:clamp(44px,5vw,68px);line-height:1.01;letter-spacing:-.055em;}
+    #landingPage .hero h1 span{background:linear-gradient(100deg,#e88e19,#b85d00 65%,#e5962c);-webkit-background-clip:text;background-clip:text;color:transparent;}
+    #landingPage .hero p{max-width:620px;color:#685d52;font-size:17px;line-height:1.72;}
+    #landingPage .hero-cta{margin:28px 0 30px;}
+    #landingPage .hero-cta .btn{min-height:50px;padding-inline:21px;}
+    #landingPage .mini-grid{gap:12px;}
+    #landingPage .mini-card{min-height:128px;border:1px solid rgba(124,91,48,.13);border-radius:18px;padding:17px;background:rgba(255,255,255,.76);box-shadow:0 15px 34px rgba(66,39,8,.06);}
+    #landingPage .mini-card strong{font-size:14px;} #landingPage .mini-card span{font-size:12px;color:#76695d;}
+    #landingPage .hero-visual{border:1px solid rgba(135,87,20,.13);border-radius:30px;padding:12px;background:rgba(255,255,255,.72);box-shadow:0 28px 62px rgba(89,50,2,.15);}
+    #landingPage .hero-visual img{aspect-ratio:4/4.45;border-radius:21px;object-fit:cover;}
+    #landingPage .float-card{border:1px solid rgba(229,145,39,.18);padding:13px 15px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);}
+    #landingPage .float-card strong{color:#42250c;} #landingPage .float-card span{color:#7b6c5e;}
+    #landingPage .section{padding:82px 0;}
+    #landingPage .section-head{margin-bottom:38px;} #landingPage .section-head h2{font-size:clamp(32px,3.5vw,46px);letter-spacing:-.045em;line-height:1.06;}
+    #landingPage .section-head p{max-width:660px;margin:0 auto;color:#76695d;font-size:16px;}
+    #landingPage .features{gap:20px;}
+    #landingPage .feature-box{position:relative;overflow:hidden;border-color:#f0e5d8;border-radius:22px;padding:28px;background:linear-gradient(145deg,#fff 0%,#fffaf4 100%);box-shadow:0 16px 32px rgba(54,34,12,.055);transition:transform .22s ease,box-shadow .22s ease;}
+    #landingPage .feature-box:hover{transform:translateY(-5px);box-shadow:0 24px 40px rgba(78,47,12,.11);}
+    #landingPage .feature-box::after{content:"";position:absolute;width:100px;height:100px;border-radius:50%;right:-45px;bottom:-45px;background:rgba(245,173,75,.15);}
+    #landingPage .feature-icon{display:grid;place-items:center;width:48px;height:48px;margin-bottom:20px;border-radius:15px;background:linear-gradient(135deg,#ffe5bb,#fff6e9);color:#c06d09;font-size:22px;}
+    #landingPage .feature-box h3{font-size:22px;letter-spacing:-.03em;} #landingPage .feature-box p{font-size:15px;color:#74685d;}
+    #landingPage #plans{background:linear-gradient(180deg,#fff9f0,#fffdf9);border-top:1px solid #f5ecdf;border-bottom:1px solid #f5ecdf;}
+    #landingPage .plans{max-width:960px;gap:24px;}
+    #landingPage .plan-card{padding:34px 30px;border-color:#eadfce;border-radius:24px;box-shadow:0 17px 38px rgba(66,41,11,.07);}
+    #landingPage .plan-card.featured{border:2px solid #df8a1a;box-shadow:0 24px 48px rgba(191,111,7,.16);}
+    #landingPage .plan-card h3{font-size:26px;} #landingPage .price{font-size:45px;letter-spacing:-.05em;}
+    #landingPage .plan-card ul{list-style:none;padding:0;margin-bottom:25px;} #landingPage .plan-card li{padding-left:27px;position:relative;color:#675d53;}
+    #landingPage .plan-card li::before{content:"✓";position:absolute;left:0;color:#d78213;font-weight:900;}
+    #landingPage .plan-card .btn{width:100%;}
+    #landingPage .footer{margin-top:0;padding:28px 0;background:#18130e;border:0;color:#d9cdc0;}
+    #landingPage .footer strong{color:#ffb651;} #landingPage .footer-row{font-size:14px;}
+    @media (max-width:1000px){
+      #landingPage .hero{padding:62px 0 58px;}
+      #landingPage .hero-grid{gap:42px;}
+      #landingPage .hero-visual{max-width:560px;margin:0 auto;width:100%;}
+      #landingPage .hero-visual img{aspect-ratio:16/10;}
+      #landingPage .float-left,#landingPage .float-right{position:absolute;}
+    }
+    @media (max-width:640px){
+      body:not(.customer-menu-mode) .container{width:min(100% - 28px,1200px);}
+      body:not(.customer-menu-mode) .nav{min-height:auto;padding:10px 0;align-items:flex-start;gap:10px;}
+      body:not(.customer-menu-mode) .logo-wrap{gap:8px;} body:not(.customer-menu-mode) .logo-wrap img{width:39px;height:39px;border-radius:11px;}
+      body:not(.customer-menu-mode) .logo-text strong{font-size:17px;} body:not(.customer-menu-mode) .logo-text span{font-size:10px;}
+      body:not(.customer-menu-mode) .nav-links{justify-content:flex-end;gap:5px;max-width:64%;}
+      body:not(.customer-menu-mode) .nav-links .btn{padding:8px 9px;border-radius:9px;font-size:11px;white-space:nowrap;}
+      #landingPage .hero{padding:47px 0 48px;} #landingPage .hero h1{font-size:clamp(39px,11vw,52px);}
+      #landingPage .hero p{font-size:15px;line-height:1.65;} #landingPage .hero-cta{display:grid;grid-template-columns:1fr 1fr;margin:23px 0;}
+      #landingPage .hero-cta .btn{min-height:46px;padding-inline:10px;font-size:13px;}
+      #landingPage .mini-grid{grid-template-columns:1fr;} #landingPage .mini-card{min-height:auto;padding:14px 16px;}
+      #landingPage .hero-visual{padding:8px;border-radius:22px;} #landingPage .hero-visual img{aspect-ratio:1/1.1;border-radius:16px;}
+      #landingPage .float-left,#landingPage .float-right{position:static;margin:10px 0 0;max-width:none;} #landingPage .float-right{display:none;}
+      #landingPage .section{padding:58px 0;} #landingPage .section-head{margin-bottom:27px;} #landingPage .section-head h2{font-size:31px;}
+      #landingPage .features,#landingPage .plans{grid-template-columns:1fr;} #landingPage .feature-box{padding:22px;}
+      #landingPage .plan-card{padding:28px 23px;} #landingPage .plan-card.featured{transform:none;}
+      #landingPage .footer-row{justify-content:center;text-align:center;font-size:12px;}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container nav">
+      <div class="logo-wrap">
+        <img src="./logo.PNG" alt="Scan2Plate logo" />
+        <div class="logo-text">
+          <strong>Scan2Plate</strong>
+          <span>Scan, Order & Relax</span>
+        </div>
+      </div>
+
+      <div class="nav-links">
+        <a href="#plans" class="btn btn-outline" id="menuTopBtn">Plans</a>
+        <a href="./track.html" class="btn btn-outline">Track Order</a>
+        <a href="./admin-login.html" class="btn btn-dark">Restaurant Login</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- LANDING PAGE -->
+  <main id="landingPage">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="badge">Scan Based Ordering System</span>
+          <h1>Scan2Plate helps restaurants <span>scan, order & relax</span></h1>
+          <p>
+            Smart QR ordering software for restaurants, cafés and food courts.
+            Customers scan table QR, place orders instantly, kitchen gets live updates,
+            and billing + WhatsApp works in one clean flow.
+          </p>
+
+          <div class="hero-cta">
+            <a href="./admin-login.html" class="btn btn-dark">Restaurant Login</a>
+            <a href="#plans" class="btn btn-outline">View Plans</a>
+          </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <strong>QR Ordering</strong>
+              <span>Customers scan table QR and order instantly.</span>
+            </div>
+            <div class="mini-card">
+              <strong>Kitchen Flow</strong>
+              <span>Accept, reject, preparing, ready and ETA updates.</span>
+            </div>
+            <div class="mini-card">
+              <strong>Billing + WhatsApp</strong>
+              <span>Bill links, payment status and customer alerts.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <img src="./assets/scan2plate-hero.jpg" alt="Scan2Plate preview">
+          <div class="float-card float-left">
+            <strong>Scan QR To Order</strong>
+            <span>No waiting • Live menu • Faster service</span>
+          </div>
+          <div class="float-card float-right">
+            <strong>WhatsApp Updates</strong>
+            <span>Customers get order and bill links instantly</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="section-head">
+          <span class="badge">Features</span>
+          <h2>Everything needed to run smart restaurant ordering</h2>
+          <p>From QR scan to kitchen control to billing and payment status, Scan2Plate keeps the full restaurant flow connected.</p>
+        </div>
+
+        <div class="features">
+          <div class="feature-box">
+            <div class="feature-icon" aria-hidden="true">⌁</div>
+            <h3>No Waiting</h3>
+            <p>Customers order directly from their table without waiting for a waiter to take order.</p>
+          </div>
+          <div class="feature-box">
+            <div class="feature-icon" aria-hidden="true">⌾</div>
+            <h3>No Fake Orders</h3>
+            <p>Table-based QR flow helps restaurants reduce random and fake order confusion.</p>
+          </div>
+          <div class="feature-box">
+            <div class="feature-icon" aria-hidden="true">✦</div>
+            <h3>Live Kitchen + Billing</h3>
+            <p>Kitchen accepts or rejects orders, admin updates payment and customer gets clear bill status.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="plans">
+      <div class="container">
+        <div class="section-head">
+          <span class="badge">Plans</span>
+          <h2>Simple plans for restaurants</h2>
+          <p>Choose a plan based on restaurant size and required features.</p>
+        </div>
+
+        <div class="plans">
+          <div class="plan-card">
+            <h3>Basic</h3>
+            <div class="price">₹1999 <span>/ month</span></div>
+            <ul>
+              <li>QR menu ordering</li>
+              <li>Kitchen dashboard</li>
+              <li>Order tracking</li>
+              <li>Basic billing</li>
+            </ul>
+            <a href="./restaurant-login.html" class="btn btn-outline">Get Started</a>
+          </div>
+
+          <div class="plan-card featured">
+            <div class="plan-tag">Popular</div>
+            <h3>Advance</h3>
+            <div class="price">₹2999 <span>/ month</span></div>
+            <ul>
+              <li>Everything in Basic</li>
+              <li>WhatsApp alerts</li>
+              <li>Super admin support</li>
+              <li>Manual order billing</li>
+              <li>Reports and payment updates</li>
+            </ul>
+            <a href="./restaurant-login.html" class="btn btn-dark">Choose Advance</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="container footer-row">
+        <div>Powered by <strong>Scan2Plate</strong></div>
+        <div>Scan based ordering for restaurants</div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- CUSTOMER ORDER PAGE -->
+  <main id="customerPage" class="order-shell hidden">
+    <div class="container">
+      <div class="order-grid">
+        <section class="card">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+            <div>
+              <h2 id="restaurantTitle" style="margin:0 0 6px">Restaurant Menu</h2>
+              <div class="muted">Table: <strong id="tableNoText">01</strong></div>
+              <span id="digitalMenuBadge" class="plan-menu-badge">Digital Menu Only</span>
+              <div id="planMenuNotice" class="plan-menu-notice"></div>
+            </div>
+            <input id="searchBox" class="field" placeholder="Search menu..." style="max-width:260px;margin:0" />
+          </div>
+
+          <div id="categoryChips" class="chips"></div>
+          <div id="menuGrid" class="menu-grid" aria-live="polite">
+            <p class="muted">Loading menu...</p>
+          </div>
+        </section>
+
+        <aside id="cartPanel" class="card cart-panel">
+          <div class="cart-panel-head">
+            <h3>Place Order</h3>
+            <button id="closeCartBtn" class="cart-close-btn" type="button" aria-label="Close cart">x</button>
+          </div>
+          <h3 class="cart-desktop-title" style="margin-top:0">Place Order</h3>
+          <input id="customerName" class="field" placeholder="Customer name" />
+          <input id="customerPhone" class="field" placeholder="Phone number" />
+          <textarea id="customerNote" class="field" placeholder="Special note" rows="3"></textarea>
+
+          <div id="cartList"></div>
+
+          <div style="border-top:1px solid #eee;margin-top:14px;padding-top:14px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span>Items total</span>
+              <strong id="itemsTotal">₹0</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span>Tax</span>
+              <strong id="taxTotal">₹0</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:18px">
+              <span>Grand total</span>
+              <strong id="grandTotal">₹0</strong>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button id="placeOrderBtn" class="btn btn-dark" style="flex:1">Place Order</button>
+            <button id="clearCartBtn" class="btn btn-outline">Clear</button>
+          </div>
+
+          <div id="orderSuccess" class="success-box hidden"></div>
+        </aside>
+
+        <div id="floatingCartBar" class="floating-cart-bar hidden">
+          <div>
+            <strong id="floatingCartCount">0 items</strong>
+            <span id="floatingCartTotal">₹0</span>
+          </div>
+          <button id="viewCartBtn" class="btn" type="button">View Cart</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+  import { db } from "./js/firebase.js";
+
+import {
+  collection,
+  query,
+  getDocs,
+  getDoc,
+  doc,
+  addDoc,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const params = new URLSearchParams(window.location.search);
+
+  const restaurantId = (
+    params.get("restaurantId") ||
+    params.get("r") ||
+    ""
+  ).trim();
+
+  const table = (
+    params.get("table") ||
+    params.get("t") ||
+    "01"
+  ).trim() || "01";
+
+  const landingPage = document.getElementById("landingPage");
+    const customerPage = document.getElementById("customerPage");
+      const isCustomerMenuUrl = Boolean(restaurantId);
+
+        if (isCustomerMenuUrl) {
+            
+    document.body.classList.add("customer-menu-mode");
+    landingPage.classList.add("hidden");
+    customerPage.classList.remove("hidden");
+    bootCustomerPage();
+  }
+
+  function money(v) {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0
+    }).format(Number(v || 0));
+  }
+
+  async function bootCustomerPage() {
+    const restaurantTitle = document.getElementById("restaurantTitle");
+    const tableNoText = document.getElementById("tableNoText");
+    const categoryChips = document.getElementById("categoryChips");
+    const menuGrid = document.getElementById("menuGrid");
+    const cartList = document.getElementById("cartList");
+    const itemsTotalEl = document.getElementById("itemsTotal");
+    const taxTotalEl = document.getElementById("taxTotal");
+    const grandTotalEl = document.getElementById("grandTotal");
+    const searchBox = document.getElementById("searchBox");
+    const placeOrderBtn = document.getElementById("placeOrderBtn");
+    const clearCartBtn = document.getElementById("clearCartBtn");
+    const orderSuccess = document.getElementById("orderSuccess");
+    const customerName = document.getElementById("customerName");
+    const customerPhone = document.getElementById("customerPhone");
+    const customerNote = document.getElementById("customerNote");
+    const floatingCartBar = document.getElementById("floatingCartBar");
+    const floatingCartCount = document.getElementById("floatingCartCount");
+    const floatingCartTotal = document.getElementById("floatingCartTotal");
+    const viewCartBtn = document.getElementById("viewCartBtn");
+    const closeCartBtn = document.getElementById("closeCartBtn");
+    const digitalMenuBadge = document.getElementById("digitalMenuBadge");
+    const planMenuNotice = document.getElementById("planMenuNotice");
+
+    if (viewCartBtn) {
+      viewCartBtn.onclick = () => document.body.classList.add("cart-open");
+    }
+
+    if (closeCartBtn) {
+      closeCartBtn.onclick = () => document.body.classList.remove("cart-open");
+    }
+
+    tableNoText.textContent = table;
+
+    let menu = [];
+    let activeCategory = "All";
+    let cart = [];
+    let taxPercent = 5;
+    let restaurantPlanData = {};
+    let canUseOrdering = true;
+    let restaurantLocationSettings = {
+      restaurantLat: null,
+      restaurantLng: null,
+      allowedOrderRadiusMeters: 150
+    };
+
+    async function loadRestaurantSettings() {
+      try {
+        const [restaurantSnap, settingSnap] = await Promise.all([
+          getDoc(doc(db, "restaurants", restaurantId)),
+          getDoc(doc(db, "restaurants", restaurantId, "settings", "general"))
+        ]);
+
+        restaurantPlanData = restaurantSnap.exists() ? restaurantSnap.data() : {};
+        const status = String(restaurantPlanData.status || "active").toLowerCase();
+        const subscriptionStatus = String(restaurantPlanData.subscriptionStatus || "").toLowerCase();
+        const rawExpiry = restaurantPlanData.planExpiryDate || restaurantPlanData.expiryDate;
+        const expiry = rawExpiry?.toDate ? rawExpiry.toDate() : rawExpiry ? new Date(rawExpiry) : null;
+        const today = new Date(); today.setHours(0,0,0,0);
+        if (expiry) expiry.setHours(0,0,0,0);
+        const isExpired = ["expired", "suspended"].includes(status) || subscriptionStatus === "expired" || (expiry && !Number.isNaN(expiry.getTime()) && expiry < today);
+        const isBasic = String(restaurantPlanData.plan || "").toLowerCase() === "basic";
+        canUseOrdering = !isBasic && !isExpired;
+        document.body.classList.toggle("digital-menu-only", !canUseOrdering);
+        if (!canUseOrdering) {
+          digitalMenuBadge?.classList.toggle("show", isBasic);
+          planMenuNotice?.classList.add("show");
+          planMenuNotice.textContent = isExpired ? "Ordering is temporarily unavailable. Please contact restaurant staff." : "Ordering is not available in this plan. Please call waiter to place order.";
+        }
+
+        if (settingSnap.exists()) {
+          const data = settingSnap.data();
+          restaurantTitle.textContent = `${data.restaurantName || "Restaurant"} Menu`;
+          taxPercent = Number(data.taxPercent || 5);
+          restaurantLocationSettings = {
+            restaurantLat: data.restaurantLat ?? null,
+            restaurantLng: data.restaurantLng ?? null,
+            allowedOrderRadiusMeters: Number(data.allowedOrderRadiusMeters || 150)
+          };
+        } else {
+          restaurantTitle.textContent = "Restaurant Menu";
+        }
+      } catch (e) {
+        restaurantTitle.textContent = "Restaurant Menu";
+      }
+    }
+
+    async function loadMenu() {
+      menuGrid.innerHTML = `<p class="muted">Loading menu...</p>`;
+      categoryChips.innerHTML = "";
+
+      try {
+        await loadRestaurantSettings();
+
+        // Keep this explicit path aligned with the admin menu writer. A failed
+        // Firestore request used to reject here and leave the grid blank.
+        const snap = await getDocs(
+          query(collection(db, "restaurants", restaurantId, "menu"))
+        );
+
+        menu = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(item => item.available !== false)
+          .sort((a, b) => {
+            const categoryCompare = String(a.category || "Other").localeCompare(
+              String(b.category || "Other")
+            );
+            if (categoryCompare !== 0) return categoryCompare;
+
+            const sortOrderCompare = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+            if (sortOrderCompare !== 0) return sortOrderCompare;
+
+            return String(a.name || "").localeCompare(String(b.name || ""));
+          });
+
+        renderCategories();
+        renderMenu();
+      } catch (error) {
+        // Always leave a visible state after a permissions, network, or config error.
+        console.error("Menu load error:", error);
+        menu = [];
+        categoryChips.innerHTML = "";
+        menuGrid.innerHTML = `<p class="muted">Menu could not load. Please refresh or ask restaurant staff.</p>`;
+      }
+    }
+
+    function renderCategories() {
+      const cats = ["All", ...new Set(menu.map(i => i.category || "Other"))];
+
+      categoryChips.innerHTML = cats.map(cat => `
+        <button class="chip ${cat === activeCategory ? "active" : ""}" data-cat="${cat}">
+          ${cat}
+        </button>
+      `).join("");
+
+      categoryChips.querySelectorAll(".chip").forEach(btn => {
+        btn.onclick = () => {
+          activeCategory = btn.dataset.cat;
+          renderCategories();
+          renderMenu();
+        };
+      });
+    }
+
+    function filteredMenu() {
+      const q = (searchBox.value || "").trim().toLowerCase();
+
+      return menu.filter(item => {
+        const catOk = activeCategory === "All" || (item.category || "Other") === activeCategory;
+        const text = `${item.name || ""} ${item.category || ""}`.toLowerCase();
+        return catOk && (!q || text.includes(q));
+      });
+    }
+
+    function renderMenu() {
+      const items = filteredMenu();
+
+      if (!items.length) {
+        const message = menu.length
+          ? "No menu items found."
+          : "No menu items available for this restaurant.";
+        menuGrid.innerHTML = `<p class="muted">${message}</p>`;
+        return;
+      }
+
+      menuGrid.innerHTML = items.map(item => `
+        <div class="menu-item">
+          <img
+            src="${item.imageUrl || item.image || "./assets/placeholder-food.jpg"}"
+            alt="${item.name || "item"}"
+            onerror="this.onerror=null;this.src='./assets/placeholder-food.jpg'"
+          >
+          <div class="menu-item-body">
+            <h3>${item.name || ""}</h3>
+            <div class="muted small">${item.category || "Other"}</div>
+            <div class="price-row">
+              <strong>${money(item.price)}</strong>
+              ${canUseOrdering ? `<button class="btn btn-dark add-btn" data-id="${item.id}">Add</button>` : ``}
+            </div>
+          </div>
+        </div>
+      `).join("");
+
+      menuGrid.querySelectorAll(".add-btn").forEach(btn => {
+        btn.onclick = () => addToCart(btn.dataset.id);
+      });
+    }
+
+    function addToCart(id) {
+      if (!canUseOrdering) return;
+      const item = menu.find(x => x.id === id);
+      if (!item) return;
+
+      const found = cart.find(x => x.id === id);
+
+      if (found) found.qty += 1;
+      else {
+        cart.push({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price || 0),
+          qty: 1
+        });
+      }
+
+      renderCart();
+    }
+
+    function updateQty(id, delta) {
+      const found = cart.find(x => x.id === id);
+      if (!found) return;
+
+      found.qty += delta;
+
+      if (found.qty <= 0) {
+        cart = cart.filter(x => x.id !== id);
+      }
+
+      renderCart();
+    }
+
+    function updateFloatingCartBar() {
+      if (!floatingCartBar || !floatingCartCount || !floatingCartTotal) return;
+
+      const count = cart.reduce((sum, item) => sum + item.qty, 0);
+      const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
+
+      floatingCartCount.textContent = `${count} ${count === 1 ? "item" : "items"}`;
+      floatingCartTotal.textContent = money(total);
+      floatingCartBar.classList.toggle("hidden", count === 0);
+
+      if (!count) {
+        document.body.classList.remove("cart-open");
+      }
+    }
+
+    function renderCart() {
+      updateFloatingCartBar();
+
+      if (!cart.length) {
+        cartList.innerHTML = `<p class="muted">Cart is empty.</p>`;
+      } else {
+        cartList.innerHTML = cart.map(item => `
+          <div style="border:1px solid #eee;border-radius:16px;padding:12px;margin-bottom:10px">
+            <strong>${item.name}</strong>
+            <div class="qty-row">
+              <span class="muted">${money(item.price)} each</span>
+              <div class="qty-box">
+                <button class="qty-btn" data-id="${item.id}" data-type="minus">-</button>
+                <strong>${item.qty}</strong>
+                <button class="qty-btn" data-id="${item.id}" data-type="plus">+</button>
+              </div>
+            </div>
+          </div>
+        `).join("");
+
+        cartList.querySelectorAll(".qty-btn").forEach(btn => {
+          btn.onclick = () => updateQty(
+            btn.dataset.id,
+            btn.dataset.type === "plus" ? 1 : -1
+          );
+        });
+      }
+
+      const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
+      const tax = itemsTotal * (taxPercent / 100);
+      const grand = itemsTotal + tax;
+
+      itemsTotalEl.textContent = money(itemsTotal);
+      taxTotalEl.textContent = money(tax);
+      grandTotalEl.textContent = money(grand);
+    }
+
+    clearCartBtn.onclick = () => {
+      cart = [];
+      renderCart();
+    };
+
+    function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const toRad = deg => deg * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    async function verifyCustomerLocationBeforeOrder() {
+      const restaurantLat = Number(restaurantLocationSettings.restaurantLat);
+      const restaurantLng = Number(restaurantLocationSettings.restaurantLng);
+      const allowedOrderRadiusMeters = Number(restaurantLocationSettings.allowedOrderRadiusMeters || 150);
+
+      if (!navigator.geolocation) {
+        alert("Location is not supported on this device.");
+        return { ok: false };
+      }
+
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          });
+        });
+
+        const customerLat = Number(pos.coords.latitude);
+        const customerLng = Number(pos.coords.longitude);
+        const customerLocationAccuracy = Number(pos.coords.accuracy);
+
+        // Request the customer's location for every order. Previously this
+        // check returned before calling getCurrentPosition when the restaurant
+        // coordinates were missing, so the browser never showed its prompt.
+        if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) {
+          alert("Restaurant location is not configured. Please contact restaurant staff.");
+          return { ok: false };
+        }
+
+        const customerDistanceMeters = Math.round(
+          calculateDistanceMeters(customerLat, customerLng, restaurantLat, restaurantLng)
+        );
+
+        if (customerDistanceMeters > allowedOrderRadiusMeters) {
+          alert("You are outside restaurant ordering range. Please order from inside the restaurant.");
+          return { ok: false };
+        }
+
+        return {
+          ok: true,
+          locationVerified: true,
+          customerLat,
+          customerLng,
+          customerLocationAccuracy,
+          customerDistanceMeters
+        };
+      } catch (error) {
+        console.error("Customer location error:", error);
+        const message = window.isSecureContext
+          ? "Location permission is required to place order. Please allow it and try again."
+          : "Location access requires this page to be opened on HTTPS or localhost.";
+        alert(message);
+        return { ok: false };
+      }
+    }
+
+    placeOrderBtn.onclick = async () => {
+      if (!canUseOrdering) {
+        alert("Ordering is not available for this restaurant plan. Please contact restaurant staff.");
+        return;
+      }
+      if (!customerName.value.trim() || !customerPhone.value.trim()) {
+        alert("Enter customer name and phone.");
+        return;
+      }
+
+      if (!cart.length) {
+        alert("Add items first.");
+        return;
+      }
+
+      placeOrderBtn.disabled = true;
+
+      try {
+        const locationCheck = await verifyCustomerLocationBeforeOrder();
+        if (!locationCheck.ok) return;
+
+        const { ok, ...locationProof } = locationCheck;
+        const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
+        const tax = itemsTotal * (taxPercent / 100);
+        const grandTotal = itemsTotal + tax;
+        const orderId = "ORD" + Date.now();
+
+        await addDoc(collection(db, "orders"), {
+          orderId,
+          restaurantId,
+          tableNo: table,
+          customerName: customerName.value.trim(),
+          customerPhone: customerPhone.value.trim(),
+          note: customerNote.value.trim(),
+          items: cart,
+          itemsTotal,
+          tax,
+          grandTotal,
+          status: "pending",
+          paymentStatus: "unpaid",
+          paymentMethod: "cash",
+          billClosed: false,
+          etaMinutes: 10,
+          etaStartedAt: null,
+          hasNewItems: false,
+          newlyAddedItems: [],
+          newlyAddedItemsText: "",
+          ...locationProof,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        orderSuccess.classList.remove("hidden");
+        orderSuccess.innerHTML = `
+          Order placed successfully.<br>
+          <strong>Order ID:</strong> ${orderId}<br>
+          <a href="./track.html?orderId=${encodeURIComponent(orderId)}">Track order</a>
+        `;
+
+        cart = [];
+        renderCart();
+        window.location.href = `./track.html?orderId=${encodeURIComponent(orderId)}`;
+      } catch (error) {
+        alert(error?.message || "Failed to place order. Please try again.");
+      } finally {
+        placeOrderBtn.disabled = false;
+      }
+    };
+
+    searchBox.addEventListener("input", renderMenu);
+    renderCart();
+    await loadMenu();
+  }
+</script>
+</body>
+</html>
