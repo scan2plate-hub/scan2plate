@@ -7,10 +7,16 @@ import { qs, toast } from "./common.js";
 
 const el = id => qs(`#${id}`);
 const restaurantId = el("restaurantId"), restaurantName = el("restaurantName"), ownerName = el("ownerName"), phone = el("phone"), email = el("email"), plan = el("plan"), amount = el("amount"), status = el("status"), expiryDate = el("expiryDate"), tableCount = el("tableCount"), address = el("address"), adminName = el("adminName"), adminEmail = el("adminEmail"), saveRestaurantBtn = el("saveRestaurantBtn"), msg = el("msg");
-const adminPassword = el("adminPassword"), restaurantType = el("restaurantType"), city = el("city"), state = el("state"), pincode = el("pincode"), billingType = el("billingType"), planStartDate = el("planStartDate"), upiId = el("upiId"), gstNumber = el("gstNumber"), taxPercent = el("taxPercent"), logoUrl = el("logoUrl"), kitchenWhatsApp = el("kitchenWhatsApp"), supportWhatsApp = el("supportWhatsApp"), restaurantLat = el("restaurantLat"), restaurantLng = el("restaurantLng"), allowedOrderRadius = el("allowedOrderRadius"), useCurrentLocationBtn = el("useCurrentLocationBtn"), locationStatus = el("locationStatus");
+const adminPassword = el("adminPassword"), restaurantType = el("restaurantType"), businessMode = el("businessMode"), city = el("city"), state = el("state"), pincode = el("pincode"), billingType = el("billingType"), planStartDate = el("planStartDate"), upiId = el("upiId"), gstNumber = el("gstNumber"), taxPercent = el("taxPercent"), logoUrl = el("logoUrl"), kitchenWhatsApp = el("kitchenWhatsApp"), supportWhatsApp = el("supportWhatsApp"), restaurantLat = el("restaurantLat"), restaurantLng = el("restaurantLng"), allowedOrderRadius = el("allowedOrderRadius"), useCurrentLocationBtn = el("useCurrentLocationBtn"), locationStatus = el("locationStatus");
 
 const session = JSON.parse(localStorage.getItem("scan2serve_super_admin") || "{}");
 if (session.role !== "super_admin") window.location.href = "./super-admin-login.html";
+// Keep legacy onboarding HTML intact while exposing the expanded business-type list.
+if (restaurantType) {
+  ["Street Vendor", "Cloud Kitchen", "Food Court", "Bakery", "Sweet Shop", "Dhaba", "Fast Food", "Juice Shop", "Tea Stall"].forEach(type => {
+    if (![...restaurantType.options].some(option => option.value === type)) restaurantType.add(new Option(type, type));
+  });
+}
 const safeDocIdFromEmail = value => String(value || "").trim().toLowerCase().replaceAll("@", "_").replaceAll(".", "_");
 const dateString = date => date.toISOString().slice(0, 10);
 const planAmounts = { basic: 1999, advance: 2999, enterprise: 4999 };
@@ -21,6 +27,13 @@ function defaultDates() { const now = new Date(); const end = new Date(now); end
 
 restaurantName?.addEventListener("input", () => { if (restaurantId && (!restaurantId.value || restaurantId.dataset.suggested === "true")) { restaurantId.value = suggestedId(restaurantName.value); restaurantId.dataset.suggested = "true"; } });
 restaurantId?.addEventListener("input", () => { restaurantId.dataset.suggested = "false"; });
+restaurantType?.addEventListener("change", () => {
+  const type = String(restaurantType.value || "").toLowerCase();
+  const tokenTypes = ["cafe", "street vendor", "food court", "bakery", "sweet shop", "dhaba", "fast food", "juice shop", "tea stall"];
+  if (businessMode) businessMode.value = tokenTypes.includes(type) ? "vendor" : "restaurant";
+  const tableWrap = el("tableCount")?.closest(".ar-field");
+  if (tableWrap) tableWrap.classList.toggle("hidden", ["street vendor", "cloud kitchen"].includes(type));
+});
 plan?.addEventListener("change", () => { if (amount) amount.value = String(planAmounts[plan.value] || 0); });
 useCurrentLocationBtn?.addEventListener("click", () => {
   if (!navigator.geolocation) return setMessage("Geolocation is not supported by this browser.", "error");
@@ -50,6 +63,12 @@ saveRestaurantBtn?.addEventListener("click", async () => {
     const locationLat = restaurantLat?.value === "" ? null : Number(restaurantLat?.value); const locationLng = restaurantLng?.value === "" ? null : Number(restaurantLng?.value);
     const settings = { restaurantName:name, phone:phoneValue, address:address?.value.trim() || "", upiId:upiId?.value.trim() || "", taxPercent:Number(taxPercent?.value || 0), logoUrl:logoUrl?.value.trim() || "", kitchenWhatsApp:kitchenWhatsApp?.value.trim() || "", gstNumber:gstNumber?.value.trim() || "", restaurantLat:Number.isFinite(locationLat) ? locationLat : null, restaurantLng:Number.isFinite(locationLng) ? locationLng : null, allowedOrderRadiusMeters:Number(allowedOrderRadius?.value || 150), updatedAt:serverTimestamp() };
     await setDoc(doc(db, "restaurants", id), { name, restaurantName:name, restaurantId:id, slug:name.toLowerCase().replace(/\s+/g,"-"), restaurantType:restaurantType?.value || "Restaurant", ownerName:owner, phone:phoneValue, email:adminEmailValue, adminEmail:adminEmailValue, adminUid:authUser.uid, address:address?.value.trim() || "", city:city?.value.trim() || "", state:state?.value.trim() || "", pincode:pincode?.value.trim() || "", plan:planValue, amount:amountValue, billingType:billingType?.value || "monthly", planStartDate:startValue, expiryDate:expiryValue, planExpiryDate:expiryValue, status:statusValue, upiId:settings.upiId, gstNumber:settings.gstNumber, taxPercent:settings.taxPercent, logoUrl:settings.logoUrl, kitchenWhatsApp:settings.kitchenWhatsApp, supportWhatsApp:supportWhatsApp?.value.trim() || "", restaurantLat:settings.restaurantLat, restaurantLng:settings.restaurantLng, allowedOrderRadiusMeters:settings.allowedOrderRadiusMeters, tableCount:tables, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+    const businessType = restaurantType?.value || "Restaurant";
+    const type = businessType.toLowerCase();
+    const orderMode = ["cafe", "street vendor", "food court", "bakery", "sweet shop", "dhaba", "fast food", "juice shop", "tea stall"].includes(type) ? "token" : type === "hotel" ? "room" : type === "cloud kitchen" ? "delivery" : "table";
+    const panelType = ({ cafe:"CafeToken", "street vendor":"VendorMobile", hotel:"HotelRoom", "cloud kitchen":"CloudKitchen", "food court":"FoodCourtToken" })[type] || "RestaurantAdmin";
+    await setDoc(doc(db, "restaurants", id), { businessType, orderMode, qrMode: orderMode === "table" ? "table" : orderMode === "room" ? "room" : "single", panelType, tokenEnabled:["token","room"].includes(orderMode), roomServiceEnabled:orderMode === "room", roomCount:orderMode === "room" ? tables : 0 }, { merge:true });
+    await setDoc(doc(db, "restaurants", id, "settings", "general"), { businessType, orderMode, qrMode: orderMode === "table" ? "table" : orderMode === "room" ? "room" : "single", panelType, tokenEnabled:["token","room"].includes(orderMode), roomServiceEnabled:orderMode === "room" }, { merge:true });
     await setDoc(doc(db, "restaurants", id, "settings", "general"), settings, { merge:true });
     await setDoc(doc(db, "restaurants", id, "users", safeDocIdFromEmail(adminEmailValue)), { uid:authUser.uid, name:adminName?.value.trim() || "Restaurant Admin", email:adminEmailValue, role:"admin", restaurantId:id, status:"active", createdAt:serverTimestamp(), updatedAt:serverTimestamp() }, { merge:true });
     for (let index=1; index<=tables; index++) { const tableNo=String(index).padStart(2,"0"); await setDoc(doc(db,"restaurants",id,"tables",tableNo), { tableNo, active:true, qrUrl:`${location.origin}/index.html?restaurantId=${encodeURIComponent(id)}&table=${encodeURIComponent(tableNo)}`, updatedAt:serverTimestamp() }, { merge:true }); }

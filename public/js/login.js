@@ -82,7 +82,9 @@ loginForm?.addEventListener("submit", async (e) => {
     if ((payload.role || "").toLowerCase() === "kitchen") {
       window.location.href = "./kitchen-dashboard.html";
     } else {
-      window.location.href = "./admin-dashboard.html";
+      const type = String(foundRestaurant.businessType || foundRestaurant.restaurantType || "Restaurant").toLowerCase();
+      const routes = { cafe:"./cafe-token-panel.html", "street vendor":"./vendor-panel.html", hotel:"./hotel-room-panel.html", "cloud kitchen":"./cloud-kitchen-panel.html", "food court":"./food-court-panel.html" };
+      window.location.href = routes[type] || "./admin-dashboard.html";
     }
   } catch (err) {
     console.error("LOGIN ERROR:", err);

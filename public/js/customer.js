@@ -9,7 +9,8 @@ import {
   serverTimestamp,
   query,
   where,
-  orderBy
+  orderBy,
+  runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   qs,
@@ -45,7 +46,8 @@ const whatsappConsent = qs('#whatsappConsent');
 const brandNameTop = qs('#brandNameTop');
 
 const restaurantId = getRestaurantIdFromUrlOrStorage();
-const tableNo = getParam('table') || '01';
+const tableParam = getParam('table');
+const tableNo = tableParam || '01';
 
 let settings = {
   restaurantName: 'Restaurant',
@@ -60,6 +62,10 @@ let settings = {
   restaurantLng: null,
   allowedOrderRadiusMeters: 150
 };
+
+// Missing businessMode intentionally remains Restaurant Mode for existing tenants.
+const isVendorMode = () => settings.orderMode === 'token' || settings.businessMode === 'vendor' || (settings.orderMode === 'hybrid' && !tableParam);
+const currentOrderMode = () => isVendorMode() ? 'token' : (settings.orderMode === 'hybrid' ? 'hybrid' : 'table');
 
 let menu = [];
 let activeCategory = 'All';
@@ -97,8 +103,26 @@ placeOrderBtn?.addEventListener('click', placeOrder);
 
 if (restaurantId) {
   await loadSettings();
-  await loadMenu();
-  renderCart();
+  if (await validateTableAvailability()) {
+    await loadMenu();
+    renderCart();
+  }
+}
+
+async function validateTableAvailability() {
+  if (isVendorMode()) return true;
+  try {
+    const tableSnap = await getDoc(doc(db, "restaurants", restaurantId, "tables", tableNo));
+    if (tableSnap.exists() && (tableSnap.data().disabled === true || tableSnap.data().active === false)) {
+      customerApp?.classList.add("hidden");
+      landingHero?.classList.remove("hidden");
+      if (landingHero) landingHero.innerHTML = `<div class="container"><div class="card" style="text-align:center;padding:32px"><h2>Table unavailable</h2><p class="muted">This table is currently disabled. Please contact restaurant staff.</p></div></div>`;
+      return false;
+    }
+  } catch (error) {
+    console.warn("Table availability check skipped:", error);
+  }
+  return true;
 }
 
 function getOrderSectionCard() {
@@ -152,6 +176,11 @@ async function loadSettings() {
 
   if (restaurantNameEl) {
     restaurantNameEl.textContent = settings.restaurantName || settings.name || 'Order from your table in seconds';
+  }
+
+  if (tableBadge) {
+    tableBadge.textContent = isVendorMode() ? 'Pickup Token Order' : `Table: ${tableNo}`;
+    tableBadge.classList.toggle('hidden', isVendorMode());
   }
 
   applyPlanMode();
@@ -348,6 +377,8 @@ function renderCart() {
 }
 
 async function findOpenOrder() {
+  // Each vendor checkout is a new counter token, never an update to a prior order.
+  if (isVendorMode()) return null;
   if (!customerPhone?.value.trim()) return null;
 
   const normalizedPhone = `+91${customerPhone.value.trim().replace(/\D/g, '').slice(0, 10)}`;
@@ -365,6 +396,24 @@ async function findOpenOrder() {
       );
     }) || null
   );
+}
+
+function localTokenDate() {
+  const now = new Date();
+  const tzOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
+}
+
+async function nextVendorToken() {
+  const tokenDate = localTokenDate();
+  const counterRef = doc(db, 'restaurants', restaurantId, 'counters', `vendor-token-${tokenDate}`);
+  const tokenNumber = await runTransaction(db, async transaction => {
+    const counter = await transaction.get(counterRef);
+    const next = Number(counter.exists() ? counter.data().lastTokenNumber : 100) + 1;
+    transaction.set(counterRef, { tokenDate, lastTokenNumber: next, updatedAt: serverTimestamp() }, { merge: true });
+    return next;
+  });
+  return { tokenDate, tokenNumber };
 }
 
 function mergeItems(existing = [], incoming = []) {
@@ -416,6 +465,10 @@ function getCustomerPosition() {
 }
 
 async function verifyCustomerLocation() {
+  // Default false preserves existing protection for restaurants that never saved this setting.
+  if (settings.locationProtectionEnabled === false) {
+    return { locationVerified: false, locationProtectionSkipped: true };
+  }
   const restaurantLat = Number(settings.restaurantLat);
   const restaurantLng = Number(settings.restaurantLng);
   const allowedOrderRadiusMeters = Number(settings.allowedOrderRadiusMeters || 150);
@@ -474,6 +527,7 @@ async function placeOrder() {
     const locationProof = await verifyCustomerLocation();
     const openOrder = await findOpenOrder();
     let orderId;
+    let createdTokenNumber = null;
     const noteVal = customerNote?.value.trim() || '';
     const etaMinutes = 10;
     const fullPhone = `+91${customerPhone.value.trim()}`;
@@ -524,11 +578,19 @@ async function placeOrder() {
       const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
       const grandTotal = itemsTotal + tax;
 
+      const vendorToken = isVendorMode() ? await nextVendorToken() : { tokenDate: null, tokenNumber: null };
+      createdTokenNumber = vendorToken.tokenNumber;
       const payload = {
         orderId,
         restaurantId,
         restaurantName: settings.restaurantName || 'Restaurant',
-        tableNo,
+        businessMode: isVendorMode() ? 'vendor' : 'restaurant',
+        orderMode: currentOrderMode(),
+        tableNo: isVendorMode() ? null : tableNo,
+        tableNumber: isVendorMode() ? null : tableNo,
+        tokenNumber: vendorToken.tokenNumber,
+        tokenNo: vendorToken.tokenNumber ? `T-${vendorToken.tokenNumber}` : null,
+        tokenDate: vendorToken.tokenDate,
         customerName: customerName.value.trim(),
         customerPhone: fullPhone,
         note: noteVal,
@@ -553,7 +615,8 @@ async function placeOrder() {
         restaurantId,
         restaurantName: settings.restaurantName || 'Restaurant',
         orderId,
-        tableNo,
+        tableNo: isVendorMode() ? null : tableNo,
+        tokenNumber: vendorToken.tokenNumber,
         customerName: customerName.value.trim(),
         customerPhone: whatsappConsent?.checked ? fullPhone : '',
         kitchenPhone: settings.kitchenWhatsApp || '',
@@ -569,7 +632,7 @@ async function placeOrder() {
       orderSuccess.classList.remove('hidden');
       orderSuccess.innerHTML = `
         Order saved successfully.<br>
-        <b>Order ID:</b> ${escapeHtml(orderId)}<br>
+        <b>${isVendorMode() ? 'Token' : 'Order ID'}:</b> ${escapeHtml(isVendorMode() ? `T-${createdTokenNumber}` : orderId)}<br>
         <a href="./track.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Track this order</a>
         |
         <a href="./bill.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Open bill</a>

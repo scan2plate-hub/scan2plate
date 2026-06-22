@@ -8,6 +8,25 @@
   --line:#e8e8ee;
   --danger:#e03131;
 }
+.app-logo{
+  width:42px;
+  height:42px;
+  object-fit:contain;
+  border-radius:12px;
+  background:#ffffff;
+  padding:4px;
+  box-shadow:0 6px 16px rgba(0,0,0,.08);
+  flex-shrink:0;
+}
+.app-logo-sm{
+  width:34px;
+  height:34px;
+  object-fit:contain;
+  border-radius:10px;
+  background:#ffffff;
+  padding:3px;
+  flex-shrink:0;
+}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;font-family:Inter,Arial,sans-serif;background:#fff;color:var(--black)}

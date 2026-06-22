@@ -69,50 +69,55 @@
       z-index:1000!important;
       transition:transform .25s cubic-bezier(.4,0,.2,1);
       overflow-y:auto;overflow-x:hidden;
-      border-right:1px solid rgba(255,255,255,.05);
+      background:linear-gradient(180deg,#151922 0%,#0c0e14 58%,#090a0f 100%)!important;
+      border-right:1px solid rgba(224,124,26,.24);
+      box-shadow:12px 0 34px rgba(5,7,12,.22);
     }
 
     .sidebar-header{
       padding:20px 18px 16px;
-      border-bottom:1px solid rgba(255,255,255,.05);
+      border-bottom:1px solid rgba(255,255,255,.11);
+      background:linear-gradient(135deg,rgba(224,124,26,.13),transparent 70%);
       display:flex;align-items:center;gap:12px;flex-shrink:0;
     }
 
     .sidebar-logo{
       width:40px;height:40px;border-radius:11px;overflow:hidden;
-      background:var(--brand);flex-shrink:0;
+      background:linear-gradient(135deg,#f4a13b,#c85e09);flex-shrink:0;
+      box-shadow:0 7px 18px rgba(224,124,26,.35);border:1px solid rgba(255,255,255,.18);
       display:flex;align-items:center;justify-content:center;
     }
     .sidebar-logo img{width:100%;height:100%;object-fit:cover}
 
-    .sb-name{font-size:17px;font-weight:800;color:#fff;letter-spacing:-.3px;line-height:1.2}
-    .sb-sub{font-size:10px;color:#3a3f52;text-transform:uppercase;letter-spacing:1.2px;margin-top:1px}
+    .sb-name{font-size:18px;font-weight:900;color:#fff;letter-spacing:-.45px;line-height:1.2}
+    .sb-sub{font-size:10px;color:#b8a18c;text-transform:uppercase;letter-spacing:1.3px;margin-top:2px;font-weight:800}
 
     .sidebar-nav{flex:1;padding:14px 12px;overflow-y:auto}
     .nav-group{margin-bottom:22px}
-    .nav-group-label{font-size:10px;font-weight:700;color:#2e3347;text-transform:uppercase;letter-spacing:1.2px;padding:0 10px;margin-bottom:5px}
+    .nav-group-label{font-size:10px;font-weight:900;color:#8f98aa;text-transform:uppercase;letter-spacing:1.4px;padding:0 10px;margin:15px 0 7px}
 
     .nav-item{
       display:flex!important;align-items:center;gap:10px;
-      padding:9px 12px;margin-bottom:2px;border-radius:var(--radius-sm);
-      color:#5a6070;cursor:pointer;font-size:13.5px;font-weight:600;
-      transition:var(--t);border:1px solid transparent;
+      padding:10px 12px;margin-bottom:4px;border-radius:10px;
+      color:#d0d6e1;cursor:pointer;font-size:13.5px;font-weight:750;
+      transition:background .18s ease,color .18s ease,transform .18s ease,border-color .18s ease;border:1px solid transparent;
     }
-    .nav-item:hover{background:rgba(255,255,255,.05);color:#b0b8cc}
+    .nav-item:hover{background:rgba(255,255,255,.09);color:#fff;transform:translateX(2px);border-color:rgba(255,255,255,.08)}
     .nav-item.active{
-      background:rgba(224,124,26,.12)!important;
-      color:var(--brand)!important;
-      border-color:rgba(224,124,26,.18)!important;
+      background:linear-gradient(90deg,rgba(224,124,26,.30),rgba(224,124,26,.10))!important;
+      color:#ffd2a1!important;
+      border-color:rgba(244,161,59,.48)!important;
+      box-shadow:inset 3px 0 0 #f5a13d,0 7px 17px rgba(0,0,0,.14);
     }
 
     .nav-icon{
       width:30px;height:30px;border-radius:8px;
       display:flex;align-items:center;justify-content:center;
       font-size:12px;flex-shrink:0;
-      background:rgba(255,255,255,.04);transition:var(--t);
+      background:rgba(255,255,255,.09);color:#cbd3e0;transition:var(--t);
     }
-    .nav-item.active .nav-icon{background:rgba(224,124,26,.15);color:var(--brand)}
-    .nav-item:hover .nav-icon{background:rgba(255,255,255,.07)}
+    .nav-item.active .nav-icon{background:#f5a13d;color:#241408;box-shadow:0 4px 12px rgba(224,124,26,.34)}
+    .nav-item:hover .nav-icon{background:rgba(255,255,255,.16);color:#fff}
 
     .nav-badge{
       margin-left:auto;background:var(--danger);color:#fff;
@@ -121,12 +126,12 @@
       padding:0 5px;
     }
 
-    .sidebar-footer{padding:14px;border-top:1px solid rgba(255,255,255,.05);flex-shrink:0}
+    .sidebar-footer{padding:14px;border-top:1px solid rgba(255,255,255,.11);flex-shrink:0;background:rgba(0,0,0,.14)}
 
     .user-card{
       display:flex;align-items:center;gap:10px;padding:10px 12px;
-      background:rgba(255,255,255,.04);border-radius:var(--radius);
-      border:1px solid rgba(255,255,255,.05);
+      background:rgba(255,255,255,.08);border-radius:var(--radius);
+      border:1px solid rgba(255,255,255,.12);
     }
     .user-avatar{
       width:34px;height:34px;border-radius:9px;flex-shrink:0;
@@ -134,8 +139,8 @@
       display:flex;align-items:center;justify-content:center;
       font-weight:800;font-size:13px;color:#fff;
     }
-    .user-name{font-size:13px;font-weight:700;color:#c0c8d8}
-    .user-role{font-size:11px;color:#3a4055}
+    .user-name{font-size:13px;font-weight:800;color:#fff}
+    .user-role{font-size:11px;color:#aeb8c8;font-weight:650}
 
     .logout-btn{
       margin-left:auto;width:30px;height:30px;border-radius:8px;
@@ -561,7 +566,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-logo">
-        <img src="logo.PNG" alt="Logo" onerror="this.style.display='none'">
+        <img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo" onerror="this.style.display='none'">
       </div>
       <div>
         <div class="sb-name">Scan2Plate</div>
@@ -974,11 +979,13 @@
             <div class="card-body" style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Item Name</th><th>Current Stock</th><th>Unit</th><th>Min Alert</th><th>Purchase Price</th><th>Supplier</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryRows"></tbody></table></div>
           </div>
         </div>
+        <div class="card" style="margin-top:18px;"><div class="card-header"><h3 class="card-title"><i class="fas fa-file-arrow-up"></i> Upload Purchase Bill</h3></div><div class="card-body"><p class="small muted" style="margin-top:0;">Upload JPG, PNG, JPEG, or PDF. Review and correct OCR results before anything is saved.</p><div class="form-row"><div class="form-group" style="flex:2;"><label class="form-label">Supplier bill file</label><input class="form-input" id="purchaseBillFile" type="file" accept="image/jpeg,image/png,application/pdf" /></div><div class="form-group"><label class="form-label">Supplier name</label><input class="form-input" id="purchaseSupplierName" placeholder="OCR can fill this" /></div></div><div id="purchaseBillPreview" class="hidden" style="margin:10px 0;"></div><div class="btn-group"><button class="btn btn-primary" id="scanPurchaseBillBtn" type="button">Scan Bill for Review</button><button class="btn btn-outline hidden" id="rescanPurchaseBillBtn" type="button">Re-scan / Upload Again</button></div><div id="purchaseReview" class="hidden" style="margin-top:18px;overflow-x:auto;"><div class="form-row"><div class="form-group"><label class="form-label">Bill Date</label><input class="form-input" id="purchaseBillDate" type="date" /></div><div class="form-group"><label class="form-label">Grand Total</label><input class="form-input" id="purchaseGrandTotal" type="number" min="0" step="any" /></div></div><table class="data-table"><thead><tr><th>Item name</th><th>Qty</th><th>Unit</th><th>Unit price</th><th>Total</th><th>Category</th></tr></thead><tbody id="purchaseReviewRows"></tbody></table><div class="btn-group" style="margin-top:14px;"><button class="btn btn-success" id="savePurchaseBillBtn" type="button">Save to Inventory</button></div></div></div></div>
         <div class="grid-2" style="margin-top:18px;">
           <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-right-left"></i> Stock Adjustment</h3></div><div class="card-body"><div class="form-row"><div class="form-group"><label class="form-label">Item</label><select class="form-select" id="adjustmentItem"></select></div><div class="form-group"><label class="form-label">Type</label><select class="form-select" id="adjustmentType"><option value="stock_in">Stock In</option><option value="stock_out">Stock Out</option></select></div></div><div class="form-row"><div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="adjustmentQuantity" type="number" min="0" step="any" /></div><div class="form-group"><label class="form-label">Reason</label><input class="form-input" id="adjustmentReason" placeholder="Purchase, wastage..." /></div></div><button class="btn btn-primary" id="saveAdjustmentBtn" type="button">Save adjustment</button></div></div>
           <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-chart-bar"></i> Inventory Report</h3></div><div class="card-body"><div id="inventoryReport" class="stats-grid" style="grid-template-columns:repeat(3,1fr);"></div><h4 style="margin:18px 0 8px;">Most used ingredients</h4><div id="inventoryMostUsed" class="small muted">No completed-order usage yet.</div></div></div>
         </div>
         <div class="card" style="margin-top:18px;"><div class="card-header"><h3 class="card-title"><i class="fas fa-clock-rotate-left"></i> Stock In / Stock Out History</h3></div><div class="card-body" style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Time</th><th>Item</th><th>Type</th><th>Quantity</th><th>Reason</th><th>By</th></tr></thead><tbody id="inventoryHistoryRows"></tbody></table></div></div>
+        <div class="card" style="margin-top:18px;"><div class="card-header"><h3 class="card-title"><i class="fas fa-receipt"></i> Purchase History</h3></div><div class="card-body" style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Upload date</th><th>Supplier</th><th>Bill date</th><th>Grand total</th><th>Status</th></tr></thead><tbody id="purchaseHistoryRows"><tr><td colspan="5" class="muted">No purchase bills yet.</td></tr></tbody></table></div></div>
       </section>
 
       <!-- SETTINGS -->
@@ -988,6 +995,8 @@
             <div class="card-header"><h3 class="card-title"><i class="fas fa-store"></i> Restaurant Info</h3></div>
             <div class="card-body">
               <div class="form-group"><label class="form-label">Restaurant Name</label><input class="form-input" id="restaurantField" placeholder="Your Restaurant Name" /></div>
+              <div class="form-group"><label class="form-label">Business Type</label><select class="form-input" id="businessModeField"><option value="restaurant">Restaurant / Café with Tables</option><option value="vendor">Street Vendor / Counter Pickup</option></select><div style="font-size:11px;color:#6b7280;margin-top:4px;">Vendor mode uses one QR and daily pickup tokens.</div></div>
+              <div class="form-group"><label class="form-label">Order Mode</label><select class="form-input" id="orderModeField"><option value="table">Table Service Mode</option><option value="token">Token Mode</option><option value="hybrid">Hybrid Mode</option></select><div style="font-size:11px;color:#6b7280;margin-top:4px;">Missing values remain Table Service Mode for existing restaurants.</div></div>
               <div class="form-row">
                 <div class="form-group"><label class="form-label">Phone Number</label><input class="form-input" id="phoneField" placeholder="+91..." /></div>
                 <div class="form-group"><label class="form-label">Tax %</label><input class="form-input" id="taxField" type="number" placeholder="5" /></div>
@@ -1073,6 +1082,8 @@
 
       <!-- TABLES -->
       <section class="content-section" id="section-tables">
+
+        <div class="card" style="margin-bottom:18px;"><div class="card-body" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;"><div class="form-group" style="margin:0;min-width:170px;"><label class="form-label">Add More Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add More Tables</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button">Download All Table QRs</button></div></div>
 
         <!-- Summary stats -->
         <div class="stats-grid" id="tableSummary" style="grid-template-columns:repeat(2,1fr);max-width:500px;margin-bottom:20px;"></div>
@@ -1204,10 +1215,11 @@
           </div>
           <div id="billPaymentMethod" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding:6px 0;font-size:12px;border-top:1px dashed #ccc;"></div>
           <div id="billUpiQrSection" style="display:none;text-align:center;margin-top:10px;padding:10px 6px 6px;border-top:1px dashed #ccc;">
-            <div style="font-size:10px;font-weight:800;margin-bottom:6px;letter-spacing:.8px;">📱 SCAN TO PAY — AMOUNT AUTO-FILLED</div>
+            <div style="font-size:13px;font-weight:900;margin-bottom:6px;letter-spacing:.8px;">Scan &amp; Pay</div>
             <img id="billUpiQrImg" alt="UPI QR" style="width:168px;height:168px;border-radius:8px;border:3px solid #111;display:block;margin:0 auto 6px;cursor:pointer;" />
             <div style="font-size:10px;color:#555;">UPI ID: <strong id="billQrUpiId"></strong></div>
-            <div style="font-size:11px;font-weight:800;color:#0ea572;margin-top:3px;">Amount: <span id="billQrAmount"></span></div>
+            <div style="font-size:11px;font-weight:800;color:#0ea572;margin-top:3px;">Amount: <span id="billQrAmount"></span></div><div style="font-size:10px;font-weight:800;margin-top:3px;">Restaurant: <span id="billQrRestaurant"></span></div>
+            <div id="billUpiMissing" style="display:none;font-size:12px;font-weight:800;color:#555">UPI Payment Not Configured</div>
             <div style="font-size:9px;color:#888;margin-top:2px;">Open any UPI app and scan</div>
           </div>
           <div class="kot-footer" style="margin-top:10px;"><div>Thank you for dining with us!</div><div>Visit Again ✨</div></div>
@@ -1246,6 +1258,7 @@
   </style>
 
   <script type="module" src="./js/admin.js"></script>
+  <script type="module" src="./js/admin-modules.js"></script>
 
   <script>
     document.addEventListener("DOMContentLoaded", function () {
@@ -1295,7 +1308,7 @@
           const t = this.getAttribute("data-action");
           if (t === "new-order")  switchSection("billing");
           if (t === "print-kot")  document.getElementById("kotModal")?.classList.add("active");
-          if (t === "print-bill") document.getElementById("billModal")?.classList.add("active");
+          if (t === "print-bill") window.openOrderBillPicker?.();
           if (t === "reports")    switchSection("reports");
           if (t === "settings")   switchSection("settings");
         });

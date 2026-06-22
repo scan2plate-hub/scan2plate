@@ -232,7 +232,7 @@ function printKOT(orderData, items, label = "") {
   ${label ? `<div class="label">${escapeHtml(label)}</div>` : ""}
   <table class="meta">
     <tr><td>KOT #</td><td><strong>${escapeHtml(orderData.orderId || "")}</strong></td></tr>
-    <tr><td>Table</td><td><strong>${escapeHtml(orderData.tableNo || "-")}</strong></td></tr>
+    <tr><td>${orderData.businessMode === "vendor" || orderData.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(orderData.businessMode === "vendor" || orderData.orderMode === "token" ? (orderData.tokenNo || `T-${orderData.tokenNumber || "-"}`) : orderData.tableNo || "-")}</strong></td></tr>
     <tr><td>Customer</td><td>${escapeHtml(orderData.customerName || "Walk-in")}</td></tr>
     <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
     <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
@@ -350,12 +350,13 @@ function cardHtml(d) {
   return `
     <div class="card" style="margin-bottom:12px;padding:14px">
       <strong>${escapeHtml(x.orderId || d.id)}</strong><br>
-      ${escapeHtml(x.customerName || "Guest")} • Table ${escapeHtml(x.tableNo || "--")}<br>
+      ${escapeHtml(x.customerName || "Guest")} • ${x.businessMode === "vendor" ? `Token #${escapeHtml(x.tokenNumber || "--")}` : `Table ${escapeHtml(x.tableNo || "--")}`}<br>
       <span class="muted small">${tsToDate(x.createdAt).toLocaleString()}</span><br>
       <span>${items}</span><br>
       <strong>${fmtCurrency(x.grandTotal || 0)}</strong><br>
       <span>Phone: ${escapeHtml(x.customerPhone || "-")}</span><br>
-      <span>Status: ${escapeHtml(x.status || "pending")}</span><br>
+      <span>Status: ${escapeHtml(x.businessMode === "vendor" && String(x.status || "").toLowerCase() === "pending" ? "New" : x.status || "pending")}</span><br>
+      ${x.note ? `<span>Note: ${escapeHtml(x.note)}</span><br>` : ""}
 
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
         <span>ETA: ${eta} min</span>

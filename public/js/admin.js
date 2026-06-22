@@ -190,6 +190,10 @@ const kotHistoryDateEl = document.getElementById("kotHistoryDate");
 
 const tablesGridEl = document.getElementById("tablesGrid");
 const tableSummaryEl = document.getElementById("tableSummary");
+const addTablesCountEl = document.getElementById("addTablesCount");
+const addTablesBtn = document.getElementById("addTablesBtn");
+const downloadAllTableQrsBtn = document.getElementById("downloadAllTableQrsBtn");
+let managedTables = [];
 
 const logoutBtn = document.getElementById("logoutBtn");
 const refreshBtn = document.getElementById("refreshBtn");
@@ -232,8 +236,21 @@ const inventoryHistoryRowsEl = document.getElementById("inventoryHistoryRows");
 const inventoryReportEl = document.getElementById("inventoryReport");
 const inventoryMostUsedEl = document.getElementById("inventoryMostUsed");
 const lowStockAlertEl = document.getElementById("lowStockAlert");
+const purchaseBillFileEl = document.getElementById("purchaseBillFile");
+const purchaseSupplierNameEl = document.getElementById("purchaseSupplierName");
+const purchaseBillPreviewEl = document.getElementById("purchaseBillPreview");
+const scanPurchaseBillBtn = document.getElementById("scanPurchaseBillBtn");
+const rescanPurchaseBillBtn = document.getElementById("rescanPurchaseBillBtn");
+const purchaseReviewEl = document.getElementById("purchaseReview");
+const purchaseReviewRowsEl = document.getElementById("purchaseReviewRows");
+const purchaseBillDateEl = document.getElementById("purchaseBillDate");
+const purchaseGrandTotalEl = document.getElementById("purchaseGrandTotal");
+const savePurchaseBillBtn = document.getElementById("savePurchaseBillBtn");
+const purchaseHistoryRowsEl = document.getElementById("purchaseHistoryRows");
 
 const restaurantFieldEl = document.getElementById("restaurantField");
+const businessModeFieldEl = document.getElementById("businessModeField");
+const orderModeFieldEl = document.getElementById("orderModeField");
 const upiFieldEl = document.getElementById("upiField");
 const taxFieldEl = document.getElementById("taxField");
 const phoneFieldEl = document.getElementById("phoneField");
@@ -298,6 +315,8 @@ const billUpiQrSectionEl = document.getElementById("billUpiQrSection");
 const billUpiQrImgEl = document.getElementById("billUpiQrImg");
 const billQrUpiIdEl = document.getElementById("billQrUpiId");
 const billQrAmountEl = document.getElementById("billQrAmount");
+const billQrRestaurantEl = document.getElementById("billQrRestaurant");
+const billUpiMissingEl = document.getElementById("billUpiMissing");
 
 const userNameEl = document.getElementById("userName");
 const userRoleEl = document.getElementById("userRole");
@@ -313,6 +332,8 @@ let allOrders = [];
 let manualCart = [];
 let allInventoryItems = [];
 let inventoryLogs = [];
+let purchaseBills = [];
+let reviewedPurchaseFileUrl = "";
 
 let editingOrderDocId = null;
 let editingOrderPublicId = null;
@@ -496,7 +517,9 @@ function setNotice(message = "", type = "info") {
 
 function getTableOptions() {
   const seen = new Set();
-  for (let i = 1; i <= 20; i++) seen.add(String(i).padStart(2, "0"));
+  const count = Math.max(1, Number(restaurantSettings.tableCount || 20));
+  for (let i = 1; i <= count; i++) seen.add(String(i).padStart(2, "0"));
+  managedTables.filter(table => table.disabled !== true).forEach(table => seen.add(String(table.tableNo || table.id).padStart(2,"0")));
 
   allOrders.forEach(order => {
     const t = String(order.tableNo || "").trim();
@@ -538,6 +561,8 @@ let adminAlertPlaying = false;
 let adminAlertType = "";
 let adminFirstRealtimeLoad = true;
 const adminSeenRealtimeKeys = new Map();
+const adminMutedOrderIds = new Set(JSON.parse(localStorage.getItem("scan2plate_muted_order_alerts") || "[]"));
+let adminPendingAlarmIds = new Set();
 
 async function unlockAdminAudio() {
   if (adminAudioUnlocked) return;
@@ -604,12 +629,16 @@ function ensureAdminAlertBanner() {
         font-size:16px;
         font-weight:800;
         cursor:pointer;
-      ">Dismiss Alert</button>
+      ">Mute Pending Alarm</button>
     </div>
   `;
 
   document.body.appendChild(banner);
-  document.getElementById("dismissAdminAlertBtn")?.addEventListener("click", stopAdminAlert);
+  document.getElementById("dismissAdminAlertBtn")?.addEventListener("click", () => {
+    adminPendingAlarmIds.forEach(id => adminMutedOrderIds.add(id));
+    localStorage.setItem("scan2plate_muted_order_alerts", JSON.stringify([...adminMutedOrderIds]));
+    stopAdminAlert();
+  });
 
   return banner;
 }
@@ -629,7 +658,7 @@ function showAdminAlertBanner(type = "new_order") {
   } else {
     if (emoji) emoji.textContent = "🔔";
     if (title) title.textContent = "New Order Arrived!";
-    if (text) text.textContent = "A new customer order is waiting in Live Orders.";
+    if (text) text.textContent = `${adminPendingAlarmIds.size} New Order${adminPendingAlarmIds.size === 1 ? "" : "s"} Pending — accept, reject, or mute the alarm.`;
   }
 
   if (banner) banner.style.display = "flex";
@@ -674,9 +703,7 @@ function stopAdminAlert(resetTitle = true) {
   if (resetTitle) document.title = "Admin Dashboard";
 }
 
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") stopAdminAlert();
-});
+// Do not stop a new-order alarm merely because the tab loses focus.
 
 function buildRealtimeKey(order) {
   return JSON.stringify({
@@ -720,8 +747,12 @@ function handleRealtimeAdminAlerts(orders) {
   });
 
   adminFirstRealtimeLoad = false;
-
-  if (shouldPlay) startAdminAlert(type);
+  adminPendingAlarmIds = new Set(orders.filter(order => String(order.status || "").toLowerCase() === "pending").map(order => order.id));
+  [...adminMutedOrderIds].forEach(id => { if (!adminPendingAlarmIds.has(id)) adminMutedOrderIds.delete(id); });
+  localStorage.setItem("scan2plate_muted_order_alerts", JSON.stringify([...adminMutedOrderIds]));
+  const unmutedPending = [...adminPendingAlarmIds].filter(id => !adminMutedOrderIds.has(id));
+  if (unmutedPending.length) startAdminAlert(type);
+  else if (adminAlertPlaying) stopAdminAlert();
 }
 
 /* =========================================================
@@ -813,9 +844,13 @@ function showPaymentMethodModal(orderId) {
 async function loadSettings() {
   try {
     const snap = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
-    restaurantSettings = snap.exists() ? snap.data() : {};
+    const restaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
+    // Root fallback keeps legacy restaurants in Restaurant Mode and supports mode set by Super Admin.
+    restaurantSettings = { ...(restaurantSnap.exists() ? restaurantSnap.data() : {}), ...(snap.exists() ? snap.data() : {}) };
 
     if (restaurantFieldEl) restaurantFieldEl.value = restaurantSettings.restaurantName || "";
+    if (businessModeFieldEl) businessModeFieldEl.value = restaurantSettings.businessMode === "vendor" ? "vendor" : "restaurant";
+    if (orderModeFieldEl) orderModeFieldEl.value = restaurantSettings.orderMode || (restaurantSettings.businessMode === "vendor" ? "token" : "table");
     if (upiFieldEl) upiFieldEl.value = restaurantSettings.upiId || "";
     if (taxFieldEl) taxFieldEl.value = restaurantSettings.taxPercent ?? "";
     if (phoneFieldEl) phoneFieldEl.value = restaurantSettings.phone || "";
@@ -827,9 +862,17 @@ async function loadSettings() {
     if (restaurantLatFieldEl) restaurantLatFieldEl.value = restaurantSettings.restaurantLat ?? "";
     if (restaurantLngFieldEl) restaurantLngFieldEl.value = restaurantSettings.restaurantLng ?? "";
     if (allowedOrderRadiusFieldEl) allowedOrderRadiusFieldEl.value = restaurantSettings.allowedOrderRadiusMeters ?? 150;
+    ensureTableCountControl();
+    const tableCountField = document.getElementById("tableCountField");
+    if (tableCountField) tableCountField.value = restaurantSettings.tableCount ?? 20;
+    ensureLocationProtectionControl();
+    const locationToggle = document.getElementById("locationProtectionEnabled");
+    if (locationToggle) locationToggle.checked = restaurantSettings.locationProtectionEnabled !== false;
   } catch (err) {
     console.error("loadSettings error", err);
   }
+  ensureOcrStatusControl();
+  testOcrConnection();
 }
 
 async function saveSettings() {
@@ -851,6 +894,8 @@ async function saveSettings() {
 
     const payload = {
       restaurantName: restaurantFieldEl?.value.trim() || "",
+      businessMode: businessModeFieldEl?.value === "vendor" ? "vendor" : "restaurant",
+      orderMode: ["table", "token", "hybrid"].includes(orderModeFieldEl?.value) ? orderModeFieldEl.value : "table",
       upiId: upiFieldEl?.value.trim() || "",
       taxPercent: Number(taxFieldEl?.value || 0),
       phone: phoneFieldEl?.value.trim() || "",
@@ -862,16 +907,33 @@ async function saveSettings() {
       restaurantLat,
       restaurantLng,
       allowedOrderRadiusMeters,
+      locationProtectionEnabled: document.getElementById("locationProtectionEnabled")?.checked !== false,
+      tableCount: Math.max(1, Number(document.getElementById("tableCountField")?.value || restaurantSettings.tableCount || 20)),
       updatedAt: serverTimestamp()
     };
 
     await setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true });
+    await setDoc(doc(db, "restaurants", restaurantId), { businessMode: payload.businessMode, orderMode: payload.orderMode, tableCount: payload.tableCount, updatedAt: serverTimestamp() }, { merge: true });
     restaurantSettings = { ...restaurantSettings, ...payload };
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
     alert("Failed to save settings: " + err.message);
   }
+}
+
+function ensureLocationProtectionControl() {
+  if (document.getElementById("locationProtectionEnabled") || !allowedOrderRadiusFieldEl) return;
+  const wrap = document.createElement("div"); wrap.className = "form-group";
+  wrap.innerHTML = `<label class="form-label" style="display:flex;align-items:center;gap:9px;"><input id="locationProtectionEnabled" type="checkbox" checked /> Enable Location Protection</label><div style="font-size:11px;color:#6b7280;margin-top:5px;">When disabled, customers can order without GPS or radius checks.</div>`;
+  allowedOrderRadiusFieldEl.closest(".form-group")?.insertAdjacentElement("afterend", wrap);
+}
+
+function ensureTableCountControl() {
+  if (document.getElementById("tableCountField") || !allowedOrderRadiusFieldEl) return;
+  const wrap = document.createElement("div"); wrap.className = "form-group";
+  wrap.innerHTML = `<label class="form-label">Table Count</label><input id="tableCountField" class="form-input" type="number" min="1" step="1" /><div style="font-size:11px;color:#6b7280;margin-top:5px;">Use Tables → Add More Tables to safely create additional QR-enabled tables.</div>`;
+  allowedOrderRadiusFieldEl.closest(".form-group")?.insertAdjacentElement("afterend", wrap);
 }
 
 function useAdminCurrentLocation() {
@@ -1316,6 +1378,119 @@ function renderInventoryHistory() {
   inventoryHistoryRowsEl.innerHTML = inventoryLogs.length ? inventoryLogs.slice(0, 50).map(log => `<tr><td>${escapeHtml(formatDateTime(log.createdAt))}</td><td>${escapeHtml(log.itemName)}</td><td><span class="status-badge ${log.type === "stock_in" ? "success" : "warning"}">${log.type === "stock_in" ? "Stock In" : "Stock Out"}</span></td><td>${Number(log.quantity || 0)} ${escapeHtml(log.unit || "")}</td><td>${escapeHtml(log.reason || "-")}</td><td>${escapeHtml(log.createdBy || "-")}</td></tr>`).join("") : `<tr><td colspan="6" class="muted">No stock adjustments yet.</td></tr>`;
 }
 
+function purchaseBackendUrl() {
+  // Normal deployments proxy /api on the same host. API_BASE_URL is an optional deploy-time override.
+  const configured = window.API_BASE_URL || window.__API_BASE_URL__ || restaurantSettings.apiBaseUrl || "";
+  return String(configured || restaurantSettings.backendUrl || window.location.origin || "").replace(/\/+$/, "");
+}
+
+function showPurchaseOcrMessage(message = "", tone = "error") {
+  let messageEl = document.getElementById("purchaseOcrMessage");
+  if (!messageEl && scanPurchaseBillBtn) {
+    messageEl = document.createElement("div"); messageEl.id = "purchaseOcrMessage"; messageEl.setAttribute("role", "status");
+    scanPurchaseBillBtn.parentElement?.insertAdjacentElement("afterend", messageEl);
+  }
+  if (!messageEl) return;
+  messageEl.textContent = message; messageEl.style.display = message ? "block" : "none";
+  messageEl.style.cssText += tone === "success" ? ";margin-top:12px;padding:10px 12px;border-radius:9px;font-size:13px;background:#ecfdf3;color:#18794e;" : ";margin-top:12px;padding:10px 12px;border-radius:9px;font-size:13px;background:#fff1f0;color:#b43731;";
+}
+
+function ensureOcrStatusControl() {
+  if (document.getElementById("testOcrConnectionBtn") || !backendUrlFieldEl) return;
+  const wrap = document.createElement("div"); wrap.className = "form-group";
+  wrap.innerHTML = `<label class="form-label">Inventory OCR Service</label><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><button class="btn btn-outline" id="testOcrConnectionBtn" type="button">Test OCR Connection</button><span id="ocrServiceStatus" class="small muted">Checking…</span></div><div class="small muted" style="margin-top:5px;">Uses this deployment's API automatically. Backend URL is only an optional override.</div>`;
+  backendUrlFieldEl.closest(".form-group")?.insertAdjacentElement("afterend", wrap);
+  document.getElementById("testOcrConnectionBtn")?.addEventListener("click", testOcrConnection);
+}
+
+async function testOcrConnection() {
+  const statusEl = document.getElementById("ocrServiceStatus"); const button = document.getElementById("testOcrConnectionBtn");
+  if (statusEl) statusEl.textContent = "Checking…"; if (button) button.disabled = true;
+  try {
+    const response = await fetch(`${purchaseBackendUrl()}/health`);
+    const data = await response.json();
+    if (!response.ok || data.inventoryBackendReady !== true) throw new Error("not configured");
+    if (statusEl) { statusEl.textContent = "Connected"; statusEl.style.color = "#18794e"; }
+  } catch {
+    if (statusEl) { statusEl.textContent = "Disconnected"; statusEl.style.color = "#b43731"; }
+  } finally { if (button) button.disabled = false; }
+}
+
+async function purchaseAuthHeaders() {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Please sign in again before uploading a purchase bill.");
+  return { Authorization: `Bearer ${token}` };
+}
+
+function renderPurchaseReview(items = []) {
+  if (!purchaseReviewRowsEl) return;
+  purchaseReviewRowsEl.innerHTML = items.length ? items.map(item => `<tr>
+    <td><input class="form-input purchase-item-name" value="${escapeHtml(item.itemName || "")}" /></td>
+    <td><input class="form-input purchase-qty" type="number" min="0" step="any" value="${Number(item.quantity || 0)}" /></td>
+    <td><select class="form-select purchase-unit"><option value="kg" ${item.unit === "kg" ? "selected" : ""}>kg</option><option value="gm" ${item.unit === "gm" ? "selected" : ""}>gm</option><option value="litre" ${item.unit === "litre" ? "selected" : ""}>litre</option><option value="ml" ${item.unit === "ml" ? "selected" : ""}>ml</option><option value="pcs" ${item.unit === "pcs" ? "selected" : ""}>pcs</option><option value="packet" ${item.unit === "packet" ? "selected" : ""}>packet</option><option value="box" ${item.unit === "box" ? "selected" : ""}>box</option></select></td>
+    <td><input class="form-input purchase-unit-price" type="number" min="0" step="any" value="${Number(item.unitPrice || 0)}" /></td>
+    <td><input class="form-input purchase-total-price" type="number" min="0" step="any" value="${Number(item.totalPrice || 0)}" /></td>
+    <td><input class="form-input purchase-category" value="${escapeHtml(item.category || "")}" /></td>
+  </tr>`).join("") : `<tr><td colspan="6" class="muted">No item lines were recognised. Add a clearer bill or enter items manually in Stock List.</td></tr>`;
+}
+
+function reviewedPurchaseItems() {
+  return [...(purchaseReviewRowsEl?.querySelectorAll("tr") || [])].map(row => ({
+    itemName: row.querySelector(".purchase-item-name")?.value.trim() || "",
+    quantity: Number(row.querySelector(".purchase-qty")?.value || 0),
+    unit: row.querySelector(".purchase-unit")?.value || "pcs",
+    unitPrice: Number(row.querySelector(".purchase-unit-price")?.value || 0),
+    totalPrice: Number(row.querySelector(".purchase-total-price")?.value || 0),
+    category: row.querySelector(".purchase-category")?.value.trim() || ""
+  })).filter(item => item.itemName && item.quantity > 0);
+}
+
+function previewPurchaseFile() {
+  const file = purchaseBillFileEl?.files?.[0];
+  if (!purchaseBillPreviewEl) return;
+  if (!file) { purchaseBillPreviewEl.classList.add("hidden"); purchaseBillPreviewEl.innerHTML = ""; return; }
+  purchaseBillPreviewEl.classList.remove("hidden");
+  const url = URL.createObjectURL(file);
+  purchaseBillPreviewEl.innerHTML = file.type === "application/pdf" ? `<a class="btn btn-outline" href="${url}" target="_blank" rel="noopener">Preview PDF: ${escapeHtml(file.name)}</a>` : `<img src="${url}" alt="Purchase bill preview" style="max-width:320px;max-height:260px;border:1px solid var(--border);border-radius:10px;" />`;
+}
+
+async function scanPurchaseBill() {
+  const file = purchaseBillFileEl?.files?.[0];
+  if (!file) return alert("Choose a JPG, PNG, JPEG, or PDF purchase bill first.");
+  const backendUrl = purchaseBackendUrl();
+  showPurchaseOcrMessage("");
+  scanPurchaseBillBtn.disabled = true; scanPurchaseBillBtn.textContent = "Scanning…";
+  try {
+    const form = new FormData(); form.append("bill", file); form.append("restaurantId", restaurantId);
+    const response = await fetch(`${backendUrl}/api/inventory/upload-bill`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
+    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Inventory OCR service is not configured.");
+    reviewedPurchaseFileUrl = data.file?.fileUrl || "";
+    if (purchaseSupplierNameEl && !purchaseSupplierNameEl.value.trim()) purchaseSupplierNameEl.value = data.supplierName || "";
+    if (purchaseBillDateEl) purchaseBillDateEl.value = /^\d{4}-\d{2}-\d{2}$/.test(data.billDate || "") ? data.billDate : "";
+    if (purchaseGrandTotalEl) purchaseGrandTotalEl.value = data.grandTotal || "";
+    renderPurchaseReview(data.items || []); purchaseReviewEl?.classList.remove("hidden"); rescanPurchaseBillBtn?.classList.remove("hidden");
+    if (!data.ocrConfigured) showPurchaseOcrMessage("Inventory OCR service is not configured.");
+  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" ? "Inventory OCR service is not configured." : (error.message || "Inventory OCR service is not configured.")); }
+  finally { scanPurchaseBillBtn.disabled = false; scanPurchaseBillBtn.textContent = "Scan Bill for Review"; }
+}
+
+async function saveReviewedPurchase() {
+  const items = reviewedPurchaseItems(); if (!items.length) return alert("Review the bill and provide at least one valid item.");
+  const backendUrl = purchaseBackendUrl(); showPurchaseOcrMessage("");
+  savePurchaseBillBtn.disabled = true; savePurchaseBillBtn.textContent = "Saving…";
+  try {
+    const response = await fetch(`${backendUrl}/api/inventory/save-purchase`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", grandTotal: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
+    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Inventory OCR service is not configured.");
+    alert("Purchase saved and stock updated."); purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl.value = ""; reviewedPurchaseFileUrl = ""; previewPurchaseFile();
+  } catch (error) { showPurchaseOcrMessage(error.message || "Inventory OCR service is not configured."); }
+  finally { savePurchaseBillBtn.disabled = false; savePurchaseBillBtn.textContent = "Save to Inventory"; }
+}
+
+function renderPurchaseHistory() {
+  if (!purchaseHistoryRowsEl) return;
+  purchaseHistoryRowsEl.innerHTML = purchaseBills.length ? purchaseBills.map(bill => `<tr><td>${escapeHtml(formatDateTime(bill.uploadedAt))}</td><td>${escapeHtml(bill.supplierName || "-")}</td><td>${escapeHtml(bill.billDate || "-")}</td><td>${money(bill.grandTotal || 0)}</td><td><span class="status-badge success">${escapeHtml(bill.status || "saved")}</span></td></tr>`).join("") : `<tr><td colspan="5" class="muted">No purchase bills yet.</td></tr>`;
+}
+
 async function saveInventoryAdjustment() {
   const inventoryItemId = adjustmentItemEl?.value || "";
   const quantity = Number(adjustmentQuantityEl?.value);
@@ -1388,6 +1563,10 @@ function startInventoryListeners() {
     renderInventoryHistory();
     renderInventoryReports(allInventoryItems.filter(inventoryStatus));
   });
+  onSnapshot(collection(db, "restaurants", restaurantId, "purchase_bills"), snap => {
+    purchaseBills = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.uploadedAt?.seconds || 0) - (a.uploadedAt?.seconds || 0));
+    renderPurchaseHistory();
+  });
 }
 
 /* =========================================================
@@ -1412,6 +1591,7 @@ function renderTablesSection() {
   });
 
   const tableOptions = getTableOptions();
+  const disabledTableNos = new Set(managedTables.filter(table => table.disabled === true || table.active === false).map(table => String(table.tableNo || table.id).padStart(2, "0")));
 
   const openCount = [...latestOrderByTable.values()].filter(order => {
     if (!order) return false;
@@ -1420,7 +1600,8 @@ function renderTablesSection() {
     return payment !== "paid" && !["served", "completed", "cancelled", "rejected"].includes(status) && order.billClosed !== true;
   }).length;
 
-  const closedCount = tableOptions.length - openCount;
+  const disabledCount = disabledTableNos.size;
+  const closedCount = Math.max(0, tableOptions.length - openCount - disabledCount);
 
   tableSummaryEl.innerHTML = `
     <div class="stat-card">
@@ -1431,9 +1612,12 @@ function renderTablesSection() {
       <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
       <div class="stat-info"><h3>Available Tables</h3><div class="value">${closedCount}</div></div>
     </div>
+    <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-table"></i></div><div class="stat-info"><h3>Total Tables</h3><div class="value">${tableOptions.length}</div></div></div>
+    <div class="stat-card"><div class="stat-icon danger"><i class="fas fa-ban"></i></div><div class="stat-info"><h3>Disabled Tables</h3><div class="value">${disabledCount}</div></div></div>
   `;
 
   tablesGridEl.innerHTML = tableOptions.map(tableNo => {
+    const disabled = disabledTableNos.has(String(tableNo).padStart(2, "0"));
     const order = latestOrderByTable.get(tableNo);
 
     const payment = String(order?.paymentStatus || "").toLowerCase();
@@ -1446,14 +1630,16 @@ function renderTablesSection() {
       order.billClosed !== true
     );
 
-    const cardClass = occupied ? "occupied" : "available";
-    const statusText = occupied ? "Customer Sitting" : "Bill Closed";
+    const cardClass = disabled ? "disabled" : (occupied ? "occupied" : "available");
+    const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
     const orderText = order?.orderId ? `Order: ${order.orderId}` : "No recent bill";
     const customerText = occupied
       ? order.customerName || "Walk-in"
       : order?.customerName || "Ready for next customer";
 
-    const actionBtn = occupied
+    const actionBtn = disabled
+      ? `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="false">Enable Table</button>`
+      : occupied
       ? `<button class="btn btn-sm btn-outline table-open-bill-btn" data-id="${order.id}"><i class="fas fa-edit"></i> Open Bill</button>`
       : `<button class="btn btn-sm btn-primary table-new-bill-btn" data-table="${escapeHtml(tableNo)}"><i class="fas fa-plus"></i> New Bill</button>`;
 
@@ -1467,7 +1653,7 @@ function renderTablesSection() {
           <span class="table-state">${escapeHtml(statusText)}</span>
         </div>
         <div class="table-customer">${escapeHtml(customerText)}</div>
-        <div class="table-actions">${actionBtn}</div>
+        <div class="table-actions">${actionBtn}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">Download QR</button></div>
       </div>
     `;
   }).join("");
@@ -1490,6 +1676,14 @@ if (manualTableNoEl) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
+  tablesGridEl.querySelectorAll(".table-toggle-btn").forEach(btn => btn.addEventListener("click", async () => {
+    const tableNo = String(btn.dataset.table || "").padStart(2,"0");
+    await setDoc(doc(db,"restaurants",restaurantId,"tables",tableNo), { tableNo, disabled: btn.dataset.disabled === "true", active: btn.dataset.disabled !== "true", updatedAt: serverTimestamp() }, { merge:true });
+  }));
+  tablesGridEl.querySelectorAll(".table-qr-btn").forEach(btn => btn.addEventListener("click", () => {
+    const tableNo = String(btn.dataset.table || "").padStart(2,"0"); const url = `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`;
+    const link = document.createElement("a"); link.href = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}`; link.download = `${restaurantId}-table-${tableNo}-qr.png`; link.target = "_blank"; link.click();
+  }));
 }
 
 /* =========================================================
@@ -1754,7 +1948,6 @@ function fillKotPreviewFromCart(orderId = "") {
       ? manualCart.map(item => `
           <div class="kot-item">
             <span><strong>${item.qty}x</strong> ${escapeHtml(item.name)}</span>
-            <span>${money(item.price * item.qty)}</span>
           </div>
         `).join("")
       : "<div>No items</div>";
@@ -1810,9 +2003,8 @@ if (billAddressEl) {
     billPaymentMethodEl.innerHTML = `<span>${escapeHtml(pmLabel)}</span><span style="font-weight:800;">${escapeHtml(psLabel)}</span>`;
   }
 
-  const isPaid = String(order.paymentStatus || "").toLowerCase() === "paid";
-  const isUpi = String(order.paymentMethod || "").toLowerCase() === "upi";
-  const showQr = Boolean(upiId && (isUpi || !isPaid));
+  // A configured UPI ID always shows on final bills, including paid cash/card bills.
+  const showQr = Boolean(upiId);
 
   if (billUpiQrSectionEl && billUpiQrImgEl) {
     if (showQr) {
@@ -1829,16 +2021,35 @@ if (billAddressEl) {
 
       if (billQrUpiIdEl) billQrUpiIdEl.textContent = upiId;
       if (billQrAmountEl) billQrAmountEl.textContent = money(grandTotal);
+      if (billQrRestaurantEl) billQrRestaurantEl.textContent = restaurantName;
 
       billUpiQrSectionEl.style.display = "block";
+      if (billUpiMissingEl) billUpiMissingEl.style.display = "none";
+      billUpiQrImgEl.style.display = "block";
       billUpiQrImgEl.onclick = () => {
         if (isMobileDevice()) window.location.href = upiUrl;
       };
       billUpiQrImgEl.style.cursor = isMobileDevice() ? "pointer" : "default";
     } else {
-      billUpiQrSectionEl.style.display = "none";
+      billUpiQrSectionEl.style.display = "block";
+      billUpiQrImgEl.style.display = "none";
+      if (billUpiMissingEl) billUpiMissingEl.style.display = "block";
     }
   }
+
+  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    console.log("[Bill UPI QR]", { restaurantId, upiId, billAmount: Number(order.grandTotal || 0), qrGenerated: showQr });
+  }
+
+  // Refresh a UPI ID saved elsewhere without changing the order document.
+  getDoc(doc(db, "restaurants", restaurantId, "settings", "general")).then(snap => {
+    const latest = snap.exists() ? String(snap.data().upiId || "").trim() : "";
+    if (latest && latest !== upiId) {
+      restaurantSettings = { ...restaurantSettings, upiId: latest };
+      if (upiFieldEl) upiFieldEl.value = latest;
+      fillBillPreview(order);
+    }
+  }).catch(() => {});
 }
 
 async function createManualBill() {
@@ -2141,9 +2352,8 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   const rows = items
     .map(i => `
       <tr>
-        <td style="padding:5px 0;">${escapeHtml(i.name || "")}</td>
-        <td style="padding:5px 0;text-align:center;font-weight:800;">${Number(i.qty || 0)}</td>
-        <td style="padding:5px 0;text-align:right;">${money(Number(i.price || 0) * Number(i.qty || 0))}</td>
+        <td>${escapeHtml(i.name || "")}</td>
+        <td>${Number(i.qty || 0)}</td>
       </tr>
     `)
     .join("");
@@ -2159,27 +2369,26 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
 <head>
   <title>KOT</title>
   <style>
-    body{font-family:"Courier New",monospace;font-size:12px;padding:12px;max-width:300px;margin:0 auto}
-    h2{text-align:center;margin:0 0 4px;font-size:16px}
+    @page{margin:3mm} body{font-family:Arial,"Courier New",monospace;font-size:15px;font-weight:700;color:#000;padding:0;max-width:72mm;margin:0 auto}
+    h2{text-align:center;margin:0 0 2px;font-size:20px;font-weight:900}
     .center{text-align:center}
-    hr{border:none;border-top:1px dashed #333;margin:8px 0}
+    hr{border:none;border-top:2px dashed #000;margin:5px 0}
     table{width:100%;border-collapse:collapse}
-    thead th{font-size:11px;text-transform:uppercase;text-align:left;padding:4px 0;border-bottom:1px dashed #333}
+    thead th{font-size:14px;text-transform:uppercase;text-align:left;padding:5px 0;border-bottom:2px solid #000}
     thead th:nth-child(2){text-align:center}
-    thead th:nth-child(3){text-align:right}
-    .label{background:#111;color:#fff;text-align:center;padding:7px;font-weight:800;font-size:13px;border-radius:4px;margin-bottom:8px}
-    .meta td{padding:3px 0;font-size:12px}
-    .meta td:first-child{width:80px;color:#555}
+    .label{background:#000;color:#fff;text-align:center;padding:6px;font-weight:900;font-size:14px;margin-bottom:5px}
+    .meta td{padding:2px 0;font-size:14px}.meta td:first-child{width:84px;color:#000}
+    tbody td{padding:5px 0;font-size:16px;font-weight:800}tbody td:last-child{text-align:center}
   </style>
 </head>
 <body>
   <h2>${escapeHtml(restaurantName)}</h2>
-  <div class="center" style="font-size:11px;margin-bottom:6px;">KITCHEN ORDER TICKET</div>
+  <div class="center" style="font-size:14px;font-weight:900;margin-bottom:3px;">KITCHEN ORDER TICKET</div>
   <hr>
   ${label ? `<div class="label">${escapeHtml(label)}</div>` : ""}
   <table class="meta">
     <tr><td>KOT #</td><td><strong>${escapeHtml(order.orderId || "")}</strong></td></tr>
-    <tr><td>Table</td><td><strong>${escapeHtml(order.tableNo || "-")}</strong></td></tr>
+    <tr><td>${order.businessMode === "vendor" || order.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(order.businessMode === "vendor" || order.orderMode === "token" ? (order.tokenNo || `T-${order.tokenNumber || "-"}`) : order.tableNo || "-")}</strong></td></tr>
     <tr><td>Customer</td><td>${escapeHtml(order.customerName || "Walk-in")}</td></tr>
     <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
     <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
@@ -2187,12 +2396,12 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   <hr>
   <table>
     <thead>
-      <tr><th>Item</th><th>Qty</th><th>Amt</th></tr>
+      <tr><th>Item</th><th>Qty</th></tr>
     </thead>
     <tbody>${rows}</tbody>
   </table>
   <hr>
-  <div class="center" style="font-size:11px;">--- END OF KOT ---</div>
+  <div class="center" style="font-size:12px;">--- END OF KOT ---</div>
 </body>
 </html>`);
 
@@ -2249,7 +2458,7 @@ function renderOrdersList(targetEl, orders) {
             <div class="order-id">${escapeHtml(o.orderId || o.id)}</div>
             <div class="order-time">${escapeHtml(formatDateTime(o.createdAt))}</div>
           </div>
-          <div class="order-status ${getStatusClass(o.status)}">${escapeHtml(o.status || "pending")}</div>
+          <div class="order-status ${getStatusClass(o.status)}">${escapeHtml(o.businessMode === "vendor" && String(o.status || "").toLowerCase() === "pending" ? "New" : o.status || "pending")}</div>
         </div>
 
         <div class="order-customer">
@@ -2258,7 +2467,7 @@ function renderOrdersList(targetEl, orders) {
             <h4>${escapeHtml(o.customerName || "Customer")}</h4>
             <span>${escapeHtml(o.customerPhone || "-")}</span>
           </div>
-          <div class="table-badge">Table ${escapeHtml(o.tableNo || "-")}</div>
+          <div class="table-badge">${o.businessMode === "vendor" || o.orderMode === "token" ? `Token ${escapeHtml(o.tokenNo || `T-${o.tokenNumber || "-"}`)}` : `Table ${escapeHtml(o.tableNo || "-")}`}</div>
         </div>
 
         <div class="order-items">
@@ -2269,6 +2478,8 @@ function renderOrdersList(targetEl, orders) {
             </div>
           `).join("")}
         </div>
+
+        ${o.note ? `<div style="margin-top:10px;font-size:13px;color:#555;"><strong>Note:</strong> ${escapeHtml(o.note)}</div>` : ""}
 
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding-top:10px;border-top:1px solid var(--gray-200);margin-top:10px;flex-wrap:wrap;">
           <div style="font-size:13px;font-weight:700;">ETA: ${Number(o.etaMinutes || 10)} min</div>
@@ -2531,7 +2742,7 @@ function renderKotSections() {
         <div class="order-header">
           <div>
             <div class="order-id">${escapeHtml(order.orderId || order.id)}</div>
-            <div class="order-time">Table ${escapeHtml(order.tableNo || "-")} • ${escapeHtml(order.customerName || "Customer")}</div>
+            <div class="order-time">${order.businessMode === "vendor" ? `Token #${escapeHtml(order.tokenNumber || "-")}` : `Table ${escapeHtml(order.tableNo || "-")}`} • ${escapeHtml(order.customerName || "Customer")}</div>
           </div>
           <button class="btn btn-sm btn-primary kot-print-one" data-id="${order.id}">Print KOT</button>
         </div>
@@ -2702,6 +2913,34 @@ addInventoryUsageBtn?.addEventListener("click", () => renderInventoryUsageRows([
 saveInventoryBtn?.addEventListener("click", saveInventoryItem);
 clearInventoryBtn?.addEventListener("click", clearInventoryForm);
 saveAdjustmentBtn?.addEventListener("click", saveInventoryAdjustment);
+addTablesBtn?.addEventListener("click", async () => {
+  const addCount = Number(addTablesCountEl?.value || 0);
+  if (!Number.isInteger(addCount) || addCount < 1) return alert("Enter the number of tables to add.");
+  const currentCount = Math.max(Number(restaurantSettings.tableCount || 20), ...managedTables.map(t => Number(t.tableNo || t.id) || 0), ...getTableOptions().map(Number));
+  const batch = [];
+  for (let index = 1; index <= addCount; index++) {
+    const tableNo = String(currentCount + index).padStart(2, "0");
+    const qrUrl = `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`;
+    batch.push(setDoc(doc(db, "restaurants", restaurantId, "tables", tableNo), { tableNo, active: true, disabled: false, qrUrl, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true }));
+  }
+  await Promise.all(batch);
+  const nextCount = currentCount + addCount;
+  await setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), { tableCount: nextCount, updatedAt: serverTimestamp() }, { merge: true });
+  await setDoc(doc(db, "restaurants", restaurantId), { tableCount: nextCount, updatedAt: serverTimestamp() }, { merge: true });
+  restaurantSettings.tableCount = nextCount;
+  if (addTablesCountEl) addTablesCountEl.value = "";
+  renderTableNumberOptions(); renderTablesSection();
+  alert(`${addCount} new table${addCount === 1 ? "" : "s"} added (Table ${String(currentCount + 1).padStart(2,"0")}–${String(nextCount).padStart(2,"0")}).`);
+});
+downloadAllTableQrsBtn?.addEventListener("click", () => {
+  const rows = getTableOptions().map(tableNo => [`Table ${tableNo}`, `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`]);
+  const csv = [["Table", "QR Link"], ...rows].map(row => row.map(value => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\n");
+  const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = `${restaurantId}-table-qr-links.csv`; link.click(); URL.revokeObjectURL(link.href);
+});
+purchaseBillFileEl?.addEventListener("change", previewPurchaseFile);
+scanPurchaseBillBtn?.addEventListener("click", scanPurchaseBill);
+rescanPurchaseBillBtn?.addEventListener("click", () => { purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl?.click(); });
+savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 
 saveSettingsBtn?.addEventListener("click", saveSettings);
 useCurrentLocationBtn?.addEventListener("click", useAdminCurrentLocation);
@@ -2761,10 +3000,10 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
       <head>
         <title>KOT</title>
         <style>
-          body { font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; }
-          .kot-header { text-align:center; border-bottom:1px dashed #333; padding-bottom:8px; margin-bottom:8px; }
-          .kot-item { display:flex; justify-content:space-between; margin-bottom:6px; }
-          .kot-details div { display:flex; justify-content:space-between; margin-bottom:4px; }
+          @page{margin:3mm} body { font-family:Arial,'Courier New',monospace; color:#000; font-size:15px; font-weight:800; padding:0; margin:0; max-width:72mm; }
+          .kot-header { text-align:center; border-bottom:2px dashed #000; padding-bottom:4px; margin-bottom:5px; font-size:17px; font-weight:900; }
+          .kot-item { display:flex; justify-content:space-between; margin-bottom:5px; font-size:16px; font-weight:900; }
+          .kot-details div { display:flex; justify-content:space-between; margin-bottom:3px; }
         </style>
       </head>
       <body>${html}</body>
@@ -2786,10 +3025,10 @@ document.getElementById("printBillBtn")?.addEventListener("click", () => {
       <head>
         <title>Bill</title>
         <style>
-          body { font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; max-width: 280px; margin: 0 auto; }
-          .kot-header { text-align:center; border-bottom:1px dashed #333; padding-bottom:8px; margin-bottom:8px; }
-          .kot-item { display:flex; justify-content:space-between; margin-bottom:6px; }
-          .kot-details div { display:flex; justify-content:space-between; margin-bottom:4px; }
+          @page{margin:3mm} body { font-family:Arial,'Courier New',monospace; color:#000; font-size:14px; font-weight:700; padding:0; max-width:72mm; margin:0 auto; }
+          .kot-header { text-align:center; border-bottom:2px dashed #000; padding-bottom:4px; margin-bottom:5px; font-size:17px; font-weight:900; }
+          .kot-header h4{font-size:21px;margin:0 0 3px;font-weight:900}.kot-item { display:flex; justify-content:space-between; margin-bottom:5px; font-size:15px; font-weight:800; }
+          .kot-details div { display:flex; justify-content:space-between; margin-bottom:3px; }.kot-footer{font-weight:800}.kot-preview img{max-width:150px!important;height:auto!important;}
         </style>
       </head>
       <body>${html}</body>
@@ -2801,6 +3040,8 @@ document.getElementById("printBillBtn")?.addEventListener("click", () => {
     win.close();
   }, 350);
 });
+
+window.fillBillPreview = fillBillPreview;
 
 /* =========================================================
    INIT
@@ -2819,6 +3060,11 @@ if (!subscriptionBlocked) {
   await loadSettings();
   await loadMenuData();
   startInventoryListeners();
+  onSnapshot(collection(db, "restaurants", restaurantId, "tables"), snap => {
+    managedTables = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderTableNumberOptions();
+    renderTablesSection();
+  });
   renderMenuManagement();
   renderManualMenuPicker();
   renderManualCart();
