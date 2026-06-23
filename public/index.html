@@ -925,7 +925,12 @@ import {
     let restaurantLocationSettings = {
       restaurantLat: null,
       restaurantLng: null,
-      allowedOrderRadiusMeters: 150
+      allowedOrderRadiusMeters: 150,
+      locationProtectionEnabled: false
+    };
+
+    const locationDebug = (...args) => {
+      if (["localhost", "127.0.0.1"].includes(location.hostname)) console.debug("[Scan2Plate location]", ...args);
     };
 
     async function loadRestaurantSettings() {
@@ -960,11 +965,18 @@ import {
           restaurantLocationSettings = {
             restaurantLat: data.restaurantLat ?? null,
             restaurantLng: data.restaurantLng ?? null,
-            allowedOrderRadiusMeters: Number(data.allowedOrderRadiusMeters || 150)
+            allowedOrderRadiusMeters: Number(data.allowedOrderRadiusMeters || restaurantPlanData.allowedOrderRadiusMeters || 150),
+            locationProtectionEnabled: data.locationProtectionEnabled === true || data.enableLocationProtection === true || restaurantPlanData.locationProtectionEnabled === true || restaurantPlanData.enableLocationProtection === true
           };
         } else {
           tokenMode = String(restaurantPlanData.orderMode || "table").toLowerCase() === "token" || String(restaurantPlanData.businessMode || "").toLowerCase() === "vendor";
           restaurantTitle.textContent = "Restaurant Menu";
+          restaurantLocationSettings = {
+            restaurantLat: restaurantPlanData.restaurantLat ?? null,
+            restaurantLng: restaurantPlanData.restaurantLng ?? null,
+            allowedOrderRadiusMeters: Number(restaurantPlanData.allowedOrderRadiusMeters || 150),
+            locationProtectionEnabled: restaurantPlanData.locationProtectionEnabled === true || restaurantPlanData.enableLocationProtection === true
+          };
         }
         if (tokenMode) {
           tableNoText.textContent = "Pickup Token";
@@ -1179,9 +1191,19 @@ import {
     }
 
     async function verifyCustomerLocationBeforeOrder() {
+      const locationProtectionEnabled = restaurantLocationSettings.locationProtectionEnabled === true;
+      locationDebug({ restaurantId, locationProtectionEnabled, locationCheckSkipped: !locationProtectionEnabled });
+      if (!locationProtectionEnabled) {
+        return { ok: true, locationVerified: false, locationProtectionSkipped: true };
+      }
       const restaurantLat = Number(restaurantLocationSettings.restaurantLat);
       const restaurantLng = Number(restaurantLocationSettings.restaurantLng);
       const allowedOrderRadiusMeters = Number(restaurantLocationSettings.allowedOrderRadiusMeters || 150);
+
+      if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng) || !Number.isFinite(allowedOrderRadiusMeters) || allowedOrderRadiusMeters <= 0) {
+        console.warn("[Scan2Plate location] protection enabled but location data is incomplete", { restaurantId });
+        return { ok: true, locationVerified: false, locationProtectionSkipped: true, locationProtectionWarning: "incomplete-location-settings" };
+      }
 
       if (!navigator.geolocation) {
         alert("Location is not supported on this device.");
@@ -1201,22 +1223,17 @@ import {
         const customerLng = Number(pos.coords.longitude);
         const customerLocationAccuracy = Number(pos.coords.accuracy);
 
-        // Request the customer's location for every order. Previously this
-        // check returned before calling getCurrentPosition when the restaurant
-        // coordinates were missing, so the browser never showed its prompt.
-        if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) {
-          alert("Restaurant location is not configured. Please contact restaurant staff.");
-          return { ok: false };
-        }
-
         const customerDistanceMeters = Math.round(
           calculateDistanceMeters(customerLat, customerLng, restaurantLat, restaurantLng)
         );
 
         if (customerDistanceMeters > allowedOrderRadiusMeters) {
+          locationDebug({ restaurantId, radiusCheckResult: "outside", customerDistanceMeters, allowedOrderRadiusMeters });
           alert("You are outside restaurant ordering range. Please order from inside the restaurant.");
           return { ok: false };
         }
+
+        locationDebug({ restaurantId, radiusCheckResult: "inside", customerDistanceMeters, allowedOrderRadiusMeters });
 
         return {
           ok: true,

@@ -60,7 +60,8 @@ let settings = {
   plan: 'advance',
   restaurantLat: null,
   restaurantLng: null,
-  allowedOrderRadiusMeters: 150
+  allowedOrderRadiusMeters: 150,
+  locationProtectionEnabled: false
 };
 
 // Missing businessMode intentionally remains Restaurant Mode for existing tenants.
@@ -465,16 +466,21 @@ function getCustomerPosition() {
 }
 
 async function verifyCustomerLocation() {
-  // Default false preserves existing protection for restaurants that never saved this setting.
-  if (settings.locationProtectionEnabled === false) {
+  const locationProtectionEnabled = settings.locationProtectionEnabled === true || settings.enableLocationProtection === true;
+  const locationDebug = (...args) => {
+    if (['localhost', '127.0.0.1'].includes(location.hostname)) console.debug('[Scan2Plate location]', ...args);
+  };
+  locationDebug({ restaurantId, locationProtectionEnabled, locationCheckSkipped: !locationProtectionEnabled });
+  if (!locationProtectionEnabled) {
     return { locationVerified: false, locationProtectionSkipped: true };
   }
   const restaurantLat = Number(settings.restaurantLat);
   const restaurantLng = Number(settings.restaurantLng);
   const allowedOrderRadiusMeters = Number(settings.allowedOrderRadiusMeters || 150);
 
-  if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) {
-    throw new Error('Restaurant location is not configured. Please contact restaurant staff.');
+  if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng) || !Number.isFinite(allowedOrderRadiusMeters) || allowedOrderRadiusMeters <= 0) {
+    console.warn('[Scan2Plate location] protection enabled but location data is incomplete', { restaurantId });
+    return { locationVerified: false, locationProtectionSkipped: true, locationProtectionWarning: 'incomplete-location-settings' };
   }
 
   let position;
@@ -491,8 +497,11 @@ async function verifyCustomerLocation() {
   );
 
   if (customerDistanceMeters > allowedOrderRadiusMeters) {
+    locationDebug({ restaurantId, radiusCheckResult: 'outside', customerDistanceMeters, allowedOrderRadiusMeters });
     throw new Error('You are outside restaurant ordering range. Please place order only from inside the restaurant.');
   }
+
+  locationDebug({ restaurantId, radiusCheckResult: 'inside', customerDistanceMeters, allowedOrderRadiusMeters });
 
   return {
     customerLat,

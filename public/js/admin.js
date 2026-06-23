@@ -1058,7 +1058,7 @@ async function loadSettings() {
     if (tableCountField) tableCountField.value = restaurantSettings.tableCount ?? 20;
     ensureLocationProtectionControl();
     const locationToggle = document.getElementById("locationProtectionEnabled");
-    if (locationToggle) locationToggle.checked = restaurantSettings.locationProtectionEnabled !== false;
+    if (locationToggle) locationToggle.checked = restaurantSettings.locationProtectionEnabled === true || restaurantSettings.enableLocationProtection === true;
   } catch (err) {
     console.error("loadSettings error", err);
   }
@@ -1098,7 +1098,7 @@ async function saveSettings() {
       restaurantLat,
       restaurantLng,
       allowedOrderRadiusMeters,
-      locationProtectionEnabled: document.getElementById("locationProtectionEnabled")?.checked !== false,
+      locationProtectionEnabled: document.getElementById("locationProtectionEnabled")?.checked === true,
       tableCount: Math.max(1, Number(document.getElementById("tableCountField")?.value || restaurantSettings.tableCount || 20)),
       updatedAt: serverTimestamp()
     };
@@ -1116,7 +1116,7 @@ async function saveSettings() {
 function ensureLocationProtectionControl() {
   if (document.getElementById("locationProtectionEnabled") || !allowedOrderRadiusFieldEl) return;
   const wrap = document.createElement("div"); wrap.className = "form-group";
-  wrap.innerHTML = `<label class="form-label" style="display:flex;align-items:center;gap:9px;"><input id="locationProtectionEnabled" type="checkbox" checked /> Enable Location Protection</label><div style="font-size:11px;color:#6b7280;margin-top:5px;">When disabled, customers can order without GPS or radius checks.</div>`;
+  wrap.innerHTML = `<label class="form-label" style="display:flex;align-items:center;gap:9px;"><input id="locationProtectionEnabled" type="checkbox" /> Enable Location Protection</label><div style="font-size:11px;color:#6b7280;margin-top:5px;">When disabled, customers can order without GPS or radius checks.</div>`;
   allowedOrderRadiusFieldEl.closest(".form-group")?.insertAdjacentElement("afterend", wrap);
 }
 
