@@ -200,13 +200,8 @@ function stopAlert(resetTitle = true) {
 function printKOT(orderData, items, label = "") {
   const now  = new Date();
   const name = cafeSettings.restaurantName || "Restaurant";
-
-  const rows = (items || []).map(i => `
-    <tr>
-      <td style="padding:5px 0;">${escapeHtml(String(i.name || ""))}</td>
-      <td style="padding:5px 0;text-align:center;font-weight:800;">${Number(i.qty || 0)}</td>
-      <td style="padding:5px 0;text-align:right;">${fmtCurrency(Number(i.price || 0) * Number(i.qty || 0))}</td>
-    </tr>`).join("");
+  const modifierList = item => [item.addons,item.addOns,item.modifiers,item.customizations,item.variants,item.selectedAddons,item.options].flatMap(list => Array.isArray(list) ? list : []).map(extra => typeof extra === "string" ? { name:extra, qty:1 } : { name:extra?.name || extra?.title || extra?.label || "Customisation", qty:Number(extra?.qty || extra?.quantity || extra?.count || 1) });
+  const rows = (items || []).map(item => `<div class="thermal-item-row"><div class="thermal-item-name"><strong>${escapeHtml(String(item.name || "Item"))}</strong>${modifierList(item).map(extra => `<div class="thermal-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` ×${extra.qty}` : ""}</div>`).join("")}</div><div class="thermal-item-qty">${Number(item.qty || 0)}</div></div>`).join("");
 
   const w = window.open("", "_blank", "width=400,height=640");
   if (!w) { alert("Allow popups to print KOT."); return; }
@@ -214,16 +209,13 @@ function printKOT(orderData, items, label = "") {
   w.document.write(`<!DOCTYPE html>
 <html><head><title>KOT</title>
 <style>
-  body{font-family:"Courier New",monospace;font-size:13px;padding:14px;max-width:300px;margin:0 auto;}
-  h2{text-align:center;margin:0 0 4px;font-size:16px;}
+  @page{margin:2mm}body{font-family:Arial,"Courier New",monospace;font-size:11px;font-weight:700;color:#000;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}
+  h2{text-align:center;margin:0 0 4px;font-size:14px;overflow-wrap:anywhere;}
   .center{text-align:center;}
   hr{border:none;border-top:1px dashed #333;margin:8px 0;}
   table{width:100%;border-collapse:collapse;}
-  thead th{font-size:11px;text-transform:uppercase;text-align:left;padding:4px 0;border-bottom:1px dashed #333;}
-  thead th:nth-child(2){text-align:center;}
-  thead th:nth-child(3){text-align:right;}
   .label{background:#111;color:#fff;text-align:center;padding:7px;font-weight:800;font-size:13px;border-radius:4px;margin-bottom:8px;letter-spacing:1px;}
-  .meta td{padding:3px 0;font-size:12px;}
+  .meta td{padding:3px 0;font-size:10px;}.thermal-head{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:2px solid #000;font-size:10px;text-transform:uppercase}.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-item-qty{text-align:center;font-weight:900}.thermal-modifier{padding:2px 0 0 8px;font-size:10px;overflow-wrap:anywhere}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 42px}.thermal-modifier{font-size:11px}}
   .meta td:first-child{color:#555;width:80px;}
 </style></head><body>
   <h2>${escapeHtml(name)}</h2>
@@ -238,10 +230,8 @@ function printKOT(orderData, items, label = "") {
     <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
   </table>
   <hr>
-  <table>
-    <thead><tr><th>Item</th><th>Qty</th><th>Amt</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
+  <div class="thermal-head"><strong>Item</strong><strong style="text-align:center">Qty</strong></div>
+  <div>${rows || "<div class='thermal-item-row'><span>No items</span><span>0</span></div>"}</div>
   <hr>
   <div class="center" style="font-size:11px;margin-top:6px;">--- END OF KOT ---</div>
 </body></html>`);

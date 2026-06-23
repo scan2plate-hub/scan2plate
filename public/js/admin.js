@@ -1978,12 +1978,7 @@ if (billAddressEl) {
   if (billCustomerEl) billCustomerEl.textContent = order.customerName || "Walk-in";
 
   if (billItemsEl) {
-    billItemsEl.innerHTML = (order.items || []).map(item => `
-      <div class="kot-item">
-        <span>${escapeHtml(item.name || "")} x${Number(item.qty || 0)}</span>
-        <span>${money(Number(item.price || 0) * Number(item.qty || 0))}</span>
-      </div>
-    `).join("");
+    billItemsEl.innerHTML = `<div class="thermal-bill-head"><span>Item</span><span>Qty</span><span>Amt</span></div>${thermalBillRows(order.items || []) || "<div class='thermal-item-row'><span>No items</span><span>0</span><span>₹0</span></div>"}`;
   }
 
   if (billSubtotalEl) billSubtotalEl.textContent = money(order.itemsTotal || 0);
@@ -2341,6 +2336,30 @@ function getPaymentMethodPill(o) {
 /* =========================================================
    PRINT KOT DIRECT
 ========================================================= */
+function printItemExtras(item = {}) {
+  const groups = [item.addons, item.addOns, item.modifiers, item.customizations, item.variants, item.selectedAddons, item.options];
+  return groups.flatMap(group => Array.isArray(group) ? group : []).map(extra => {
+    if (typeof extra === "string") return { name: extra, qty: 1, price: 0 };
+    return { name: extra?.name || extra?.title || extra?.label || "Customisation", qty: Number(extra?.qty || extra?.quantity || extra?.count || 1), price: Number(extra?.price || extra?.amount || 0) };
+  });
+}
+
+function thermalKotRows(items = []) {
+  return items.map(item => {
+    const extras = printItemExtras(item);
+    return `<div class="thermal-item-row"><div class="thermal-item-name"><strong>${escapeHtml(String(item.name || "Item"))}</strong>${extras.map(extra => `<div class="thermal-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` ×${extra.qty}` : ""}</div>`).join("")}</div><div class="thermal-item-qty">${Number(item.qty || 0)}</div></div>`;
+  }).join("");
+}
+
+function thermalBillRows(items = []) {
+  return items.map(item => {
+    const qty = Number(item.qty || 0), price = Number(item.price || 0), extras = printItemExtras(item);
+    const parent = `<div class="thermal-item-row"><div class="thermal-item-name">${escapeHtml(String(item.name || "Item"))}</div><div class="thermal-item-qty">${qty}</div><div class="thermal-item-amount">${money(price * qty)}</div></div>`;
+    const modifierRows = extras.map(extra => `<div class="thermal-item-row thermal-modifier-row"><div class="thermal-item-name">↳ ${escapeHtml(String(extra.name))}</div><div class="thermal-item-qty">${extra.qty}</div><div class="thermal-item-amount">${extra.price ? money(extra.price * extra.qty) : ""}</div></div>`).join("");
+    return parent + modifierRows;
+  }).join("");
+}
+
 function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   const items = itemsToPrint || order.items || [];
   const now = new Date();
@@ -2349,14 +2368,7 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
     restaurantSettings.restaurantName ||
     "Restaurant";
 
-  const rows = items
-    .map(i => `
-      <tr>
-        <td>${escapeHtml(i.name || "")}</td>
-        <td>${Number(i.qty || 0)}</td>
-      </tr>
-    `)
-    .join("");
+  const rows = thermalKotRows(items);
 
   const win = window.open("", "_blank", "width=400,height=650");
   if (!win) {
@@ -2369,16 +2381,17 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
 <head>
   <title>KOT</title>
   <style>
-    @page{margin:3mm} body{font-family:Arial,"Courier New",monospace;font-size:15px;font-weight:700;color:#000;padding:0;max-width:72mm;margin:0 auto}
-    h2{text-align:center;margin:0 0 2px;font-size:20px;font-weight:900}
+    @page{margin:2mm} body{font-family:Arial,"Courier New",monospace;font-size:11px;font-weight:700;color:#000;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}
+    h2{text-align:center;margin:0 0 2px;font-size:14px;font-weight:900;word-break:break-word}
     .center{text-align:center}
     hr{border:none;border-top:2px dashed #000;margin:5px 0}
     table{width:100%;border-collapse:collapse}
-    thead th{font-size:14px;text-transform:uppercase;text-align:left;padding:5px 0;border-bottom:2px solid #000}
+    .thermal-head{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;font-size:10px;text-transform:uppercase;padding:4px 0;border-bottom:2px solid #000}
     thead th:nth-child(2){text-align:center}
     .label{background:#000;color:#fff;text-align:center;padding:6px;font-weight:900;font-size:14px;margin-bottom:5px}
-    .meta td{padding:2px 0;font-size:14px}.meta td:first-child{width:84px;color:#000}
-    tbody td{padding:5px 0;font-size:16px;font-weight:800}tbody td:last-child{text-align:center}
+    .meta td{padding:2px 0;font-size:10px}.meta td:first-child{width:62px;color:#000}
+    .thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-item-qty{text-align:center;font-weight:900}.thermal-modifier{padding:2px 0 0 8px;font-size:10px;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+    @media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-head{grid-template-columns:minmax(0,1fr) 42px;font-size:12px}.thermal-item-row{grid-template-columns:minmax(0,1fr) 42px;padding:5px 0}.meta td{font-size:12px}.thermal-modifier{font-size:11px}h2{font-size:17px}}
   </style>
 </head>
 <body>
@@ -2394,12 +2407,8 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
     <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
   </table>
   <hr>
-  <table>
-    <thead>
-      <tr><th>Item</th><th>Qty</th></tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
+  <div class="thermal-head"><strong>Item</strong><strong style="text-align:center">Qty</strong></div>
+  <div>${rows || "<div class='thermal-item-row'><span>No items</span><span>0</span></div>"}</div>
   <hr>
   <div class="center" style="font-size:12px;">--- END OF KOT ---</div>
 </body>
@@ -3000,10 +3009,7 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
       <head>
         <title>KOT</title>
         <style>
-          @page{margin:3mm} body { font-family:Arial,'Courier New',monospace; color:#000; font-size:15px; font-weight:800; padding:0; margin:0; max-width:72mm; }
-          .kot-header { text-align:center; border-bottom:2px dashed #000; padding-bottom:4px; margin-bottom:5px; font-size:17px; font-weight:900; }
-          .kot-item { display:flex; justify-content:space-between; margin-bottom:5px; font-size:16px; font-weight:900; }
-          .kot-details div { display:flex; justify-content:space-between; margin-bottom:3px; }
+          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;margin:0;width:58mm;max-width:100%;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 2px;font-weight:900;overflow-wrap:anywhere}.kot-details div{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-item-qty{text-align:center;font-weight:900}.thermal-modifier{padding:2px 0 0 8px;font-size:10px;overflow-wrap:anywhere}.thermal-head{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:2px solid #000;font-size:10px;text-transform:uppercase}.kot-item{display:flex;justify-content:space-between;gap:8px;overflow-wrap:anywhere}.kot-preview{padding:0!important;border:0!important}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-item-row,.thermal-head{grid-template-columns:minmax(0,1fr) 42px}.thermal-modifier{font-size:11px}}
         </style>
       </head>
       <body>${html}</body>
@@ -3025,10 +3031,7 @@ document.getElementById("printBillBtn")?.addEventListener("click", () => {
       <head>
         <title>Bill</title>
         <style>
-          @page{margin:3mm} body { font-family:Arial,'Courier New',monospace; color:#000; font-size:14px; font-weight:700; padding:0; max-width:72mm; margin:0 auto; }
-          .kot-header { text-align:center; border-bottom:2px dashed #000; padding-bottom:4px; margin-bottom:5px; font-size:17px; font-weight:900; }
-          .kot-header h4{font-size:21px;margin:0 0 3px;font-weight:900}.kot-item { display:flex; justify-content:space-between; margin-bottom:5px; font-size:15px; font-weight:800; }
-          .kot-details div { display:flex; justify-content:space-between; margin-bottom:3px; }.kot-footer{font-weight:800}.kot-preview img{max-width:150px!important;height:auto!important;}
+          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img{max-width:118px!important;height:auto!important}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}.kot-preview img{max-width:150px!important}}
         </style>
       </head>
       <body>${html}</body>
