@@ -476,6 +476,37 @@ function buildQrUrl(upiUrl) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiUrl)}`;
 }
 
+function waitForImageLoad(image) {
+  if (!image) return Promise.reject(new Error("QR image is missing"));
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("QR image load timed out")), 8000);
+    image.addEventListener("load", () => { clearTimeout(timeout); resolve(); }, { once: true });
+    image.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("QR image failed to load")); }, { once: true });
+  });
+}
+
+async function billQrAsPngDataUrl() {
+  if (!billUpiQrImgEl || billUpiQrImgEl.style.display === "none" || !billUpiQrImgEl.src) throw new Error("UPI QR unavailable");
+  await waitForImageLoad(billUpiQrImgEl);
+  if (billUpiQrImgEl.src.startsWith("data:image/png")) return billUpiQrImgEl.src;
+  const response = await fetch(billUpiQrImgEl.src, { mode: "cors", cache: "no-store" });
+  if (!response.ok) throw new Error("Unable to download QR image");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("QR conversion failed")); image.src = objectUrl; });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || 300;
+    canvas.height = image.naturalHeight || 300;
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function updateUserCard() {
   const name = currentUser.name || currentUser.email || "Admin";
   const role = currentUser.role || "Restaurant Admin";
@@ -3022,16 +3053,35 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
   }, 350);
 });
 
-document.getElementById("printBillBtn")?.addEventListener("click", () => {
+document.getElementById("printBillBtn")?.addEventListener("click", async () => {
   const win = window.open("", "_blank", "width=380,height=700");
   if (!win) return alert("Allow popup to print.");
-  const html = document.getElementById("billPreview")?.innerHTML || "";
+  const printRoot = document.getElementById("billPreview")?.cloneNode(true);
+  if (!printRoot) { win.close(); return alert("Bill preview is unavailable."); }
+  const printQr = printRoot.querySelector("#billUpiQrImg");
+  const unavailable = printRoot.querySelector("#billUpiMissing");
+  try {
+    // Embed the fully-loaded QR as PNG so print never depends on an external URL.
+    const qrDataUrl = await billQrAsPngDataUrl();
+    if (printQr) {
+      printQr.src = qrDataUrl;
+      printQr.style.display = "block";
+      printQr.style.visibility = "visible";
+      printQr.style.opacity = "1";
+    }
+    if (unavailable) unavailable.style.display = "none";
+  } catch (error) {
+    console.warn("Bill QR could not be embedded for printing", error);
+    if (printQr) printQr.style.display = "none";
+    if (unavailable) { unavailable.textContent = "UPI QR unavailable"; unavailable.style.display = "block"; }
+  }
+  const html = printRoot.outerHTML;
   win.document.write(`
     <html>
       <head>
         <title>Bill</title>
         <style>
-          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img{max-width:118px!important;height:auto!important}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}.kot-preview img{max-width:150px!important}}
+          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img{max-width:118px!important;height:auto!important}#billUpiQrImg{width:150px!important;height:150px!important;margin:0 auto!important;display:block!important;visibility:visible!important;opacity:1!important;background:#fff!important}@media print{#billUpiQrImg{display:block!important;visibility:visible!important;opacity:1!important}}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}}
         </style>
       </head>
       <body>${html}</body>
@@ -3041,7 +3091,7 @@ document.getElementById("printBillBtn")?.addEventListener("click", () => {
   setTimeout(() => {
     win.print();
     win.close();
-  }, 350);
+  }, 500);
 });
 
 window.fillBillPreview = fillBillPreview;
