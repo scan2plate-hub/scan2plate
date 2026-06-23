@@ -73,6 +73,7 @@
       border-right:1px solid rgba(224,124,26,.24);
       box-shadow:12px 0 34px rgba(5,7,12,.22);
     }
+    .sidebar-mobile-overlay{display:none}
 
     .sidebar-header{
       padding:20px 18px 16px;
@@ -541,6 +542,8 @@
     @media(max-width:992px){
       .sidebar{transform:translateX(-100%)}
       .sidebar.open{transform:translateX(0)!important}
+      .sidebar-mobile-overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:999;opacity:0;pointer-events:none;transition:opacity .2s ease}
+      .sidebar-mobile-overlay.show{opacity:1;pointer-events:auto}
       .main-content{margin-left:0!important}
       .menu-toggle{display:flex!important}
       .grid-2,.grid-3{grid-template-columns:1fr}
@@ -636,6 +639,7 @@
       </div>
     </div>
   </aside>
+  <div id="sidebarMobileOverlay" class="sidebar-mobile-overlay" aria-hidden="true"></div>
 
   <!-- MAIN -->
   <main class="main-content">
@@ -1266,6 +1270,16 @@
       const sections     = document.querySelectorAll(".content-section");
       const pageTitle    = document.getElementById("pageTitle");
       const pageSubtitle = document.getElementById("pageSubtitle");
+      const sidebar = document.getElementById("sidebar");
+      const mobileOverlay = document.getElementById("sidebarMobileOverlay");
+
+      window.closeSidebarOnMobile = function () {
+        if (window.innerWidth < 992) { sidebar?.classList.remove("open"); mobileOverlay?.classList.remove("show"); }
+      };
+      window.openSidebarOnMobile = function () {
+        if (window.innerWidth < 992) { sidebar?.classList.add("open"); mobileOverlay?.classList.add("show"); }
+      };
+      mobileOverlay?.addEventListener("click", window.closeSidebarOnMobile);
 
       const sectionMeta = {
         dashboard: { title:"Dashboard",     subtitle:"Overview & Statistics" },
@@ -1290,7 +1304,7 @@
           if (pageTitle)    pageTitle.textContent    = sectionMeta[name].title;
           if (pageSubtitle) pageSubtitle.textContent = sectionMeta[name].subtitle;
         }
-        if (window.innerWidth < 992) document.getElementById("sidebar")?.classList.remove("open");
+        window.closeSidebarOnMobile();
       }
 
       window.switchSection = switchSection;
@@ -1324,7 +1338,7 @@
       });
 
       document.getElementById("menuToggle")?.addEventListener("click", () => {
-        document.getElementById("sidebar")?.classList.toggle("open");
+        if (sidebar?.classList.contains("open")) window.closeSidebarOnMobile(); else window.openSidebarOnMobile();
       });
 
       ["closeKotModal","closeKotModalBtn"].forEach(id => {

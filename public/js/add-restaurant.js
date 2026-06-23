@@ -17,6 +17,26 @@ if (restaurantType) {
     if (![...restaurantType.options].some(option => option.value === type)) restaurantType.add(new Option(type, type));
   });
 }
+function applyBusinessOnboardingLabels() {
+  document.querySelectorAll("label,h1,h2,p,.ar-kicker,.ar-btn,.ar-back").forEach(element => {
+    if (element.children.length) return;
+    const text = element.textContent.trim();
+    const replacements = {
+      "Restaurant onboarding": "Business onboarding",
+      "Add New Restaurant": "Add New Business",
+      "Restaurant Details": "Business Details",
+      "Restaurant Name *": "Business Name *",
+      "Restaurant ID *": "Business ID *",
+      "Restaurant Type": "Business Type",
+      "Restaurant Settings": "Business Settings",
+      "Create Restaurant Account →": "Create Business Account →",
+      "Restaurant created successfully": "Business created successfully"
+    };
+    if (replacements[text]) element.textContent = replacements[text];
+  });
+  if (restaurantName) restaurantName.placeholder = "Business name";
+}
+applyBusinessOnboardingLabels();
 const safeDocIdFromEmail = value => String(value || "").trim().toLowerCase().replaceAll("@", "_").replaceAll(".", "_");
 const dateString = date => date.toISOString().slice(0, 10);
 const planAmounts = { basic: 1999, advance: 2999, enterprise: 4999 };
