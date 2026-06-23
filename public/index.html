@@ -843,6 +843,7 @@ import {
   getDoc,
   doc,
   addDoc,
+  runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -918,6 +919,7 @@ import {
     let activeCategory = "All";
     let cart = [];
     let taxPercent = 5;
+    let tokenMode = false;
     let restaurantPlanData = {};
     let canUseOrdering = true;
     let restaurantLocationSettings = {
@@ -952,6 +954,7 @@ import {
 
         if (settingSnap.exists()) {
           const data = settingSnap.data();
+          tokenMode = String(data.orderMode || restaurantPlanData.orderMode || "table").toLowerCase() === "token" || String(data.businessMode || restaurantPlanData.businessMode || "").toLowerCase() === "vendor";
           restaurantTitle.textContent = `${data.restaurantName || "Restaurant"} Menu`;
           taxPercent = Number(data.taxPercent || 5);
           restaurantLocationSettings = {
@@ -960,7 +963,12 @@ import {
             allowedOrderRadiusMeters: Number(data.allowedOrderRadiusMeters || 150)
           };
         } else {
+          tokenMode = String(restaurantPlanData.orderMode || "table").toLowerCase() === "token" || String(restaurantPlanData.businessMode || "").toLowerCase() === "vendor";
           restaurantTitle.textContent = "Restaurant Menu";
+        }
+        if (tokenMode) {
+          tableNoText.textContent = "Pickup Token";
+          tableNoText.parentElement.firstChild.textContent = "Order: ";
         }
       } catch (e) {
         restaurantTitle.textContent = "Restaurant Menu";
@@ -1254,11 +1262,28 @@ import {
         const tax = itemsTotal * (taxPercent / 100);
         const grandTotal = itemsTotal + tax;
         const orderId = "ORD" + Date.now();
+        let tokenNo = null;
+        if (tokenMode) {
+          const tokenDate = new Date().toLocaleDateString("en-CA");
+          const counterRef = doc(db, "restaurants", restaurantId, "token_counters", tokenDate);
+          let tokenNumber = 0;
+          await runTransaction(db, async transaction => {
+            const counter = await transaction.get(counterRef);
+            tokenNumber = Number(counter.data()?.lastNumber || 0) + 1;
+            transaction.set(counterRef, { lastNumber: tokenNumber, date: tokenDate, updatedAt: serverTimestamp() }, { merge: true });
+          });
+          tokenNo = `T-${String(tokenNumber).padStart(3, "0")}`;
+        }
 
         await addDoc(collection(db, "orders"), {
           orderId,
           restaurantId,
-          tableNo: table,
+          tableNo: tokenMode ? null : table,
+          tokenNo,
+          tokenNumber: tokenNo ? Number(tokenNo.slice(2)) : null,
+          tokenDate: tokenNo ? new Date().toLocaleDateString("en-CA") : null,
+          orderMode: tokenMode ? "token" : "table",
+          businessType: restaurantPlanData.businessType || "Restaurant",
           customerName: customerName.value.trim(),
           customerPhone: customerPhone.value.trim(),
           note: customerNote.value.trim(),
@@ -1283,7 +1308,7 @@ import {
         orderSuccess.classList.remove("hidden");
         orderSuccess.innerHTML = `
           Order placed successfully.<br>
-          <strong>Order ID:</strong> ${orderId}<br>
+          <strong>Order ID:</strong> ${orderId}<br>${tokenNo ? `<strong>Token Number:</strong> ${tokenNo}<br>` : ""}
           <a href="./track.html?orderId=${encodeURIComponent(orderId)}">Track order</a>
         `;
 
