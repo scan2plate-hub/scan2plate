@@ -948,12 +948,21 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title"><i class="fas fa-utensils"></i> Menu Items</h3>
-              <input type="text" class="form-input" placeholder="Search..." id="menuSearch" style="width:200px;" />
+              <div class="btn-group"><button class="btn btn-sm btn-outline" id="uploadMenuPdfBtn" type="button"><i class="fas fa-file-pdf"></i> Upload Menu PDF</button><input id="menuPdfInput" type="file" accept="application/pdf,.pdf" hidden /><button class="btn btn-sm btn-outline" id="downloadMenuPdfSampleBtn" type="button"><i class="fas fa-download"></i> Download sample PDF format</button><input type="text" class="form-input" placeholder="Search..." id="menuSearch" style="width:200px;" /></div>
             </div>
             <div class="card-body">
               <div class="tab-pills" id="menuCategoryTabs"><button class="tab-pill active" data-category="all">All</button></div>
               <div class="menu-grid" id="menuList" style="margin-top:13px;"></div>
             </div>
+          </div>
+        </div>
+        <div class="card" id="menuImportCard" style="display:none;margin-top:16px;">
+          <div class="card-header"><h3 class="card-title"><i class="fas fa-file-import"></i> Review Imported Menu</h3><span id="menuImportStatus" class="muted" style="font-size:12px;"></span></div>
+          <div class="card-body">
+            <p class="muted" style="margin-top:0;">Review every extracted item before importing. Existing menu items are never changed unless you explicitly enable update duplicates.</p>
+            <div style="overflow:auto;"><table class="data-table" style="min-width:650px;"><thead><tr><th>Category</th><th>Item Name</th><th>Price</th><th>Status</th><th>Edit</th><th>Remove</th></tr></thead><tbody id="menuImportRows"></tbody></table></div>
+            <label class="check-row" style="margin-top:14px;"><input id="menuImportUpdateDuplicates" type="checkbox" /> Update price/category for duplicates (confirmed overwrite)</label>
+            <div class="btn-group" style="margin-top:14px;"><button class="btn btn-primary" id="importMenuBtn" type="button"><i class="fas fa-file-import"></i> Import Menu</button><button class="btn btn-outline" id="cancelMenuImportBtn" type="button">Cancel</button></div>
           </div>
         </div>
       </section>
@@ -1261,6 +1270,7 @@
     .subscription-lock.show{display:flex}.subscription-lock-card{width:min(510px,100%);padding:34px;border:1px solid rgba(224,124,26,.28);border-radius:24px;background:linear-gradient(145deg,#fffdf9,#fff4e6);box-shadow:0 32px 90px rgba(0,0,0,.35);text-align:center}.subscription-lock-mark{display:grid;place-items:center;width:58px;height:58px;margin:0 auto 16px;border-radius:18px;background:linear-gradient(135deg,#f2a13c,#d66a0c);color:#fff;font-size:24px;box-shadow:0 12px 26px rgba(224,124,26,.25)}.subscription-lock-kicker{color:#b65d09;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.subscription-lock-card h2{margin:7px 0 10px;font-size:28px;color:#21160e}.subscription-lock-card>p{margin:0;color:#705f50;line-height:1.6}.subscription-lock-details{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:22px 0 14px}.subscription-lock-details div{padding:12px 8px;border:1px solid #f0dfca;border-radius:12px;background:rgba(255,255,255,.74)}.subscription-lock-details span,.subscription-lock-details strong{display:block}.subscription-lock-details span{color:#8a7767;font-size:10px;text-transform:uppercase;letter-spacing:.05em}.subscription-lock-details strong{margin-top:5px;font-size:13px;color:#352416;overflow-wrap:anywhere}.subscription-lock-support{margin:0 0 18px;color:#86603e;font-size:12px}.subscription-lock-actions{display:flex;gap:9px;justify-content:center;flex-wrap:wrap}.subscription-lock-actions .btn{min-height:42px}@media(max-width:540px){.subscription-lock-card{padding:26px 18px}.subscription-lock-details{grid-template-columns:1fr}.subscription-lock-actions .btn{width:100%}}
   </style>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script type="module" src="./js/admin.js"></script>
   <script type="module" src="./js/admin-modules.js"></script>
 
