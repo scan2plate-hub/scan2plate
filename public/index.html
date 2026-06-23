@@ -959,7 +959,9 @@ import {
 
         if (settingSnap.exists()) {
           const data = settingSnap.data();
-          tokenMode = String(data.orderMode || restaurantPlanData.orderMode || "table").toLowerCase() === "token" || String(data.businessMode || restaurantPlanData.businessMode || "").toLowerCase() === "vendor";
+          const resolvedOrderMode = restaurantPlanData.orderMode || data.orderMode || "Table";
+          const hasExplicitOrderMode = Boolean(restaurantPlanData.orderMode || data.orderMode);
+          tokenMode = String(resolvedOrderMode).toLowerCase() === "token" || (!hasExplicitOrderMode && String(data.businessMode || restaurantPlanData.businessMode || "").toLowerCase() === "vendor");
           restaurantTitle.textContent = `${data.restaurantName || "Restaurant"} Menu`;
           taxPercent = Number(data.taxPercent || 5);
           restaurantLocationSettings = {
@@ -969,7 +971,7 @@ import {
             locationProtectionEnabled: data.locationProtectionEnabled === true || data.enableLocationProtection === true || restaurantPlanData.locationProtectionEnabled === true || restaurantPlanData.enableLocationProtection === true
           };
         } else {
-          tokenMode = String(restaurantPlanData.orderMode || "table").toLowerCase() === "token" || String(restaurantPlanData.businessMode || "").toLowerCase() === "vendor";
+          tokenMode = String(restaurantPlanData.orderMode || "Table").toLowerCase() === "token" || (!restaurantPlanData.orderMode && String(restaurantPlanData.businessMode || "").toLowerCase() === "vendor");
           restaurantTitle.textContent = "Restaurant Menu";
           restaurantLocationSettings = {
             restaurantLat: restaurantPlanData.restaurantLat ?? null,

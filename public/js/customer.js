@@ -166,6 +166,13 @@ async function loadSettings() {
       ...rootData,
       ...restaurantData,
       ...scopedData,
+      // The main restaurant record is the source of truth for panel/order
+      // identity. A stale settings/general value must not turn an old table
+      // restaurant into a token vendor.
+      businessType: restaurantData.businessType || scopedData.businessType || 'Restaurant',
+      orderMode: restaurantData.orderMode || scopedData.orderMode || 'Table',
+      panelType: restaurantData.panelType || scopedData.panelType || 'RestaurantAdmin',
+      businessMode: restaurantData.businessType === 'Restaurant' || restaurantData.orderMode === 'Table' ? 'restaurant' : (restaurantData.businessMode || scopedData.businessMode || 'restaurant'),
       plan: String(restaurantData.plan || scopedData.plan || settings.plan || 'advance').toLowerCase()
     };
   } catch (e) {
