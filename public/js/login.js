@@ -1,93 +1,24 @@
 import { auth, db } from "./firebase.js";
-import { signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const loginForm = document.getElementById("loginForm");
-const emailEl = document.getElementById("email");
-const passwordEl = document.getElementById("password");
+const $ = id => document.getElementById(id);
+const form = $("loginForm"), emailEl = $("email"), passwordEl = $("password"), typeEl = $("businessType"), loginButton = $("loginButton"), messageEl = $("loginMessage"), mismatchModal = $("typeMismatchModal");
+const canonical = value => String(value || "Restaurant").trim().toLowerCase().replace(/\s+/g, " ");
+const routeByType = { restaurant:"./admin-dashboard.html", cafe:"./cafe-token-panel.html", "street vendor":"./vendor-panel.html", hotel:"./hotel-room-panel.html", "cloud kitchen":"./cloud-kitchen-panel.html", "food court":"./food-court-panel.html", bakery:"./cafe-token-panel.html", "sweet shop":"./cafe-token-panel.html", dhaba:"./cafe-token-panel.html", "fast food":"./cafe-token-panel.html", "juice shop":"./cafe-token-panel.html", "tea stall":"./cafe-token-panel.html", kitchen:"./kitchen-dashboard.html" };
+const panelByType = { restaurant:"restaurantadmin", cafe:"cafetoken", "street vendor":"vendormobile", hotel:"hotelroom", "cloud kitchen":"cloudkitchen", "food court":"foodcourttoken", bakery:"cafetoken", "sweet shop":"cafetoken", dhaba:"cafetoken", "fast food":"cafetoken", "juice shop":"cafetoken", "tea stall":"cafetoken" };
+function showMessage(text) { if (messageEl) { messageEl.textContent = text; messageEl.classList.add("show"); } }
+function setLoading(value) { if (loginButton) { loginButton.disabled = value; loginButton.textContent = value ? "Signing in…" : "Login"; } }
+function expired(business = {}) { const status=String(business.status||"").toLowerCase(), subscription=String(business.subscriptionStatus||"").toLowerCase(); if (["expired","suspended"].includes(status)||subscription==="expired") return true; const raw=business.planExpiryDate||business.expiryDate; if(!raw) return false; const date=raw.toDate?raw.toDate():typeof raw.seconds==="number"?new Date(raw.seconds*1000):new Date(raw); if(Number.isNaN(date.getTime())) return false; date.setHours(23,59,59,999); return date.getTime()<Date.now(); }
+async function findProfile(email) { const id=email.replaceAll("@","_").replaceAll(".","_"); const restaurants=await getDocs(collection(db,"restaurants")); for(const restaurantDoc of restaurants.docs) { const user=await getDoc(doc(db,"restaurants",restaurantDoc.id,"users",id)); if(user.exists()&&String(user.data().email||"").toLowerCase()===email) return { profile:user.data(), business:{id:restaurantDoc.id,...restaurantDoc.data()} }; } return null; }
+function saveSession(credential, profile, business) { const session={uid:credential.user.uid,email:credential.user.email||emailEl.value.trim().toLowerCase(),name:profile.name||"",role:profile.role||"staff",restaurantId:profile.restaurantId||business.id}; localStorage.setItem("scan2plate_user",JSON.stringify(session)); localStorage.setItem("scan2serve_user",JSON.stringify(session)); localStorage.setItem("scan2plate_last_restaurant_id",session.restaurantId); return session; }
+async function loginSuperAdmin(credential) { const record=await getDoc(doc(db,"super_admins",credential.user.uid)); if(!record.exists()) return false; localStorage.setItem("scan2serve_super_admin",JSON.stringify({uid:credential.user.uid,role:"super_admin",...record.data()})); window.location.assign("./super-admin-dashboard.html"); return true; }
 
-function isRestaurantExpired(restaurantData = {}) {
-  const status = String(restaurantData.status || "").toLowerCase();
-  const subscriptionStatus = String(restaurantData.subscriptionStatus || "").toLowerCase();
-  if (["expired", "suspended"].includes(status) || subscriptionStatus === "expired") return true;
-  const rawExpiry = restaurantData.planExpiryDate || restaurantData.expiryDate;
-  if (!rawExpiry) return false;
-  const expiry = rawExpiry.toDate ? rawExpiry.toDate() : typeof rawExpiry.seconds === "number" ? new Date(rawExpiry.seconds * 1000) : new Date(rawExpiry);
-  if (Number.isNaN(expiry.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  expiry.setHours(0, 0, 0, 0);
-  return expiry < today;
-}
+$("closeTypeMismatch")?.addEventListener("click",()=>mismatchModal?.classList.remove("open")); mismatchModal?.addEventListener("click",event=>{if(event.target===mismatchModal)mismatchModal.classList.remove("open")});
+$("forgotPasswordLink")?.addEventListener("click",async event=>{ event.preventDefault(); const email=emailEl?.value.trim().toLowerCase(); if(!email)return showMessage("Enter your email address first, then select Forgot Password."); try { await sendPasswordResetEmail(auth,email); showMessage("Password reset email sent. Follow the secure link in your inbox to set a new password."); } catch(error) { console.error("Password reset error",error); showMessage("Unable to send a password reset email. Check the email address and try again."); } });
 
-loginForm?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-
-  const email = emailEl.value.trim().toLowerCase();
-  const password = passwordEl.value.trim();
-
-  if (!email || !password) {
-    alert("Enter email and password");
-    return;
-  }
-
-  try {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-
-    const restaurantSnap = await getDocs(collection(db, "restaurants"));
-    const userDocId = email.replaceAll("@", "_").replaceAll(".", "_");
-
-    let foundProfile = null;
-    let foundRestaurant = null;
-
-    for (const restDoc of restaurantSnap.docs) {
-      const restaurantId = restDoc.id;
-      const userRef = doc(db, "restaurants", restaurantId, "users", userDocId);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-
-        if (data.email?.toLowerCase() === email) {
-          foundProfile = data;
-          foundRestaurant = { id: restaurantId, ...restDoc.data() };
-          break;
-        }
-      }
-    }
-
-    if (!foundProfile || !foundRestaurant) {
-      alert("User profile not found in restaurant users");
-      return;
-    }
-
-    if (isRestaurantExpired(foundRestaurant)) {
-      await signOut(auth);
-      alert("Your plan has expired. Please renew to continue using Scan2Plate.");
-      return;
-    }
-
-    const payload = {
-      uid: cred.user.uid,
-      email: cred.user.email || email,
-      name: foundProfile.name || "",
-      role: foundProfile.role || "staff",
-      restaurantId: foundProfile.restaurantId || foundRestaurant.id
-    };
-
-    localStorage.setItem("scan2plate_user", JSON.stringify(payload));
-    localStorage.setItem("scan2serve_user", JSON.stringify(payload));
-    localStorage.setItem("scan2plate_last_restaurant_id", payload.restaurantId);
-
-    if ((payload.role || "").toLowerCase() === "kitchen") {
-      window.location.href = "./kitchen-dashboard.html";
-    } else {
-      const type = String(foundRestaurant.businessType || foundRestaurant.restaurantType || "Restaurant").toLowerCase();
-      const routes = { cafe:"./cafe-token-panel.html", "street vendor":"./vendor-panel.html", hotel:"./hotel-room-panel.html", "cloud kitchen":"./cloud-kitchen-panel.html", "food court":"./food-court-panel.html" };
-      window.location.href = routes[type] || "./admin-dashboard.html";
-    }
-  } catch (err) {
-    console.error("LOGIN ERROR:", err);
-    alert(err.message || "Login failed");
-  }
-});
+form?.addEventListener("submit",async event=>{ event.preventDefault(); const email=emailEl?.value.trim().toLowerCase(), password=passwordEl?.value||"", selected=canonical(typeEl?.value); messageEl?.classList.remove("show"); if(!email||!password)return showMessage("Enter your email and password."); setLoading(true); try { const credential=await signInWithEmailAndPassword(auth,email,password); if(selected==="super admin") { if(await loginSuperAdmin(credential)) return; await signOut(auth); mismatchModal?.classList.add("open"); return; }
+  const result=await findProfile(email); if(!result){await signOut(auth);return showMessage("User profile not found for this account.");} const {profile,business}=result; if(expired(business)){await signOut(auth);return showMessage("Your plan has expired. Please renew to continue using Scan2Plate.");}
+  const role=String(profile.role||"staff").toLowerCase(), registeredType=canonical(business.businessType||"Restaurant"), registeredPanel=canonical(business.panelType||"RestaurantAdmin").replaceAll(" ",""); const kitchen=selected==="kitchen", staff=selected==="staff"; const matches=(kitchen&&role==="kitchen")||(staff&&["staff","employee"].includes(role))||(!kitchen&&!staff&&(selected===registeredType||panelByType[selected]===registeredPanel)); if(!matches){await signOut(auth);mismatchModal?.classList.add("open");return;}
+  saveSession(credential,profile,business); if(staff)return showMessage("The Staff Panel is not available yet. Please use the Restaurant Admin Panel."); window.location.assign(routeByType[selected]||routeByType.restaurant);
+} catch(error) { console.error("Login error",error); showMessage(error?.message||"Login failed. Please try again."); } finally { setLoading(false); } });

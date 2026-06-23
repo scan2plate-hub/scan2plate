@@ -3,46 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Staff Login - Scan2Plate</title>
-  <link rel="stylesheet" href="./css/style.css" />
+  <title>Admin Login · Scan2Plate</title>
+  <link rel="stylesheet" href="./css/style.css?v=latest-business-login-fix" />
+  <style>
+    :root { --login-orange:#F97316; --login-dark:#111827; }
+    .s2p-login-page { min-height:100vh; display:grid; place-items:center; padding:24px; background:radial-gradient(circle at top left,#fff0e3 0,transparent 34%),linear-gradient(135deg,#fff 0%,#fff7f1 100%); }
+    .s2p-login-card { width:min(440px,100%); padding:32px; border:1px solid #fed7aa; border-radius:24px; background:#fff; box-shadow:0 24px 55px rgba(17,24,39,.12); }
+    .s2p-login-brand { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:24px; color:var(--login-dark); font-size:22px; font-weight:850; }
+    .s2p-login-brand img { width:42px; height:42px; padding:3px; object-fit:contain; border-radius:12px; background:#fff; box-shadow:0 5px 14px rgba(17,24,39,.12); }
+    .s2p-login-card h1 { margin:0; color:var(--login-dark); font-size:27px; text-align:center; }
+    .s2p-login-subtitle { margin:8px 0 25px; color:#6b7280; text-align:center; font-size:14px; line-height:1.55; }
+    .s2p-login-field { margin-top:15px; }.s2p-login-field .label { color:#374151; }.s2p-login-card .input,.s2p-login-card .select { min-height:48px; border-color:#d1d5db; }
+    .s2p-login-card .input:focus,.s2p-login-card .select:focus { outline:3px solid rgba(249,115,22,.18); border-color:var(--login-orange); }.s2p-login-submit { width:100%; min-height:48px; margin-top:23px; background:var(--login-orange); color:#fff; }.s2p-login-submit:disabled { cursor:wait; opacity:.7; }
+    .s2p-login-actions { display:flex; justify-content:space-between; gap:12px; margin-top:17px; font-size:13px; }.s2p-login-actions a { color:#c2410c; font-weight:750; }.s2p-login-message { display:none; margin-top:16px; padding:11px 13px; border-radius:12px; background:#fff7ed; color:#9a3412; font-size:13px; line-height:1.45; }.s2p-login-message.show { display:block; }
+    .s2p-login-modal { position:fixed; inset:0; z-index:100; display:none; place-items:center; padding:20px; background:rgba(17,24,39,.52); }.s2p-login-modal.open { display:grid; }.s2p-login-modal-card { width:min(410px,100%); border-radius:20px; padding:25px; background:#fff; box-shadow:0 25px 60px rgba(0,0,0,.26); }.s2p-login-modal-card h2 { margin:0 0 10px; color:var(--login-dark); font-size:21px; }.s2p-login-modal-card p { margin:0; color:#4b5563; line-height:1.6; }.s2p-login-contact { margin:17px 0; padding:12px; border-radius:12px; background:#fff7ed; color:#9a3412; font-size:14px; line-height:1.65; }
+    @media (max-width:480px) { .s2p-login-page { padding:16px; align-items:start; }.s2p-login-card { margin-top:22px; padding:25px 20px; border-radius:20px; }.s2p-login-actions { align-items:flex-start; flex-direction:column-reverse; } }
+  </style>
 </head>
 <body>
-  <section class="login-wrap">
-    <div class="card login-card">
-      <div class="center" style="margin-bottom:16px">
-        <div class="logo" style="justify-content:center">
-          <img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo">
-          <div></div>
-        </div>
-        <p class="muted">Login for admin, staff, or kitchen</p>
-      </div>
-
-      <form id="loginForm">
-        <div>
-          <label class="label">Email</label>
-          <input class="input" id="email" type="email" placeholder="admin@scan2plate.com" />
-        </div>
-
-        <div style="margin-top:12px">
-          <label class="label">Password</label>
-          <input class="input" id="password" type="password" placeholder="Enter password" />
-        </div>
-
-        <button type="submit" class="btn btn-primary" style="width:100%;margin-top:16px">
-          Login
-        </button>
-      </form>
-
-      <p class="notice" style="margin-top:14px">
-       
-      </p>
-
-      <div class="center" style="margin-top:12px">
-        <a href="./index.html" class="muted">Back to customer page</a>
-      </div>
-    </div>
-  </section>
-
-  <script type="module" src="./js/login.js"></script>
+  <main class="s2p-login-page"><section class="s2p-login-card" aria-labelledby="loginTitle">
+    <div class="s2p-login-brand"><img src="./assets/logo.PNG" alt="Scan2Plate logo" /><span>Scan2Plate</span></div>
+    <h1 id="loginTitle">Admin Login</h1><p class="s2p-login-subtitle">Sign in to the panel registered for your business.</p>
+    <form id="loginForm" novalidate>
+      <div class="s2p-login-field"><label class="label" for="businessType">Select Business Type</label><select class="select" id="businessType" required><option value="Restaurant">Restaurant</option><option value="Cafe">Cafe</option><option value="Street Vendor">Street Vendor</option><option value="Hotel">Hotel</option><option value="Cloud Kitchen">Cloud Kitchen</option><option value="Food Court">Food Court</option><option value="Bakery">Bakery</option><option value="Sweet Shop">Sweet Shop</option><option value="Dhaba">Dhaba</option><option value="Fast Food">Fast Food</option><option value="Juice Shop">Juice Shop</option><option value="Tea Stall">Tea Stall</option><option value="Staff">Staff</option><option value="Kitchen">Kitchen</option><option value="Super Admin">Super Admin</option></select></div>
+      <div class="s2p-login-field"><label class="label" for="email">Email</label><input class="input" id="email" type="email" autocomplete="email" placeholder="admin@scan2plate.com" required /></div>
+      <div class="s2p-login-field"><label class="label" for="password">Password</label><input class="input" id="password" type="password" autocomplete="current-password" placeholder="Enter password" required /></div>
+      <button id="loginButton" type="submit" class="btn s2p-login-submit">Login</button>
+    </form>
+    <div id="loginMessage" class="s2p-login-message" role="alert"></div><div class="s2p-login-actions"><a href="./index.html">← Back to home</a><a id="forgotPasswordLink" href="#forgot-password">Forgot Password?</a></div>
+  </section></main>
+  <div id="typeMismatchModal" class="s2p-login-modal" role="dialog" aria-modal="true" aria-labelledby="typeMismatchTitle"><div class="s2p-login-modal-card"><h2 id="typeMismatchTitle">Panel not registered</h2><p>This business type is not registered for your account.</p><p style="margin-top:8px">Please contact Scan2Plate to register or upgrade your business type.</p><div class="s2p-login-contact">Phone: <strong>+91 9142579601</strong><br />WhatsApp: <strong>+91 9142579601</strong></div><button id="closeTypeMismatch" class="btn btn-primary" type="button" style="width:100%;background:#F97316">Okay</button></div></div>
+  <script type="module" src="./js/login.js?v=latest-business-login-fix"></script>
 </body>
 </html>

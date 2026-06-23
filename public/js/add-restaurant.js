@@ -17,22 +17,16 @@ if (restaurantType) {
     if (![...restaurantType.options].some(option => option.value === type)) restaurantType.add(new Option(type, type));
   });
 }
+// This only updates visible language. Legacy element IDs and Firestore paths
+// remain unchanged so existing integrations continue to work.
 function applyBusinessOnboardingLabels() {
-  document.querySelectorAll("label,h1,h2,p,.ar-kicker,.ar-btn,.ar-back").forEach(element => {
-    if (element.children.length) return;
-    const text = element.textContent.trim();
-    const replacements = {
-      "Restaurant onboarding": "Business onboarding",
-      "Add New Restaurant": "Add New Business",
-      "Restaurant Details": "Business Details",
-      "Restaurant Name *": "Business Name *",
-      "Restaurant ID *": "Business ID *",
-      "Restaurant Type": "Business Type",
-      "Restaurant Settings": "Business Settings",
-      "Create Restaurant Account →": "Create Business Account →",
-      "Restaurant created successfully": "Business created successfully"
-    };
-    if (replacements[text]) element.textContent = replacements[text];
+  const replacements = [[/Restaurant onboarding/g, "Business onboarding"], [/Add New Restaurant/g, "Add New Business"], [/Restaurant Details/g, "Business Details"], [/Restaurant Name \*/g, "Business Name *"], [/Restaurant ID \*/g, "Business ID *"], [/Restaurant Type/g, "Business Type"], [/Restaurant Settings/g, "Business Settings"], [/Create Restaurant Account/g, "Create Business Account"]];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    if (node.parentElement?.closest("script,style")) return;
+    replacements.forEach(([find, replacement]) => { node.nodeValue = node.nodeValue.replace(find, replacement); });
   });
   if (restaurantName) restaurantName.placeholder = "Business name";
 }
@@ -86,7 +80,7 @@ saveRestaurantBtn?.addEventListener("click", async () => {
     const businessType = restaurantType?.value || "Restaurant";
     const type = businessType.toLowerCase();
     const orderMode = ["cafe", "street vendor", "food court", "bakery", "sweet shop", "dhaba", "fast food", "juice shop", "tea stall"].includes(type) ? "token" : type === "hotel" ? "room" : type === "cloud kitchen" ? "delivery" : "table";
-    const panelType = ({ cafe:"CafeToken", "street vendor":"VendorMobile", hotel:"HotelRoom", "cloud kitchen":"CloudKitchen", "food court":"FoodCourtToken" })[type] || "RestaurantAdmin";
+    const panelType = ({ cafe:"CafeToken", "street vendor":"VendorMobile", hotel:"HotelRoom", "cloud kitchen":"CloudKitchen", "food court":"FoodCourtToken", bakery:"CafeToken", "sweet shop":"CafeToken", dhaba:"CafeToken", "fast food":"CafeToken", "juice shop":"CafeToken", "tea stall":"CafeToken" })[type] || "RestaurantAdmin";
     await setDoc(doc(db, "restaurants", id), { businessType, orderMode, qrMode: orderMode === "table" ? "table" : orderMode === "room" ? "room" : "single", panelType, tokenEnabled:["token","room"].includes(orderMode), roomServiceEnabled:orderMode === "room", roomCount:orderMode === "room" ? tables : 0 }, { merge:true });
     await setDoc(doc(db, "restaurants", id, "settings", "general"), { businessType, orderMode, qrMode: orderMode === "table" ? "table" : orderMode === "room" ? "room" : "single", panelType, tokenEnabled:["token","room"].includes(orderMode), roomServiceEnabled:orderMode === "room" }, { merge:true });
     await setDoc(doc(db, "restaurants", id, "settings", "general"), settings, { merge:true });
