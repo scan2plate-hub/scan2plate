@@ -225,6 +225,8 @@ const menuImportUpdateDuplicatesEl = document.getElementById("menuImportUpdateDu
 const importMenuBtn = document.getElementById("importMenuBtn");
 const cancelMenuImportBtn = document.getElementById("cancelMenuImportBtn");
 let menuImportItems = [];
+let menuImportInvalidCount = 0;
+let menuImportWarning = "";
 const inventoryUsageRowsEl = document.getElementById("inventoryUsageRows");
 const addInventoryUsageBtn = document.getElementById("addInventoryUsageBtn");
 const inventoryItemNameEl = document.getElementById("inventoryItemName");
@@ -389,53 +391,98 @@ function getUniqueCategories(items = []) {
   );
 }
 
-const MENU_PDF_CATEGORIES = ["Burger", "Pasta", "Drinks", "Chinese", "Tea", "Coffee", "Snacks", "Pizza", "Sandwich", "Momos", "Rice", "Dessert", "Starters", "Main Course", "Beverages"];
+const MENU_PDF_CATEGORIES = ["Kadak Chai", "Hot Coffee", "Cold Coffee", "Milk Shake", "Coolers", "Hot Milk", "Firangi French Fries", "Garlic Bread", "Old Monk Special", "Magical Momos", "Magestic Maggie", "Burger Buffet", "Shahi Sandwich", "Pristine Pizza", "Aakhri Pasta", "Noodles", "Rolls", "Chinese Snacks", "Fried Rice", "Pav", "Soup", "Desi Paneer", "Marvellous Mushroom", "Roti & Rice", "South Indian", "Dessert Dhamaka", "Burger", "Pasta", "Drinks", "Chinese", "Tea", "Coffee", "Snacks", "Pizza", "Sandwich", "Momos", "Rice", "Dessert", "Starters", "Main Course", "Beverages"];
 const normalizedMenuName = value => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+const MENU_PDF_NOISE = /^(menu|open\s*10\s*am|basudeopur|@?old\s*monk\s*cafe|thanks|about\s*us|our\s*story|follow\s*us|rate\s*us|scan2plate)$/i;
 
 function categoryFromMenuLine(line) {
-  const clean = String(line || "").replace(/[:|]/g, "").trim();
+  const clean = String(line || "").replace(/[₹|]/g, "").replace(/[:]/g, "").replace(/\s+/g, " ").trim();
   const match = MENU_PDF_CATEGORIES.find(category => { const value = clean.toLowerCase(); const base = category.toLowerCase(); return value === base || value === `${base}s`; });
   if (match) return match;
-  if (!/\d/.test(clean) && clean.length <= 32 && clean.split(/\s+/).length <= 4 && clean === clean.toUpperCase()) return clean.replace(/\b\w/g, char => char.toUpperCase()).toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+  if (!MENU_PDF_NOISE.test(clean) && !/\d/.test(clean) && clean.length <= 38 && clean.split(/\s+/).length <= 5 && clean === clean.toUpperCase()) return clean.toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
   return "";
 }
 
-function parseMenuPdfText(text) {
-  let category = "Uncategorized";
+function cleanMenuName(value) {
+  return String(value || "").replace(/[₹]/g, " ").replace(/(?:rs\.?|inr\.?)/ig, " ").replace(/[|–—]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function isValidMenuName(value) {
+  const name = cleanMenuName(value);
+  return /[A-Za-z]/.test(name) && !/^[-₹\d./\s]+$/.test(name) && !MENU_PDF_NOISE.test(name);
+}
+
+function priceFromText(line) {
+  const value = String(line || "");
+  const match = value.match(/(?:₹\s*|rs\.?\s*|inr\.?\s*)(\d{1,5}(?:\.\d{1,2})?)|\b(\d{1,5}(?:\.\d{1,2})?)\s*\/-/i);
+  if (match) return Number(match[1] || match[2]);
+  const trailing = /[A-Za-z].*?\s(\d{1,5}(?:\.\d{1,2})?)\s*$/.exec(value);
+  return trailing ? Number(trailing[1]) : null;
+}
+
+function isPriceOnlyLine(line) {
+  return /^(?:₹\s*|rs\.?\s*|inr\.?\s*)?\d{1,5}(?:\.\d{1,2})?\s*(?:\/-)?\s*₹?$/i.test(String(line || "").trim());
+}
+
+function addParsedMenuItem(target, candidate, category) {
+  const name = cleanMenuName(candidate?.name);
+  const price = Number(candidate?.price);
+  if (!isValidMenuName(name) || !Number.isFinite(price) || price <= 0) return false;
+  target.push({ category: category || "Uncategorized", name, price });
+  return true;
+}
+
+function parsePdfColumnLines(lines) {
+  let category = "Uncategorized", pendingName = "", invalid = 0, headings = 0;
   const items = [];
-  String(text || "").split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(Boolean).forEach(line => {
-    const detectedCategory = categoryFromMenuLine(line);
-    if (detectedCategory) { category = detectedCategory; return; }
-    const match = line.match(/^(.+?)\s*(?:[-–—|.]\s*)?(?:₹|rs\.?|inr\.?\s*)?(\d{1,5}(?:\.\d{1,2})?)\s*(?:\/-)?$/i);
-    if (!match) return;
-    const name = match[1].replace(/[.\-–—|]+$/g, "").trim();
-    const price = Number(match[2]);
-    if (name.length >= 2 && Number.isFinite(price) && price > 0) items.push({ category, name, price });
+  lines.forEach(rawLine => {
+    const line = String(rawLine || "").replace(/\s+/g, " ").trim();
+    if (!line || MENU_PDF_NOISE.test(line)) return;
+    const heading = categoryFromMenuLine(line);
+    if (heading) { category = heading; pendingName = ""; headings++; return; }
+    const price = priceFromText(line);
+    if (price !== null && !isPriceOnlyLine(line)) {
+      const name = cleanMenuName(line.replace(/(?:₹\s*|rs\.?\s*|inr\.?\s*)?\d{1,5}(?:\.\d{1,2})?\s*(?:\/-)?\s*₹?$/i, ""));
+      if (addParsedMenuItem(items, { name, price }, category)) pendingName = "";
+      else invalid++;
+      return;
+    }
+    if (price !== null && isPriceOnlyLine(line)) {
+      if (pendingName && addParsedMenuItem(items, { name: pendingName, price }, category)) pendingName = "";
+      else invalid++;
+      return;
+    }
+    if (isValidMenuName(line)) pendingName = pendingName ? `${pendingName} ${line}` : cleanMenuName(line);
   });
-  return items;
+  return { items, invalid, headings };
 }
 
 async function extractMenuPdf(file) {
   if (!window.pdfjsLib) throw new Error("PDF reader is unavailable. Please check your internet connection and try again.");
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   const pdf = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-  const pages = [];
+  const parsed = { items: [], invalid: 0, headings: 0 };
   for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
-    const content = await (await pdf.getPage(pageNo)).getTextContent();
+    const page = await pdf.getPage(pageNo); const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
     const lines = new Map();
     content.items.forEach(item => {
-      const y = Math.round(Number(item.transform?.[5] || 0));
-      const row = lines.get(y) || [];
+      const x = Number(item.transform?.[4] || 0); const y = Math.round(Number(item.transform?.[5] || 0) / 3) * 3;
+      const column = Math.min(2, Math.floor(x / Math.max(viewport.width / 2, 1)));
+      const key = `${column}:${y}`; const row = lines.get(key) || [];
       row.push({ x: Number(item.transform?.[4] || 0), text: item.str || "" });
-      lines.set(y, row);
+      lines.set(key, row);
     });
-    pages.push([...lines.entries()].sort((a, b) => b[0] - a[0]).map(([, row]) => row.sort((a, b) => a.x - b.x).map(word => word.text).join(" ")).join("\n"));
+    const columns = new Map();
+    lines.forEach((row, key) => { const [column, y] = key.split(":"); const list = columns.get(column) || []; list.push({ y:Number(y), text:row.sort((a,b) => a.x - b.x).map(word => word.text).join(" ") }); columns.set(column, list); });
+    [...columns.keys()].sort((a,b) => Number(a) - Number(b)).forEach(column => { const result = parsePdfColumnLines(columns.get(column).sort((a,b) => b.y - a.y).map(line => line.text)); parsed.items.push(...result.items); parsed.invalid += result.invalid; parsed.headings += result.headings; });
   }
-  return parseMenuPdfText(pages.join("\n"));
+  const unique = new Map(); parsed.items.forEach(item => unique.set(`${normalizedMenuName(item.category)}|${normalizedMenuName(item.name)}|${item.price}`, item));
+  return { items:[...unique.values()], invalid:parsed.invalid, headings:parsed.headings };
 }
 
 function menuDuplicateFor(item) {
-  return allMenuItems.find(existing => normalizedMenuName(existing.name) === normalizedMenuName(item.name));
+  return allMenuItems.find(existing => normalizedMenuName(existing.name) === normalizedMenuName(item.name) && normalizedMenuName(existing.category) === normalizedMenuName(item.category));
 }
 
 function renderMenuImportReview() {
@@ -448,12 +495,14 @@ function renderMenuImportReview() {
   }).join("");
   menuImportRowsEl.querySelectorAll(".import-edit").forEach(button => button.onclick = () => button.closest("tr")?.querySelector(".import-name")?.focus());
   menuImportRowsEl.querySelectorAll(".import-remove").forEach(button => button.onclick = () => { menuImportItems.splice(Number(button.closest("tr")?.dataset.importIndex), 1); renderMenuImportReview(); });
-  if (menuImportStatusEl) menuImportStatusEl.textContent = `${menuImportItems.length} item${menuImportItems.length === 1 ? "" : "s"} ready for review`;
+  if (menuImportStatusEl) menuImportStatusEl.textContent = `${menuImportItems.length} item${menuImportItems.length === 1 ? "" : "s"} ready for review${menuImportInvalidCount ? ` · ${menuImportInvalidCount} invalid row${menuImportInvalidCount === 1 ? "" : "s"} skipped` : ""}${menuImportWarning ? ` · ${menuImportWarning}` : ""}`;
 }
 
 async function importReviewedMenuItems() {
   const rows = [...(menuImportRowsEl?.querySelectorAll("tr[data-import-index]") || [])];
-  const reviewed = rows.map(row => ({ category: normalizeCategory(row.querySelector(".import-category")?.value), name: row.querySelector(".import-name")?.value.trim() || "", price: Number(row.querySelector(".import-price")?.value || 0) })).filter(item => item.name && item.price > 0);
+  const allReviewed = rows.map(row => ({ category: normalizeCategory(row.querySelector(".import-category")?.value), name: cleanMenuName(row.querySelector(".import-name")?.value), price: Number(row.querySelector(".import-price")?.value || 0) }));
+  const invalidRows = allReviewed.filter(item => !item.category || !isValidMenuName(item.name) || !Number.isFinite(item.price) || item.price <= 0).length;
+  const reviewed = allReviewed.filter(item => item.category && isValidMenuName(item.name) && Number.isFinite(item.price) && item.price > 0);
   if (!reviewed.length) return alert("Add at least one valid item before importing.");
   const updateDuplicates = Boolean(menuImportUpdateDuplicatesEl?.checked);
   if (updateDuplicates && !confirm("Update category and price for matching existing menu items? Images and descriptions will stay unchanged.")) return;
@@ -472,8 +521,8 @@ async function importReviewedMenuItems() {
       if (duplicate) { await setDoc(doc(db, "restaurants", restaurantId, "menu", duplicate.id), payload, { merge:true }); updated++; }
       else { await addDoc(collection(db, "restaurants", restaurantId, "menu"), { ...payload, imageUrl:"", image:"", description:"", createdAt:serverTimestamp() }); added++; }
     }
-    alert(`Menu import complete: ${added} added, ${updated} updated, ${skipped} skipped.`);
-    menuImportItems = []; if (menuPdfInput) menuPdfInput.value = ""; if (menuImportUpdateDuplicatesEl) menuImportUpdateDuplicatesEl.checked = false;
+    alert(`Menu import complete: Imported: ${added + updated}, Skipped duplicates: ${skipped}, Invalid rows: ${invalidRows}.`);
+    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuImportUpdateDuplicatesEl) menuImportUpdateDuplicatesEl.checked = false;
     await loadMenuData(); renderMenuManagement(); renderManualMenuPicker(); renderMenuImportReview();
   } catch (error) { console.error("Menu PDF import failed", error); alert("Could not import menu. Please review the items and try again."); }
   finally { importMenuBtn.disabled = false; importMenuBtn.innerHTML = '<i class="fas fa-file-import"></i> Import Menu'; }
@@ -3061,17 +3110,19 @@ menuPdfInput?.addEventListener("change", async () => {
   try {
     if (menuImportStatusEl) menuImportStatusEl.textContent = "Reading menu PDF…";
     const extracted = await extractMenuPdf(file);
-    if (!extracted.length) throw new Error("No menu items detected");
-    menuImportItems = extracted;
+    if (!extracted.items.length) throw new Error("No menu items detected");
+    menuImportItems = extracted.items;
+    menuImportInvalidCount = extracted.invalid;
+    menuImportWarning = extracted.headings ? "Some items may need review. Please check category, item name and price before import." : "Category headings were not confidently detected. Please review categories before import.";
     renderMenuImportReview();
   } catch (error) {
     console.error("Menu PDF extraction failed", error);
-    menuImportItems = []; renderMenuImportReview();
+    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; renderMenuImportReview();
     alert("Could not read menu clearly. Please upload clear PDF or enter manually.");
   }
 });
 importMenuBtn?.addEventListener("click", importReviewedMenuItems);
-cancelMenuImportBtn?.addEventListener("click", () => { menuImportItems = []; if (menuPdfInput) menuPdfInput.value = ""; renderMenuImportReview(); });
+cancelMenuImportBtn?.addEventListener("click", () => { menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; renderMenuImportReview(); });
 downloadMenuPdfSampleBtn?.addEventListener("click", downloadSampleMenuPdf);
 addInventoryUsageBtn?.addEventListener("click", () => renderInventoryUsageRows([
   ...(inventoryUsageRowsEl ? [...inventoryUsageRowsEl.querySelectorAll(".inventory-usage-row")].map(row => ({
