@@ -14,6 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { mountSafeReset } from "./safe-reset.js";
+import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
 
 /* =========================================================
    LOGIN / USER
@@ -1707,7 +1708,20 @@ async function scanPurchaseBill() {
   showPurchaseOcrMessage("");
   scanPurchaseBillBtn.disabled = true; scanPurchaseBillBtn.textContent = "Scanning…";
   try {
-    const uploadFile = await preparePurchaseBillForUpload(file);
+    let scanFile = file;
+    if (file.type === "application/pdf") {
+      let pdfText = "";
+      try { pdfText = await extractTextFromPdf(file); }
+      catch (error) { console.warn("PDF text extraction failed; trying scanned-PDF OCR fallback.", error); }
+      if (pdfText) {
+        const parsed = parseSupplierBillText(pdfText); reviewedPurchaseFileUrl = ""; applyPurchaseOcrResult(parsed); rescanPurchaseBillBtn?.classList.remove("hidden");
+        showPurchaseOcrMessage(parsed.items.length ? "Bill text extracted directly from PDF. Review before adding inventory." : "PDF has readable text, but the parser found no items. Review raw text or enter the bill manually.", Boolean(parsed.items.length));
+        return;
+      }
+      try { scanFile = await renderPdfFirstPage(file); }
+      catch (error) { throw new Error(error.message || "PDF has no readable text and first-page conversion is unavailable."); }
+    }
+    const uploadFile = await preparePurchaseBillForUpload(scanFile);
     const form = new FormData(); form.append("bill", uploadFile); form.append("restaurantId", restaurantId);
     const response = await fetch(`${backendUrl}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
     const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not read bill clearly. Please upload a clearer image or enter manually.");
