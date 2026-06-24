@@ -255,7 +255,10 @@ const scanPurchaseBillBtn = document.getElementById("scanPurchaseBillBtn");
 const rescanPurchaseBillBtn = document.getElementById("rescanPurchaseBillBtn");
 const purchaseReviewEl = document.getElementById("purchaseReview");
 const purchaseReviewRowsEl = document.getElementById("purchaseReviewRows");
+const addPurchaseReviewRowBtn = document.getElementById("addPurchaseReviewRowBtn");
+const purchaseBillNumberEl = document.getElementById("purchaseBillNumber");
 const purchaseBillDateEl = document.getElementById("purchaseBillDate");
+const purchaseTaxAmountEl = document.getElementById("purchaseTaxAmount");
 const purchaseGrandTotalEl = document.getElementById("purchaseGrandTotal");
 const savePurchaseBillBtn = document.getElementById("savePurchaseBillBtn");
 const purchaseHistoryRowsEl = document.getElementById("purchaseHistoryRows");
@@ -1570,9 +1573,10 @@ function renderInventoryHistory() {
 }
 
 function purchaseBackendUrl() {
-  // Normal deployments proxy /api on the same host. API_BASE_URL is an optional deploy-time override.
-  const configured = window.API_BASE_URL || window.__API_BASE_URL__ || restaurantSettings.apiBaseUrl || "";
-  return String(configured || restaurantSettings.backendUrl || window.location.origin || "").replace(/\/+$/, "");
+  // A saved override is useful for separate backends. Otherwise every hosted panel uses its own origin.
+  // When the field is visible, an intentionally blank value means use this site's API now.
+  const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
+  return String(configuredOverride || window.location.origin).replace(/\/+$/, "");
 }
 
 function showPurchaseOcrMessage(message = "", tone = "error") {
@@ -1598,12 +1602,13 @@ async function testOcrConnection() {
   const statusEl = document.getElementById("ocrServiceStatus"); const button = document.getElementById("testOcrConnectionBtn");
   if (statusEl) statusEl.textContent = "Checking…"; if (button) button.disabled = true;
   try {
-    const response = await fetch(`${purchaseBackendUrl()}/health`);
-    const data = await response.json();
-    if (!response.ok || data.inventoryBackendReady !== true) throw new Error("not configured");
-    if (statusEl) { statusEl.textContent = "Connected"; statusEl.style.color = "#18794e"; }
-  } catch {
-    if (statusEl) { statusEl.textContent = "Disconnected"; statusEl.style.color = "#b43731"; }
+    const response = await fetch(`${purchaseBackendUrl()}/api/ocr/status`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.endpointReachable !== true || data.validResponse !== true || data.status !== "ready") throw new Error(data.reason || "The OCR endpoint did not return a ready status.");
+    if (statusEl) { statusEl.textContent = "Connected ✅"; statusEl.title = "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
+  } catch (error) {
+    const reason = error.message === "Failed to fetch" ? "OCR endpoint could not be reached." : error.message;
+    if (statusEl) { statusEl.textContent = `Disconnected ❌ — ${reason}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
   } finally { if (button) button.disabled = false; }
 }
 
@@ -1613,16 +1618,26 @@ async function purchaseAuthHeaders() {
   return { Authorization: `Bearer ${token}` };
 }
 
-function renderPurchaseReview(items = []) {
-  if (!purchaseReviewRowsEl) return;
-  purchaseReviewRowsEl.innerHTML = items.length ? items.map(item => `<tr>
+function purchaseReviewRow(item = {}) {
+  return `<tr>
     <td><input class="form-input purchase-item-name" value="${escapeHtml(item.itemName || "")}" /></td>
     <td><input class="form-input purchase-qty" type="number" min="0" step="any" value="${Number(item.quantity || 0)}" /></td>
-    <td><select class="form-select purchase-unit"><option value="kg" ${item.unit === "kg" ? "selected" : ""}>kg</option><option value="gm" ${item.unit === "gm" ? "selected" : ""}>gm</option><option value="litre" ${item.unit === "litre" ? "selected" : ""}>litre</option><option value="ml" ${item.unit === "ml" ? "selected" : ""}>ml</option><option value="pcs" ${item.unit === "pcs" ? "selected" : ""}>pcs</option><option value="packet" ${item.unit === "packet" ? "selected" : ""}>packet</option><option value="box" ${item.unit === "box" ? "selected" : ""}>box</option></select></td>
+    <td><select class="form-select purchase-unit"><option value="kg" ${item.unit === "kg" ? "selected" : ""}>kg</option><option value="gm" ${item.unit === "gm" ? "selected" : ""}>gm</option><option value="litre" ${item.unit === "litre" ? "selected" : ""}>litre</option><option value="ml" ${item.unit === "ml" ? "selected" : ""}>ml</option><option value="pcs" ${!item.unit || item.unit === "pcs" ? "selected" : ""}>pcs</option><option value="packet" ${item.unit === "packet" ? "selected" : ""}>packet</option><option value="box" ${item.unit === "box" ? "selected" : ""}>box</option></select></td>
     <td><input class="form-input purchase-unit-price" type="number" min="0" step="any" value="${Number(item.unitPrice || 0)}" /></td>
     <td><input class="form-input purchase-total-price" type="number" min="0" step="any" value="${Number(item.totalPrice || 0)}" /></td>
     <td><input class="form-input purchase-category" value="${escapeHtml(item.category || "")}" /></td>
-  </tr>`).join("") : `<tr><td colspan="6" class="muted">No item lines were recognised. Add a clearer bill or enter items manually in Stock List.</td></tr>`;
+    <td><button class="btn btn-outline btn-sm remove-purchase-row" type="button">Remove</button></td>
+  </tr>`;
+}
+
+function bindPurchaseReviewRowActions() {
+  purchaseReviewRowsEl?.querySelectorAll(".remove-purchase-row").forEach(button => button.addEventListener("click", () => button.closest("tr")?.remove()));
+}
+
+function renderPurchaseReview(items = []) {
+  if (!purchaseReviewRowsEl) return;
+  purchaseReviewRowsEl.innerHTML = items.length ? items.map(purchaseReviewRow).join("") : purchaseReviewRow();
+  bindPurchaseReviewRowActions();
 }
 
 function reviewedPurchaseItems() {
@@ -1645,23 +1660,35 @@ function previewPurchaseFile() {
   purchaseBillPreviewEl.innerHTML = file.type === "application/pdf" ? `<a class="btn btn-outline" href="${url}" target="_blank" rel="noopener">Preview PDF: ${escapeHtml(file.name)}</a>` : `<img src="${url}" alt="Purchase bill preview" style="max-width:320px;max-height:260px;border:1px solid var(--border);border-radius:10px;" />`;
 }
 
+async function preparePurchaseBillForUpload(file) {
+  if (!file?.type.startsWith("image/") || file.size <= 2 * 1024 * 1024) return file;
+  const source = await createImageBitmap(file);
+  const scale = Math.min(1, 2000 / Math.max(source.width, source.height));
+  const canvas = document.createElement("canvas"); canvas.width = Math.round(source.width * scale); canvas.height = Math.round(source.height * scale);
+  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height); source.close?.();
+  const compressed = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  return compressed ? new File([compressed], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }) : file;
+}
+
 async function scanPurchaseBill() {
   const file = purchaseBillFileEl?.files?.[0];
-  if (!file) return alert("Choose a JPG, PNG, JPEG, or PDF purchase bill first.");
+  if (!file) return alert("Choose a JPG, PNG, WEBP, or PDF purchase bill first.");
   const backendUrl = purchaseBackendUrl();
   showPurchaseOcrMessage("");
   scanPurchaseBillBtn.disabled = true; scanPurchaseBillBtn.textContent = "Scanning…";
   try {
-    const form = new FormData(); form.append("bill", file); form.append("restaurantId", restaurantId);
+    const uploadFile = await preparePurchaseBillForUpload(file);
+    const form = new FormData(); form.append("bill", uploadFile); form.append("restaurantId", restaurantId);
     const response = await fetch(`${backendUrl}/api/inventory/upload-bill`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
-    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Inventory OCR service is not configured.");
+    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not read bill clearly. Please upload a clearer image or enter manually.");
     reviewedPurchaseFileUrl = data.file?.fileUrl || "";
     if (purchaseSupplierNameEl && !purchaseSupplierNameEl.value.trim()) purchaseSupplierNameEl.value = data.supplierName || "";
+    if (purchaseBillNumberEl) purchaseBillNumberEl.value = data.billNumber || "";
     if (purchaseBillDateEl) purchaseBillDateEl.value = /^\d{4}-\d{2}-\d{2}$/.test(data.billDate || "") ? data.billDate : "";
+    if (purchaseTaxAmountEl) purchaseTaxAmountEl.value = data.taxAmount || "";
     if (purchaseGrandTotalEl) purchaseGrandTotalEl.value = data.grandTotal || "";
     renderPurchaseReview(data.items || []); purchaseReviewEl?.classList.remove("hidden"); rescanPurchaseBillBtn?.classList.remove("hidden");
-    if (!data.ocrConfigured) showPurchaseOcrMessage("Inventory OCR service is not configured.");
-  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" ? "Inventory OCR service is not configured." : (error.message || "Inventory OCR service is not configured.")); }
+  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" ? "Could not reach the OCR service. Please check the connection and try again." : (error.message || "Could not read bill clearly. Please upload a clearer image or enter manually.")); }
   finally { scanPurchaseBillBtn.disabled = false; scanPurchaseBillBtn.textContent = "Scan Bill for Review"; }
 }
 
@@ -1670,10 +1697,10 @@ async function saveReviewedPurchase() {
   const backendUrl = purchaseBackendUrl(); showPurchaseOcrMessage("");
   savePurchaseBillBtn.disabled = true; savePurchaseBillBtn.textContent = "Saving…";
   try {
-    const response = await fetch(`${backendUrl}/api/inventory/save-purchase`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", grandTotal: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
-    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Inventory OCR service is not configured.");
+    const response = await fetch(`${backendUrl}/api/inventory/save-purchase`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billNumber: purchaseBillNumberEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", taxAmount: Number(purchaseTaxAmountEl?.value || 0), grandTotal: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
+    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not save the reviewed purchase.");
     alert("Purchase saved and stock updated."); purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl.value = ""; reviewedPurchaseFileUrl = ""; previewPurchaseFile();
-  } catch (error) { showPurchaseOcrMessage(error.message || "Inventory OCR service is not configured."); }
+  } catch (error) { showPurchaseOcrMessage(error.message || "Could not save the reviewed purchase."); }
   finally { savePurchaseBillBtn.disabled = false; savePurchaseBillBtn.textContent = "Save to Inventory"; }
 }
 
@@ -3162,6 +3189,7 @@ downloadAllTableQrsBtn?.addEventListener("click", () => {
 purchaseBillFileEl?.addEventListener("change", previewPurchaseFile);
 scanPurchaseBillBtn?.addEventListener("click", scanPurchaseBill);
 rescanPurchaseBillBtn?.addEventListener("click", () => { purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl?.click(); });
+addPurchaseReviewRowBtn?.addEventListener("click", () => { purchaseReviewRowsEl?.insertAdjacentHTML("beforeend", purchaseReviewRow()); bindPurchaseReviewRowActions(); });
 savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 
 saveSettingsBtn?.addEventListener("click", saveSettings);

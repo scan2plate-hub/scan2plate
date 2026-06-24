@@ -14,7 +14,7 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const allowedMimeTypes = new Set(["image/jpeg", "image/png", "application/pdf"]);
+const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const twilioRequired = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"];
 const missing = twilioRequired.filter(key => !process.env[key]);
 const twilioEnabled = missing.length === 0;
@@ -54,11 +54,22 @@ function normalizeUnit(quantity, rawUnit) {
   return { quantity: qty, unit: "pcs" };
 }
 
+function asIsoDate(value = "") {
+  const match = String(value).match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/);
+  if (!match) return "";
+  const [, day, month, year] = match;
+  const fullYear = year.length === 2 ? `20${year}` : year;
+  const date = new Date(`${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? "" : `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
 // Conservative parser: it only suggests rows; the UI always requires human review before saving.
 function parseBillText(text = "") {
   const lines = String(text).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const supplierName = lines[0] || "";
-  const billDate = (text.match(/\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/) || [])[1] || "";
+  const billDate = asIsoDate((text.match(/\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/) || [])[1] || "");
+  const billNumber = (text.match(/(?:invoice|bill)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([a-z0-9/-]+)/i) || [])[1] || "";
+  const taxMatch = text.match(/(?:gst|tax|cgst|sgst|igst)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
   const grandTotalMatch = text.match(/(?:grand\s*total|net\s*amount|total)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
   const items = lines.map(line => {
     const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|kgs?|gm|g|ml|l|litre|litres|pcs?|piece|packet|pkt|box)?\s+(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)$/i);
@@ -72,7 +83,7 @@ function parseBillText(text = "") {
     const normalized = normalizeUnit(Number(pack[2]) * Number(pack[4] || 1), pack[3]);
     return { itemName: pack[1].trim(), quantity: normalized.quantity, unit: normalized.unit, unitPrice: 0, totalPrice: 0, category: "", supplierName, billDate };
   }).filter(Boolean);
-  return { supplierName, billDate, grandTotal: Number(grandTotalMatch?.[1] || 0), items, rawText: text };
+  return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items, rawText: text };
 }
 async function verifyAdmin(req, res, next) {
   if (!adminReady) return res.status(503).json({ error: "Inventory backend is not configured with Firebase Admin credentials." });
@@ -93,6 +104,22 @@ async function assertRestaurantAccess(uid, restaurantId) {
 }
 
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
+app.get("/api/ocr/status", (_, res) => {
+  const ocrConfigured = Boolean(process.env.OCR_SPACE_API_KEY);
+  const ready = adminReady && ocrConfigured;
+  res.status(ready ? 200 : 503).json({
+    ok: ready,
+    endpointReachable: true,
+    validResponse: true,
+    status: ready ? "ready" : "unavailable",
+    ocrConfigured,
+    reason: !adminReady
+      ? "Inventory backend is missing Firebase Admin credentials."
+      : !ocrConfigured
+        ? "OCR provider key is not configured on the backend."
+        : ""
+  });
+});
 app.post("/notify-order", async (req, res) => {
   try {
     const { customerPhone, customerName, kitchenPhone, orderId, tableNo, tokenNumber, items, grandTotal, status, etaMinutes, restaurantName, billUrl } = req.body || {};
@@ -107,17 +134,21 @@ app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), async
   try {
     const { restaurantId, ocrText = "" } = req.body || {};
     if (!restaurantId || !req.file) return res.status(400).json({ error: "restaurantId and a bill image or PDF are required." });
-    if (!allowedMimeTypes.has(req.file.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, JPEG, or PDF bill." });
+    if (!allowedMimeTypes.has(req.file.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, WEBP, or PDF bill." });
     await assertRestaurantAccess(req.user.uid, restaurantId);
     let text = ocrText;
-    if (!text && process.env.OCR_SPACE_API_KEY) {
+    if (!text && !process.env.OCR_SPACE_API_KEY) return res.status(503).json({ error: "Inventory OCR service is not configured." });
+    if (!text) {
       const form = new FormData();
       form.append("apikey", process.env.OCR_SPACE_API_KEY);
       form.append("language", "eng");
       form.append("file", new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-      const result = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form }).then(response => response.json());
+      const ocrResponse = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form });
+      const result = await ocrResponse.json().catch(() => ({}));
+      if (!ocrResponse.ok || result.IsErroredOnProcessing) throw new Error(result.ErrorMessage?.join(" ") || "OCR provider could not process this bill.");
       text = (result.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
     }
+    if (!String(text).trim()) return res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." });
     let fileUrl = "";
     if (process.env.FIREBASE_STORAGE_BUCKET) {
       const objectName = `purchase-bills/${restaurantId}/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
@@ -128,27 +159,36 @@ app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), async
     }
     const parsed = parseBillText(text);
     res.json({ file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, fileUrl }, ...parsed, ocrConfigured: Boolean(process.env.OCR_SPACE_API_KEY) });
-  } catch (error) { res.status(500).json({ error: error.message || "Could not read purchase bill." }); }
+  } catch (error) { res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." }); }
 });
 
 app.post("/api/inventory/save-purchase", verifyAdmin, async (req, res) => {
   try {
-    const { restaurantId, supplierName = "", billDate = "", grandTotal = 0, fileUrl = "", items = [] } = req.body || {};
+    const { restaurantId, supplierName = "", billNumber = "", billDate = "", taxAmount = 0, grandTotal = 0, fileUrl = "", inventoryCollection = "inventory", items = [] } = req.body || {};
     if (!restaurantId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: "restaurantId and reviewed purchase items are required." });
     await assertRestaurantAccess(req.user.uid, restaurantId);
+    const safeInventoryCollection = inventoryCollection === "inventory_items" ? "inventory_items" : "inventory";
     const db = getFirestore(); const billRef = db.collection(`restaurants/${restaurantId}/purchase_bills`).doc();
     await db.runTransaction(async transaction => {
       const prepared = items.map(item => ({ ...item, ...normalizeUnit(item.quantity, item.unit), itemName: String(item.itemName || "").trim(), normalizedName: normalizedName(item.itemName) })).filter(item => item.itemName && item.quantity > 0);
       if (!prepared.length) throw new Error("Add at least one valid reviewed item.");
       for (const item of prepared) {
-        const existing = await db.collection(`restaurants/${restaurantId}/inventory`).where("normalizedName", "==", item.normalizedName).where("unit", "==", item.unit).limit(1).get();
-        const inventoryRef = existing.empty ? db.collection(`restaurants/${restaurantId}/inventory`).doc() : existing.docs[0].ref;
+        const inventoryPath = `restaurants/${restaurantId}/${safeInventoryCollection}`;
+        let existing = await db.collection(inventoryPath).where("normalizedName", "==", item.normalizedName).where("unit", "==", item.unit).limit(1).get();
+        // Older manually-created inventory rows did not have normalizedName.
+        if (existing.empty) {
+          const sameName = await db.collection(inventoryPath).where("itemName", "==", item.itemName).limit(10).get();
+          const sameUnit = sameName.docs.find(candidate => normalizeUnit(1, candidate.data().unit).unit === item.unit);
+          existing = sameUnit ? { empty: false, docs: [sameUnit] } : sameName;
+          if (!sameUnit) existing = { empty: true, docs: [] };
+        }
+        const inventoryRef = existing.empty ? db.collection(inventoryPath).doc() : existing.docs[0].ref;
         const old = existing.empty ? {} : existing.docs[0].data();
         transaction.set(inventoryRef, { restaurantId, itemName: item.itemName, normalizedName: item.normalizedName, currentStock: Number(old.currentStock || 0) + Number(item.quantity), unit: item.unit, category: item.category || old.category || "", lastPurchasePrice: Number(item.unitPrice || 0), purchasePrice: Number(item.unitPrice || 0), supplierName: item.supplierName || supplierName || old.supplierName || "", lowStockLimit: Number(old.lowStockLimit || old.minStockAlert || 0), minStockAlert: Number(old.minStockAlert || 0), updatedAt: FieldValue.serverTimestamp(), lastUpdated: FieldValue.serverTimestamp() }, { merge: true });
         transaction.set(db.collection(`restaurants/${restaurantId}/inventory_logs`).doc(), { inventoryItemId: inventoryRef.id, itemName: item.itemName, type: "stock_in", quantity: Number(item.quantity), unit: item.unit, reason: "Purchase bill", billId: billRef.id, createdAt: FieldValue.serverTimestamp(), createdBy: req.user.email || req.user.uid });
         transaction.set(billRef.collection("purchase_bill_items").doc(), { billId: billRef.id, inventoryItemId: inventoryRef.id, itemName: item.itemName, quantity: Number(item.quantity), unit: item.unit, unitPrice: Number(item.unitPrice || 0), totalPrice: Number(item.totalPrice || 0) });
       }
-      transaction.set(billRef, { restaurantId, supplierName, billDate, grandTotal: Number(grandTotal || 0), fileUrl, uploadedAt: FieldValue.serverTimestamp(), uploadedBy: req.user.email || req.user.uid, status: "saved" });
+      transaction.set(billRef, { restaurantId, supplierName, billNumber, billDate, taxAmount: Number(taxAmount || 0), grandTotal: Number(grandTotal || 0), fileUrl, uploadedAt: FieldValue.serverTimestamp(), uploadedBy: req.user.email || req.user.uid, status: "saved" });
     });
     res.json({ success: true, billId: billRef.id });
   } catch (error) { res.status(400).json({ error: error.message || "Could not save purchase." }); }
