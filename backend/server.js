@@ -52,9 +52,10 @@ function normalizeUnit(quantity, rawUnit) {
   if (["g", "gm", "gram", "grams"].includes(unit)) return { quantity: qty / 1000, unit: "kg" };
   if (["kg", "kgs", "kilogram", "kilograms"].includes(unit)) return { quantity: qty, unit: "kg" };
   if (["ml", "millilitre", "milliliter"].includes(unit)) return { quantity: qty / 1000, unit: "litre" };
-  if (["l", "lt", "litre", "liter", "litres", "liters"].includes(unit)) return { quantity: qty, unit: "litre" };
+  if (["l", "lt", "ltr", "litre", "liter", "litres", "liters"].includes(unit)) return { quantity: qty, unit: "litre" };
   if (["packet", "packets", "pkt"].includes(unit)) return { quantity: qty, unit: "packet" };
   if (["box", "boxes"].includes(unit)) return { quantity: qty, unit: "box" };
+  if (["bottle", "bottles"].includes(unit)) return { quantity: qty, unit: "bottle" };
   return { quantity: qty, unit: "pcs" };
 }
 
@@ -101,12 +102,12 @@ function parseBillText(text = "") {
   const lines = String(text).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const supplierName = lines.find(line => !/^(tax invoice|invoice|bill|gstin|phone|mobile|address)/i.test(line)) || lines[0] || "";
   const billDate = asIsoDate((text.match(/\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/) || [])[1] || "");
-  const billNumber = (text.match(/(?:invoice|bill)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([a-z0-9/-]+)/i) || [])[1] || "";
+  const billNumber = (text.match(/(?:invoice|bill)\s*(?:no\.?|number|#)\s*[:#-]?\s*([a-z0-9/-]+)/i) || [])[1] || "";
   const taxMatch = text.match(/(?:gst|tax|cgst|sgst|igst)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
-  const grandTotalMatch = text.match(/(?:grand\s*total|net\s*amount|total)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
+  const grandTotalMatch = text.match(/\b(?:grand\s*total|net\s*amount|total)\b\D{0,12}(\d+(?:\.\d{1,2})?)/i);
   const items = lines.map(rawLine => {
-    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").replace(/^\d+\s+[.)-]\s*/, "").trim();
-    const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|kgs?|gm|g|ml|l|litre|litres|pcs?|piece|packet|pkt|box)?\s+(?:@\s*)?(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)$/i);
+    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").replace(/^\d+\s+(?:[.)-]\s*)?(?=[A-Za-z])/, "").trim();
+    const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|kgs?|gm|g|ml|l|ltr|litre|litres|pcs?|piece|packet|pkt|box|bottles?)?\s+(?:@\s*)?(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)$/i);
     if (match) {
       const normalized = normalizeUnit(match[2], match[3]);
       return { itemName: match[1].trim(), quantity: normalized.quantity, unit: normalized.unit, unitPrice: Number(match[4]), totalPrice: Number(match[5]), category: "", supplierName, billDate };
