@@ -2,6 +2,7 @@ import { auth, db } from "./firebase.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, updateDoc, doc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { escapeHtml, fmtCurrency } from "./common.js";
+import { mountSafeReset } from "./safe-reset.js";
 
 const $ = selector => document.querySelector(selector);
 const logoutBtn = $("#logoutBtn");
@@ -21,6 +22,7 @@ const defaultSuperSettings = { companyName:"Scan2Plate", supportPhone:"", suppor
 let superSettings = { ...defaultSuperSettings };
 let restaurants = [];
 let orders = [];
+let superResetMountedFor = "";
 
 const session = JSON.parse(localStorage.getItem("scan2serve_super_admin") || "{}");
 if (session.role !== "super_admin") window.location.href = "./super-admin-login.html";
@@ -56,6 +58,15 @@ const panelRouteFor = business => {
   return routes[type] || "./admin-dashboard.html";
 };
 const businessTypes = ["Restaurant","Cafe","Street Vendor","Hotel","Cloud Kitchen","Food Court","Bakery","Sweet Shop","Dhaba","Fast Food","Juice Shop","Tea Stall"];
+function renderSuperReset() {
+  const select = $("#superResetRestaurant"); const host = document.getElementById("superResetHost");
+  if (!select || !host) return;
+  const chosen = select.value || restaurants[0]?.id || "";
+  select.innerHTML = restaurants.map(restaurant => `<option value="${escapeHtml(restaurant.id)}">${escapeHtml(restaurant.name || restaurant.restaurantName || restaurant.id)} (${escapeHtml(restaurant.id)})</option>`).join("");
+  if (chosen) select.value = chosen;
+  if (!select.dataset.bound) { select.dataset.bound = "true"; select.addEventListener("change", () => { superResetMountedFor = ""; host.innerHTML = ""; renderSuperReset(); }); }
+  if (chosen && superResetMountedFor !== chosen) { host.innerHTML = ""; superResetMountedFor = chosen; mountSafeReset({ restaurantId: chosen, role: session.role, host, panelName: "Super Admin", defaultTokenReset: true, defaultTableReset: true }); }
+}
 function businessTypeConfig(value) {
   const type = String(value || "Restaurant").toLowerCase();
   const tokenTypes = ["cafe","street vendor","food court","bakery","sweet shop","dhaba","fast food","juice shop","tea stall"];
@@ -148,3 +159,4 @@ function applyBusinessTerminology() {
 
 loadSettings();
 await loadData();
+renderSuperReset();

@@ -2,6 +2,7 @@ import { auth, db } from "./firebase.js";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { parseMenuPdf, parseMenuSpreadsheet, importMenuItems, normalizeKey } from "./menu-import-service.js";
+import { mountSafeReset } from "./safe-reset.js";
 
 const $ = id => document.getElementById(id), esc = value => String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"), money = value => new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(Number(value||0));
 const session = JSON.parse(localStorage.getItem("scan2plate_user") || localStorage.getItem("scan2serve_user") || "{}");
@@ -54,6 +55,19 @@ renderSettings = () => { renderTokenSettings(); $("tokenSettingLocationEnabled")
 $("tokenMenuPdfInput") && ($("tokenMenuPdfInput").accept = "application/pdf,.pdf,.xlsx,.xls,.csv");
 $("tokenMenuPdf") && ($("tokenMenuPdf").textContent = "Upload Menu PDF / Excel");
 start().catch(error=>{console.error(error);alert("Unable to load token panel: "+error.message)});
+
+let tokenSafeReset = null;
+const tokenResetMountTimer = setInterval(() => {
+  if (!Object.keys(settings).length || !document.getElementById("token-settings")) return;
+  tokenSafeReset = mountSafeReset({ restaurantId, role: session.role, host: document.getElementById("token-settings"), panelName: requestedType, defaultTokenReset: true });
+  clearInterval(tokenResetMountTimer);
+}, 250);
+document.addEventListener("click", event => {
+  const button = event.target.closest("[data-delete-staff]");
+  if (!button || !tokenSafeReset) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  tokenSafeReset.deleteStaff(button.dataset.deleteStaff);
+}, true);
 
 // The token-panel routes are shared by Cafe, Street Vendor, Cloud Kitchen, Hotel, and Food Court.
 let tokenOcrPreviewUrl = "", tokenOcrStoredFileUrl = "";

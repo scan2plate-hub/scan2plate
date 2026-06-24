@@ -13,6 +13,7 @@ import {
   runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { mountSafeReset } from "./safe-reset.js";
 
 /* =========================================================
    LOGIN / USER
@@ -3321,6 +3322,11 @@ setInterval(checkRestaurantSubscription, 5 * 60 * 1000);
 
 if (!subscriptionBlocked) {
   await loadSettings();
+  mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
+  if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
+    const quickActions = document.querySelector(".quick-actions");
+    if (quickActions && !document.getElementById("quickResetDataBtn")) { const button=document.createElement("div"); button.id="quickResetDataBtn"; button.className="quick-action"; button.innerHTML="<i class=\"fas fa-triangle-exclamation\"></i>Reset Data"; button.addEventListener("click",()=>{document.querySelector('.nav-item[data-section="settings"]')?.click(); document.getElementById("safeResetZone")?.scrollIntoView({behavior:"smooth"});}); quickActions.append(button); }
+  }
   await loadMenuData();
   startInventoryListeners();
   onSnapshot(collection(db, "restaurants", restaurantId, "tables"), snap => {
