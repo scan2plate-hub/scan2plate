@@ -21,12 +21,16 @@ const twilioEnabled = missing.length === 0;
 const client = twilioEnabled ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
 
 let adminReady = false;
+let firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
 try {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) : null;
+  // FIREBASE_SERVICE_ACCOUNT is the preferred name. Keep the old *_JSON name working for existing deployments.
+  const serviceAccountValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
+  const serviceAccount = serviceAccountValue ? JSON.parse(serviceAccountValue) : null;
   if (serviceAccount) initializeApp(getApps().length ? undefined : { credential: cert(serviceAccount) });
-  else if (getApps().length === 0 && process.env.GOOGLE_APPLICATION_CREDENTIALS) initializeApp();
+  else if (getApps().length === 0 && (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_PROJECT || process.env.K_SERVICE || process.env.FUNCTION_TARGET)) initializeApp();
   adminReady = getApps().length > 0;
-} catch (error) { console.error("Firebase Admin setup failed:", error.message); }
+  if (!adminReady) firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
+} catch (error) { console.error("Firebase Admin setup failed:", error.message); firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing."; }
 
 function sanitizePhone(phone) {
   if (!phone) return "";
@@ -52,6 +56,23 @@ function normalizeUnit(quantity, rawUnit) {
   if (["packet", "packets", "pkt"].includes(unit)) return { quantity: qty, unit: "packet" };
   if (["box", "boxes"].includes(unit)) return { quantity: qty, unit: "box" };
   return { quantity: qty, unit: "pcs" };
+}
+
+function ocrKey() { return String(process.env.OCR_SPACE_API_KEY || "").trim(); }
+function missingOcrKeyMessage() { return "OCR_SPACE_API_KEY missing. Add it in backend environment variables."; }
+async function requestOcrSpace(form) {
+  const response = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.IsErroredOnProcessing) throw new Error(result.ErrorMessage?.join(" ") || "OCR Space API could not process the request.");
+  return result;
+}
+async function testOcrSpaceConnection() {
+  // A tiny in-memory image checks both the configured key and the provider without exposing the key.
+  const form = new FormData();
+  form.append("apikey", ocrKey());
+  form.append("language", "eng");
+  form.append("base64Image", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9VwAAAABJRU5ErkJggg==");
+  await requestOcrSpace(form);
 }
 
 function asIsoDate(value = "") {
@@ -83,10 +104,11 @@ function parseBillText(text = "") {
     const normalized = normalizeUnit(Number(pack[2]) * Number(pack[4] || 1), pack[3]);
     return { itemName: pack[1].trim(), quantity: normalized.quantity, unit: normalized.unit, unitPrice: 0, totalPrice: 0, category: "", supplierName, billDate };
   }).filter(Boolean);
-  return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items, rawText: text };
+  const reviewItems = items.map(item => ({ ...item, rate: item.unitPrice, amount: item.totalPrice }));
+  return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items: reviewItems, rawText: text };
 }
 async function verifyAdmin(req, res, next) {
-  if (!adminReady) return res.status(503).json({ error: "Inventory backend is not configured with Firebase Admin credentials." });
+  if (!adminReady) return res.status(503).json({ error: firebaseAdminError });
   try {
     const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
     if (!token) throw new Error("Missing bearer token");
@@ -105,7 +127,7 @@ async function assertRestaurantAccess(uid, restaurantId) {
 
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
 app.get("/api/ocr/status", (_, res) => {
-  const ocrConfigured = Boolean(process.env.OCR_SPACE_API_KEY);
+  const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;
   res.status(ready ? 200 : 503).json({
     ok: ready,
@@ -114,11 +136,21 @@ app.get("/api/ocr/status", (_, res) => {
     status: ready ? "ready" : "unavailable",
     ocrConfigured,
     reason: !adminReady
-      ? "Inventory backend is missing Firebase Admin credentials."
+      ? firebaseAdminError
       : !ocrConfigured
-        ? "OCR provider key is not configured on the backend."
+        ? missingOcrKeyMessage()
         : ""
   });
+});
+app.get("/api/ocr/test", async (_, res) => {
+  if (!ocrKey()) return res.status(503).json({ connected: false, error: missingOcrKeyMessage() });
+  if (!adminReady) return res.status(503).json({ connected: false, error: firebaseAdminError });
+  try {
+    await testOcrSpaceConnection();
+    res.json({ connected: true });
+  } catch (error) {
+    res.status(502).json({ connected: false, error: "OCR Space API could not be reached or rejected the configured key." });
+  }
 });
 app.post("/notify-order", async (req, res) => {
   try {
@@ -130,22 +162,20 @@ app.post("/notify-order", async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), async (req, res) => {
+async function scanSupplierBill(req, res) {
   try {
     const { restaurantId, ocrText = "" } = req.body || {};
     if (!restaurantId || !req.file) return res.status(400).json({ error: "restaurantId and a bill image or PDF are required." });
     if (!allowedMimeTypes.has(req.file.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, WEBP, or PDF bill." });
     await assertRestaurantAccess(req.user.uid, restaurantId);
     let text = ocrText;
-    if (!text && !process.env.OCR_SPACE_API_KEY) return res.status(503).json({ error: "Inventory OCR service is not configured." });
+    if (!text && !ocrKey()) return res.status(503).json({ error: missingOcrKeyMessage() });
     if (!text) {
       const form = new FormData();
-      form.append("apikey", process.env.OCR_SPACE_API_KEY);
+      form.append("apikey", ocrKey());
       form.append("language", "eng");
       form.append("file", new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-      const ocrResponse = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form });
-      const result = await ocrResponse.json().catch(() => ({}));
-      if (!ocrResponse.ok || result.IsErroredOnProcessing) throw new Error(result.ErrorMessage?.join(" ") || "OCR provider could not process this bill.");
+      const result = await requestOcrSpace(form);
       text = (result.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
     }
     if (!String(text).trim()) return res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." });
@@ -158,9 +188,12 @@ app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), async
       fileUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectName)}?alt=media&token=${token}`;
     }
     const parsed = parseBillText(text);
-    res.json({ file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, fileUrl }, ...parsed, ocrConfigured: Boolean(process.env.OCR_SPACE_API_KEY) });
+    res.json({ file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, fileUrl }, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
   } catch (error) { res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." }); }
-});
+}
+app.post("/api/ocr/scan", verifyAdmin, upload.single("bill"), scanSupplierBill);
+// Keep this endpoint for already-deployed panels while all current panels use /api/ocr/scan.
+app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), scanSupplierBill);
 
 app.post("/api/inventory/save-purchase", verifyAdmin, async (req, res) => {
   try {

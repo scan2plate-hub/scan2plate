@@ -1602,12 +1602,12 @@ async function testOcrConnection() {
   const statusEl = document.getElementById("ocrServiceStatus"); const button = document.getElementById("testOcrConnectionBtn");
   if (statusEl) statusEl.textContent = "Checking…"; if (button) button.disabled = true;
   try {
-    const response = await fetch(`${purchaseBackendUrl()}/api/ocr/status`, { cache: "no-store" });
+    const response = await fetch(`${purchaseBackendUrl()}/api/ocr/test`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.endpointReachable !== true || data.validResponse !== true || data.status !== "ready") throw new Error(data.reason || "The OCR endpoint did not return a ready status.");
+    if (!response.ok || data.connected !== true) throw new Error(data.error || "The OCR endpoint did not return a ready status.");
     if (statusEl) { statusEl.textContent = "Connected ✅"; statusEl.title = "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
   } catch (error) {
-    const reason = error.message === "Failed to fetch" ? "OCR endpoint could not be reached." : error.message;
+    const reason = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : error.message;
     if (statusEl) { statusEl.textContent = `Disconnected ❌ — ${reason}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
   } finally { if (button) button.disabled = false; }
 }
@@ -1679,7 +1679,7 @@ async function scanPurchaseBill() {
   try {
     const uploadFile = await preparePurchaseBillForUpload(file);
     const form = new FormData(); form.append("bill", uploadFile); form.append("restaurantId", restaurantId);
-    const response = await fetch(`${backendUrl}/api/inventory/upload-bill`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
+    const response = await fetch(`${backendUrl}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
     const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not read bill clearly. Please upload a clearer image or enter manually.");
     reviewedPurchaseFileUrl = data.file?.fileUrl || "";
     if (purchaseSupplierNameEl && !purchaseSupplierNameEl.value.trim()) purchaseSupplierNameEl.value = data.supplierName || "";
@@ -1688,7 +1688,7 @@ async function scanPurchaseBill() {
     if (purchaseTaxAmountEl) purchaseTaxAmountEl.value = data.taxAmount || "";
     if (purchaseGrandTotalEl) purchaseGrandTotalEl.value = data.grandTotal || "";
     renderPurchaseReview(data.items || []); purchaseReviewEl?.classList.remove("hidden"); rescanPurchaseBillBtn?.classList.remove("hidden");
-  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" ? "Could not reach the OCR service. Please check the connection and try again." : (error.message || "Could not read bill clearly. Please upload a clearer image or enter manually.")); }
+  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : (error.message || "Could not read bill clearly. Please upload a clearer image or enter manually.")); }
   finally { scanPurchaseBillBtn.disabled = false; scanPurchaseBillBtn.textContent = "Scan Bill for Review"; }
 }
 
