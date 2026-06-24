@@ -1641,6 +1641,32 @@ function renderPurchaseReview(items = []) {
   bindPurchaseReviewRowActions();
 }
 
+function ensureRawOcrReview() {
+  if (document.getElementById("purchaseRawOcrReview") || !purchaseReviewEl) return;
+  purchaseReviewEl.insertAdjacentHTML("afterend", `<details id="purchaseRawOcrReview" class="hidden" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Raw OCR Text</summary><p id="purchaseRawOcrWarning" class="muted" style="margin:8px 0"></p><textarea id="purchaseRawOcrText" class="form-input" rows="9" style="width:100%;font-family:monospace"></textarea><div class="btn-group" style="margin-top:8px"><button id="tryParsePurchaseOcrBtn" class="btn btn-outline" type="button">Try Parse Again</button><button id="enterPurchaseBillManuallyBtn" class="btn btn-outline" type="button">Enter Bill Manually</button></div></details>`);
+  document.getElementById("enterPurchaseBillManuallyBtn")?.addEventListener("click", () => { renderPurchaseReview([]); purchaseReviewEl?.classList.remove("hidden"); });
+  document.getElementById("tryParsePurchaseOcrBtn")?.addEventListener("click", async () => {
+    const rawText = document.getElementById("purchaseRawOcrText")?.value || "";
+    if (!rawText.trim()) return showPurchaseOcrMessage("Raw OCR text is empty.");
+    try {
+      const response = await fetch(`${purchaseBackendUrl()}/api/ocr/parse`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, rawText }) });
+      const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "OCR parse failed.");
+      applyPurchaseOcrResult(data); showPurchaseOcrMessage(data.items?.length ? "Parsed the raw OCR text for review." : "No rows matched yet. Edit the text or enter rows manually.", Boolean(data.items?.length));
+    } catch (error) { showPurchaseOcrMessage(error.message || "OCR parse failed."); }
+  });
+}
+
+function applyPurchaseOcrResult(data = {}) {
+  if (purchaseSupplierNameEl && !purchaseSupplierNameEl.value.trim()) purchaseSupplierNameEl.value = data.supplierName || "";
+  if (purchaseBillNumberEl) purchaseBillNumberEl.value = data.billNo || data.billNumber || "";
+  if (purchaseBillDateEl) purchaseBillDateEl.value = /^\d{4}-\d{2}-\d{2}$/.test(data.date || data.billDate || "") ? (data.date || data.billDate) : "";
+  if (purchaseTaxAmountEl) purchaseTaxAmountEl.value = data.taxAmount || "";
+  if (purchaseGrandTotalEl) purchaseGrandTotalEl.value = data.total || data.grandTotal || "";
+  renderPurchaseReview(data.items || []); purchaseReviewEl?.classList.remove("hidden");
+  ensureRawOcrReview(); const raw = document.getElementById("purchaseRawOcrReview"), rawText = document.getElementById("purchaseRawOcrText"), warning = document.getElementById("purchaseRawOcrWarning");
+  if (raw) raw.classList.toggle("hidden", !data.rawText); if (rawText && data.rawText != null) rawText.value = data.rawText; if (warning) warning.textContent = (data.parseWarnings || []).join(" ");
+}
+
 function reviewedPurchaseItems() {
   return [...(purchaseReviewRowsEl?.querySelectorAll("tr") || [])].map(row => ({
     itemName: row.querySelector(".purchase-item-name")?.value.trim() || "",
@@ -1662,12 +1688,15 @@ function previewPurchaseFile() {
 }
 
 async function preparePurchaseBillForUpload(file) {
-  if (!file?.type.startsWith("image/") || file.size <= 2 * 1024 * 1024) return file;
-  const source = await createImageBitmap(file);
-  const scale = Math.min(1, 2000 / Math.max(source.width, source.height));
+  if (!file?.type.startsWith("image/")) return file;
+  const source = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const longest = Math.max(source.width, source.height), scale = Math.min(2.5, Math.max(1, 2200 / longest));
   const canvas = document.createElement("canvas"); canvas.width = Math.round(source.width * scale); canvas.height = Math.round(source.height * scale);
-  canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height); source.close?.();
-  const compressed = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  const context = canvas.getContext("2d", { willReadFrequently: true }); context.drawImage(source, 0, 0, canvas.width, canvas.height); source.close?.();
+  const image = context.getImageData(0, 0, canvas.width, canvas.height), pixels = image.data;
+  for (let index = 0; index < pixels.length; index += 4) { const gray = Math.max(0, Math.min(255, ((pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114) - 128) * 1.7 + 128)); pixels[index] = pixels[index + 1] = pixels[index + 2] = gray; }
+  context.putImageData(image, 0, 0);
+  const compressed = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.92));
   return compressed ? new File([compressed], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }) : file;
 }
 
@@ -1683,13 +1712,9 @@ async function scanPurchaseBill() {
     const response = await fetch(`${backendUrl}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
     const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not read bill clearly. Please upload a clearer image or enter manually.");
     reviewedPurchaseFileUrl = data.file?.fileUrl || "";
-    if (purchaseSupplierNameEl && !purchaseSupplierNameEl.value.trim()) purchaseSupplierNameEl.value = data.supplierName || "";
-    if (purchaseBillNumberEl) purchaseBillNumberEl.value = data.billNumber || "";
-    if (purchaseBillDateEl) purchaseBillDateEl.value = /^\d{4}-\d{2}-\d{2}$/.test(data.billDate || "") ? data.billDate : "";
-    if (purchaseTaxAmountEl) purchaseTaxAmountEl.value = data.taxAmount || "";
-    if (purchaseGrandTotalEl) purchaseGrandTotalEl.value = data.grandTotal || "";
-    renderPurchaseReview(data.items || []); purchaseReviewEl?.classList.remove("hidden"); rescanPurchaseBillBtn?.classList.remove("hidden");
-  } catch (error) { showPurchaseOcrMessage(error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : (error.message || "Could not read bill clearly. Please upload a clearer image or enter manually.")); }
+    applyPurchaseOcrResult(data); rescanPurchaseBillBtn?.classList.remove("hidden");
+    if (!data.items?.length) showPurchaseOcrMessage("OCR text was received but no item rows matched. Review the raw text, try parsing again, or enter the bill manually.");
+  } catch (error) { const message = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : (error.message || "OCR scan failed."); showPurchaseOcrMessage(message); ensureRawOcrReview(); document.getElementById("purchaseRawOcrReview")?.classList.remove("hidden"); }
   finally { scanPurchaseBillBtn.disabled = false; scanPurchaseBillBtn.textContent = "Scan Bill for Review"; }
 }
 

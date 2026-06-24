@@ -60,10 +60,22 @@ function normalizeUnit(quantity, rawUnit) {
 
 function ocrKey() { return String(process.env.OCR_SPACE_API_KEY || "").trim(); }
 function missingOcrKeyMessage() { return "OCR_SPACE_API_KEY missing. Add it in backend environment variables."; }
+function ocrFailure(response, result = {}) {
+  const detail = Array.isArray(result.ErrorMessage) ? result.ErrorMessage.join(" ") : String(result.ErrorMessage || "");
+  let message = detail || "OCR parse failed.";
+  if (response.status === 429 || /limit|quota/i.test(detail)) message = "OCR API limit reached. Please try again later.";
+  else if (response.status === 401 || /api.?key|invalid key|unauthor/i.test(detail)) message = "OCR API key was rejected by OCR.space.";
+  else if (!response.ok) message = "OCR provider is unavailable. Please try again.";
+  const error = new Error(message); error.status = response.status === 429 ? 429 : 422; return error;
+}
+function debugOcr(event, data) { if (process.env.NODE_ENV !== "production") console.info(`[OCR] ${event}`, data); }
 async function requestOcrSpace(form) {
-  const response = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form });
+  let response;
+  try { response = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form }); }
+  catch { const error = new Error("OCR provider is unreachable. Check backend internet connection."); error.status = 503; throw error; }
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || result.IsErroredOnProcessing) throw new Error(result.ErrorMessage?.join(" ") || "OCR Space API could not process the request.");
+  debugOcr("response", { status: response.status, parsedPages: result.ParsedResults?.length || 0 });
+  if (!response.ok || result.IsErroredOnProcessing) throw ocrFailure(response, result);
   return result;
 }
 async function testOcrSpaceConnection() {
@@ -87,13 +99,14 @@ function asIsoDate(value = "") {
 // Conservative parser: it only suggests rows; the UI always requires human review before saving.
 function parseBillText(text = "") {
   const lines = String(text).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const supplierName = lines[0] || "";
+  const supplierName = lines.find(line => !/^(tax invoice|invoice|bill|gstin|phone|mobile|address)/i.test(line)) || lines[0] || "";
   const billDate = asIsoDate((text.match(/\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/) || [])[1] || "");
   const billNumber = (text.match(/(?:invoice|bill)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([a-z0-9/-]+)/i) || [])[1] || "";
   const taxMatch = text.match(/(?:gst|tax|cgst|sgst|igst)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
   const grandTotalMatch = text.match(/(?:grand\s*total|net\s*amount|total)\D{0,12}(\d+(?:\.\d{1,2})?)/i);
-  const items = lines.map(line => {
-    const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|kgs?|gm|g|ml|l|litre|litres|pcs?|piece|packet|pkt|box)?\s+(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)$/i);
+  const items = lines.map(rawLine => {
+    const line = rawLine.replace(/[|]/g, " ").replace(/\s+/g, " ").replace(/^\d+\s+[.)-]\s*/, "").trim();
+    const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(kg|kgs?|gm|g|ml|l|litre|litres|pcs?|piece|packet|pkt|box)?\s+(?:@\s*)?(\d+(?:\.\d{1,2})?)\s+(\d+(?:\.\d{1,2})?)$/i);
     if (match) {
       const normalized = normalizeUnit(match[2], match[3]);
       return { itemName: match[1].trim(), quantity: normalized.quantity, unit: normalized.unit, unitPrice: Number(match[4]), totalPrice: Number(match[5]), category: "", supplierName, billDate };
@@ -105,7 +118,8 @@ function parseBillText(text = "") {
     return { itemName: pack[1].trim(), quantity: normalized.quantity, unit: normalized.unit, unitPrice: 0, totalPrice: 0, category: "", supplierName, billDate };
   }).filter(Boolean);
   const reviewItems = items.map(item => ({ ...item, rate: item.unitPrice, amount: item.totalPrice }));
-  return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items: reviewItems, rawText: text };
+  const parseWarnings = reviewItems.length ? [] : ["OCR text was received, but no item rows matched. Edit the raw text and try parsing again, or enter rows manually."];
+  return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items: reviewItems, rawText: text, parseWarnings };
 }
 async function verifyAdmin(req, res, next) {
   if (!adminReady) return res.status(503).json({ error: firebaseAdminError });
@@ -152,6 +166,17 @@ app.get("/api/ocr/test", async (_, res) => {
     res.status(502).json({ connected: false, error: "OCR Space API could not be reached or rejected the configured key." });
   }
 });
+app.post("/api/ocr/parse", verifyAdmin, express.json({ limit: "1mb" }), async (req, res) => {
+  const { restaurantId, rawText = "" } = req.body || {};
+  try {
+    if (!restaurantId) return res.status(400).json({ error: "restaurantId is required." });
+    await assertRestaurantAccess(req.user.uid, restaurantId);
+    if (!String(rawText).trim()) return res.status(422).json({ error: "Raw OCR text is empty." });
+    const parsed = parseBillText(rawText);
+    debugOcr("parse", { rawTextLength: rawText.length, parsedItemCount: parsed.items.length, parseWarnings: parsed.parseWarnings.length });
+    res.json({ ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal });
+  } catch (error) { res.status(422).json({ error: error.message || "OCR parse failed." }); }
+});
 app.post("/notify-order", async (req, res) => {
   try {
     const { customerPhone, customerName, kitchenPhone, orderId, tableNo, tokenNumber, items, grandTotal, status, etaMinutes, restaurantName, billUrl } = req.body || {};
@@ -171,14 +196,21 @@ async function scanSupplierBill(req, res) {
     let text = ocrText;
     if (!text && !ocrKey()) return res.status(503).json({ error: missingOcrKeyMessage() });
     if (!text) {
+      debugOcr("scan", { endpoint: "https://api.ocr.space/parse/image", fileName: req.file.originalname, fileSize: req.file.size, mimeType: req.file.mimetype });
       const form = new FormData();
       form.append("apikey", ocrKey());
       form.append("language", "eng");
+      form.append("isOverlayRequired", "false");
+      form.append("detectOrientation", "true");
+      form.append("scale", "true");
+      form.append("OCREngine", "2");
+      form.append("isTable", "true");
+      if (req.file.mimetype === "application/pdf") form.append("filetype", "PDF");
       form.append("file", new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
       const result = await requestOcrSpace(form);
       text = (result.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
     }
-    if (!String(text).trim()) return res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." });
+    if (!String(text).trim()) return res.status(422).json({ error: "OCR returned empty text. The bill may be too small, blurred, rotated, or unreadable." });
     let fileUrl = "";
     if (process.env.FIREBASE_STORAGE_BUCKET) {
       const objectName = `purchase-bills/${restaurantId}/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
@@ -188,8 +220,9 @@ async function scanSupplierBill(req, res) {
       fileUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectName)}?alt=media&token=${token}`;
     }
     const parsed = parseBillText(text);
+    debugOcr("parsed", { rawTextLength: text.length, parsedItemCount: parsed.items.length, parseWarnings: parsed.parseWarnings.length });
     res.json({ file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, fileUrl }, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
-  } catch (error) { res.status(422).json({ error: "Could not read bill clearly. Please upload a clearer image or enter manually." }); }
+  } catch (error) { res.status(error.status || 422).json({ error: error.message || "OCR parse failed." }); }
 }
 app.post("/api/ocr/scan", verifyAdmin, upload.single("bill"), scanSupplierBill);
 // Keep this endpoint for already-deployed panels while all current panels use /api/ocr/scan.
