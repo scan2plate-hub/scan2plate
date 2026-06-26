@@ -178,6 +178,19 @@ async function assertRestaurantAccess(uid, restaurantId) {
     if (memberships.empty || !["admin", "owner"].includes(String(memberships.docs[0].data().role || "").toLowerCase())) throw new Error("Not permitted for this restaurant.");
   }
 }
+async function findRestaurantDocByBusinessId(restaurantId) {
+  const db = getFirestore();
+  const directSnap = await db.doc(`restaurants/${restaurantId}`).get();
+  if (directSnap.exists) return directSnap;
+
+  const fields = ["restaurantId", "id", "businessId"];
+  for (const field of fields) {
+    const snap = await db.collection("restaurants").where(field, "==", restaurantId).limit(1).get();
+    if (!snap.empty) return snap.docs[0];
+  }
+
+  return null;
+}
 
 app.get("/", (_, res) => res.send("Scan2Plate backend is running"));
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
@@ -237,6 +250,11 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
 }, async (req, res) => {
   try {
     const restaurantIdParam = String(req.params.restaurantId || "").trim();
+    console.info("[Logo Upload]", {
+      restaurantId: restaurantIdParam,
+      fileMimetype: req.file?.mimetype || "",
+      fileSize: req.file?.size || 0
+    });
     if (!restaurantIdParam) return res.status(400).json({ ok: false, error: "restaurantId missing" });
     if (!req.file) return res.status(400).json({ ok: false, error: "Logo file is required." });
     if (!String(req.file.mimetype || "").startsWith("image/")) return res.status(415).json({ ok: false, error: "Use an image logo file." });
@@ -244,7 +262,9 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
     if (!adminReady) return res.status(503).json({ ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
     if (!process.env.FIREBASE_STORAGE_BUCKET) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
 
-    await assertRestaurantAccess(req.user.uid, restaurantIdParam);
+    const restaurantSnap = await findRestaurantDocByBusinessId(restaurantIdParam);
+    if (!restaurantSnap) return res.status(404).json({ ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
+    console.info("[Logo Upload] restaurant found", { restaurantId: restaurantIdParam, documentId: restaurantSnap.id });
 
     const extension = req.file.mimetype === "image/webp" ? "webp" : req.file.mimetype === "image/png" ? "png" : "jpg";
     const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
@@ -255,7 +275,13 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
     });
     const token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens;
     const logoUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
-    res.json({ ok: true, logoUrl, storagePath });
+    await restaurantSnap.ref.set({
+      restaurantLogoUrl: logoUrl,
+      restaurantLogoStoragePath: storagePath,
+      logoUrl,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    res.json({ ok: true, restaurantId: restaurantIdParam, logoUrl, storagePath });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message || "Logo upload failed." });
   }
