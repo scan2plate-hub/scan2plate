@@ -130,7 +130,7 @@ async function testOcrSpaceConnection() {
   params.append("isOverlayRequired", "false");
   params.append("filetype", "JPG");
 
-  return fetch("https://api.ocr.space/parse/imageurl", {
+  return fetch("https://api.ocr.space/parse/image", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString()
@@ -252,7 +252,7 @@ app.get("/api/ocr/test", async (_, res) => {
         bodyPreview: bodyText.slice(0, 300)
       });
     }
-    if (result.IsErroredOnProcessing || result.OCRExitCode !== 1) {
+    if (result.IsErroredOnProcessing || result.OCRExitCode !== 1 || !Array.isArray(result.ParsedResults)) {
       return res.json({
         connected: false,
         error: "OCR Space test failed",
