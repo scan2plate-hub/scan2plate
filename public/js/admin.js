@@ -278,6 +278,9 @@ const restaurantLogoUploadEl = document.getElementById("restaurantLogoUpload");
 const restaurantLogoPreviewEl = document.getElementById("restaurantLogoPreview");
 const removeRestaurantLogoBtn = document.getElementById("removeRestaurantLogoBtn");
 const restaurantHelpNumberFieldEl = document.getElementById("restaurantHelpNumberField");
+const restaurantSignatureMessageFieldEl = document.getElementById("restaurantSignatureMessageField");
+const billFooterMessageFieldEl = document.getElementById("billFooterMessageField");
+const showQrOnPaidBillsFieldEl = document.getElementById("showQrOnPaidBillsField");
 const kitchenWhatsAppFieldEl = document.getElementById("kitchenWhatsAppField");
 const backendUrlFieldEl = document.getElementById("backendUrlField");
 const gstFieldEl = document.getElementById("gstField");
@@ -359,6 +362,7 @@ let inventoryLogs = [];
 let purchaseBills = [];
 let reviewedPurchaseFileUrl = "";
 let restaurantLogoMarkedForRemoval = false;
+let currentBillOrder = null;
 
 let editingOrderDocId = null;
 let editingOrderPublicId = null;
@@ -558,6 +562,18 @@ function todayDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+async function nextDailyOrderMeta() {
+  const dailyOrderDate = todayDateStr();
+  const counterRef = doc(db, "restaurants", restaurantId, "counters", `daily-order-${dailyOrderDate}`);
+  const dailyOrderNo = await runTransaction(db, async transaction => {
+    const snap = await transaction.get(counterRef);
+    const next = Number(snap.exists() ? snap.data().lastDailyOrderNo || 0 : 0) + 1;
+    transaction.set(counterRef, { dailyOrderDate, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    return next;
+  });
+  return { dailyOrderNo, dailyOrderDate, displayOrderNo: String(dailyOrderNo) };
+}
+
 function timestampToDate(ts) {
   if (!ts) return null;
   if (ts.toDate) return ts.toDate();
@@ -576,6 +592,16 @@ function formatDateOnly(ts) {
   const d = timestampToDate(ts);
   if (!d) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatBillDate(ts) {
+  const d = timestampToDate(ts) || new Date();
+  return d.toLocaleDateString("en-IN");
+}
+
+function formatBillTime(ts) {
+  const d = timestampToDate(ts) || new Date();
+  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
 function getStatusClass(status = "") {
@@ -753,7 +779,7 @@ function isManualOrder(order = {}) {
 function shouldRingForOrder(order = {}) {
   const source = String(order.source || "").toLowerCase();
   if (isManualOrder(order)) return false;
-  if (source && !["customer_qr", "qr_order", "online_customer", "customer"].includes(source)) return false;
+  if (source && !["customer_qr", "qr_order", "qr-order", "online_customer", "customer"].includes(source)) return false;
   return true;
 }
 
@@ -1148,6 +1174,9 @@ async function loadSettings() {
     if (addressFieldEl) addressFieldEl.value = restaurantSettings.address || "";
     if (logoFieldEl) logoFieldEl.value = restaurantSettings.logoUrl || "";
     if (restaurantHelpNumberFieldEl) restaurantHelpNumberFieldEl.value = restaurantSettings.restaurantHelpNumber || "";
+    if (restaurantSignatureMessageFieldEl) restaurantSignatureMessageFieldEl.value = restaurantSettings.restaurantSignatureMessage || "";
+    if (billFooterMessageFieldEl) billFooterMessageFieldEl.value = restaurantSettings.billFooterMessage || "";
+    if (showQrOnPaidBillsFieldEl) showQrOnPaidBillsFieldEl.checked = restaurantSettings.showQrOnPaidBills !== false;
     setLogoPreview(getRestaurantLogoUrl());
     if (kitchenWhatsAppFieldEl) kitchenWhatsAppFieldEl.value = restaurantSettings.kitchenWhatsApp || "";
     if (backendUrlFieldEl) backendUrlFieldEl.value = restaurantSettings.backendUrl || "";
@@ -1208,6 +1237,9 @@ async function saveSettings() {
       restaurantLogoUrl: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || restaurantSettings.restaurantLogoUrl || ""),
       restaurantLogoStoragePath: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || ""),
       restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
+      restaurantSignatureMessage: restaurantSignatureMessageFieldEl?.value.trim() || "",
+      billFooterMessage: billFooterMessageFieldEl?.value.trim() || "",
+      showQrOnPaidBills: showQrOnPaidBillsFieldEl?.checked !== false,
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
       backendUrl: backendUrlFieldEl?.value.trim() || "",
       gstNumber: gstFieldEl?.value.trim() || "",
@@ -2339,6 +2371,7 @@ function fillKotPreviewFromCart(orderId = "") {
 }
 
 function fillBillPreview(order) {
+  currentBillOrder = order;
   const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
   const address = addressFieldEl?.value.trim() || restaurantSettings.address || "";
   const phone = phoneFieldEl?.value.trim() || restaurantSettings.phone || "";
@@ -2395,8 +2428,8 @@ if (billAddressEl) {
     billPaymentMethodEl.innerHTML = `<span>${escapeHtml(pmLabel)}</span><span style="font-weight:800;">${escapeHtml(psLabel)}</span>`;
   }
 
-  // A configured UPI ID always shows on final bills, including paid cash/card bills.
-  const showQr = Boolean(upiId);
+  const isPaid = String(order.paymentStatus || "").toLowerCase() === "paid";
+  const showQr = Boolean(upiId) && (!isPaid || restaurantSettings.showQrOnPaidBills !== false);
 
   if (billUpiQrSectionEl && billUpiQrImgEl) {
     if (showQr) {
@@ -2423,9 +2456,9 @@ if (billAddressEl) {
       };
       billUpiQrImgEl.style.cursor = isMobileDevice() ? "pointer" : "default";
     } else {
-      billUpiQrSectionEl.style.display = "block";
+      billUpiQrSectionEl.style.display = upiId ? "none" : "block";
       billUpiQrImgEl.style.display = "none";
-      if (billUpiMissingEl) billUpiMissingEl.style.display = "block";
+      if (billUpiMissingEl) billUpiMissingEl.style.display = upiId ? "none" : "block";
     }
   }
 
@@ -2442,6 +2475,127 @@ if (billAddressEl) {
       fillBillPreview(order);
     }
   }).catch(() => {});
+}
+
+function billDisplayOrderNo(order = {}) {
+  return order.displayOrderNo || order.dailyOrderNo || (order.orderId ? String(order.orderId).replace(/^ORD/i, "").slice(-4).replace(/^0+/, "") : "-") || "-";
+}
+
+function thermalBillItemRows(items = []) {
+  return (items || []).map(item => {
+    const qty = Number(item.qty || 0);
+    const amount = Number(item.price || 0) * qty;
+    return `<div class="item-row"><div class="item-name">${escapeHtml(item.name || "Item")}</div><div class="item-qty">${qty}</div><div class="item-amt">${money(amount)}</div></div>`;
+  }).join("");
+}
+
+function buildThermalBillHtml(order, qrDataUrl = "") {
+  const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
+  const address = addressFieldEl?.value.trim() || restaurantSettings.address || "";
+  const phone = phoneFieldEl?.value.trim() || restaurantSettings.phone || "";
+  const gst = String(restaurantSettings.gstNumber || "").trim().toUpperCase();
+  const signature = String(restaurantSettings.restaurantSignatureMessage || "").trim();
+  const footer = String(restaurantSettings.billFooterMessage || "Thank you for dining with us!").trim();
+  const logoUrl = getRestaurantLogoUrl();
+  const isPaid = String(order.paymentStatus || "unpaid").toLowerCase() === "paid";
+  const pm = String(order.paymentMethod || "cash").toLowerCase();
+  const pmLabels = { cash: "Cash", upi: "UPI", debit_card: "Debit Card", credit_card: "Credit Card" };
+  const upiId = upiFieldEl?.value.trim() || restaurantSettings.upiId || "";
+  const showQr = Boolean(qrDataUrl && upiId);
+  const totalQty = (order.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Bill</title>
+  <style>
+    @page{size:80mm auto;margin:0}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{margin:0;padding:0;background:#fff;color:#000}
+    .thermal-bill{width:72mm;margin:0 auto;padding:2mm;font-family:"Courier New",monospace,Arial,sans-serif;color:#000;background:#fff;font-size:12px;line-height:1.35;font-weight:600}
+    .center{text-align:center}.right{text-align:right}.strong{font-weight:900}.muted{font-size:10.5px}
+    .bill-logo{width:18mm;max-height:15mm;object-fit:contain;display:block;margin:0 auto 1mm auto;image-rendering:crisp-edges;filter:grayscale(1) contrast(1.35)}
+    .bill-title{font-size:18px;font-weight:900;text-align:center;line-height:1.1;margin:1mm 0 0}
+    .bill-signature{font-size:11px;text-align:center;font-style:italic;margin-top:1mm}
+    .bill-meta-small{font-size:10.5px;text-align:center;overflow-wrap:anywhere}
+    .bill-divider{border-top:1px dashed #000;margin:2mm 0}
+    .invoice-title{font-size:13px;font-weight:900;letter-spacing:.08em;text-align:center}
+    .detail-row,.sum-row,.pay-row{display:grid;grid-template-columns:22mm 1fr;gap:2mm;margin:.6mm 0}
+    .detail-row span:last-child,.sum-row span:last-child,.pay-row span:last-child{text-align:right;overflow-wrap:anywhere}
+    .order-no{font-size:16px;font-weight:900;text-align:center;letter-spacing:.08em;margin:1mm 0}
+    .item-head,.item-row{display:grid;grid-template-columns:minmax(0,1fr) 11mm 19mm;gap:2mm;align-items:start}
+    .item-head{font-weight:900;border-bottom:1px solid #000;padding-bottom:1mm;margin-bottom:1mm}
+    .item-row{padding:1mm 0;border-bottom:1px dotted #777;break-inside:avoid}
+    .item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+    .item-qty{text-align:center}.item-amt{text-align:right}
+    .total-row{font-size:16px;font-weight:900;letter-spacing:.08em}
+    .upi-title{font-size:15px;font-weight:900;text-align:center;letter-spacing:.08em;margin:2mm 0 1mm}
+    .upi-qr{width:42mm!important;height:42mm!important;padding:4mm!important;background:#fff!important;display:block;margin:2mm auto 1mm!important;object-fit:contain!important;image-rendering:pixelated;image-rendering:crisp-edges}
+    .upi-details{font-size:9px;line-height:1.2;text-align:center;word-break:break-all;overflow-wrap:anywhere}
+    .footer{font-size:12px;text-align:center;font-weight:800;margin-top:2mm}
+    @media print{body{margin:0;padding:0;background:#fff}.thermal-bill{width:72mm;margin:0 auto;padding:2mm}.bill-logo{width:18mm;max-height:15mm}.upi-qr{width:42mm!important;height:42mm!important;padding:4mm!important}}
+  </style>
+</head>
+<body>
+  <main class="thermal-bill">
+    <header class="center">
+      ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" class="bill-logo" alt="">` : ""}
+      <div class="bill-title">${escapeHtml(restaurantName)}</div>
+      ${signature ? `<div class="bill-signature">${escapeHtml(signature)}</div>` : ""}
+      ${address ? `<div class="bill-meta-small">${escapeHtml(address)}</div>` : ""}
+      ${gst ? `<div class="bill-meta-small"><span class="strong">GSTIN:</span> ${escapeHtml(gst)}</div>` : ""}
+      ${phone ? `<div class="bill-meta-small"><span class="strong">Phone:</span> ${escapeHtml(phone)}</div>` : ""}
+      <div class="bill-divider"></div>
+      <div class="invoice-title">TAX INVOICE</div>
+      <div class="bill-divider"></div>
+    </header>
+
+    <section>
+      <div class="detail-row"><span>Bill #:</span><span>${escapeHtml(order.orderId || "-")}</span></div>
+      <div class="detail-row"><span>Order No:</span><span>${escapeHtml(billDisplayOrderNo(order))}</span></div>
+      <div class="detail-row"><span>Table:</span><span>${escapeHtml(order.tableNo || order.tokenNo || "-")}</span></div>
+      <div class="detail-row"><span>Date:</span><span>${escapeHtml(formatBillDate(order.createdAt))}</span></div>
+      <div class="detail-row"><span>Time:</span><span>${escapeHtml(formatBillTime(order.createdAt))}</span></div>
+      <div class="detail-row"><span>Customer:</span><span>${escapeHtml(displayCustomerName(order))}</span></div>
+      <div class="detail-row"><span>Contact:</span><span>${escapeHtml(displayCustomerPhone(order) || "-")}</span></div>
+      <div class="order-no">Order# ${escapeHtml(billDisplayOrderNo(order))}</div>
+    </section>
+
+    <div class="bill-divider"></div>
+    <section>
+      <div class="item-head"><span>ITEM</span><span class="center">QTY</span><span class="right">AMT</span></div>
+      ${thermalBillItemRows(order.items || []) || `<div class="item-row"><div class="item-name">No items</div><div class="item-qty">0</div><div class="item-amt">${money(0)}</div></div>`}
+    </section>
+    <div class="bill-divider"></div>
+
+    <section>
+      <div class="sum-row"><span>Subtotal:</span><span>${money(order.itemsTotal || 0)}</span></div>
+      <div class="sum-row"><span>Tax:</span><span>${money(order.tax || 0)}</span></div>
+      <div class="sum-row total-row"><span>TOTAL:</span><span>${money(order.grandTotal || 0)}</span></div>
+      <div class="muted">Total Qty: ${Number(totalQty || 0)}</div>
+    </section>
+    <div class="bill-divider"></div>
+
+    <section>
+      <div class="pay-row"><span>${escapeHtml(pmLabels[pm] || order.paymentMethod || "Cash")}</span><span class="strong">${isPaid ? "PAID" : "UNPAID"}</span></div>
+    </section>
+
+    ${showQr ? `<section>
+      <div class="upi-title">Scan &amp; Pay</div>
+      <img class="upi-qr" src="${qrDataUrl}" alt="UPI QR">
+      <div class="upi-details">UPI ID: <strong>${escapeHtml(upiId)}</strong></div>
+      <div class="upi-details">Amount: <strong>${money(order.grandTotal || 0)}</strong></div>
+      <div class="upi-details">Restaurant: <strong>${escapeHtml(restaurantName)}</strong></div>
+    </section>` : ""}
+
+    <div class="bill-divider"></div>
+    <footer class="footer">
+      <div>${escapeHtml(footer)}</div>
+      <div>Visit Again</div>
+    </footer>
+  </main>
+</body>
+</html>`;
 }
 
 async function createManualBill() {
@@ -2498,9 +2652,11 @@ async function createManualBill() {
       setNotice(`Order updated: ${editingOrderPublicId}`, "success");
     } else {
       const orderId = "ORD" + Date.now();
+      const dailyOrder = await nextDailyOrderMeta();
 
       await addDoc(collection(db, "orders"), {
         orderId,
+        ...dailyOrder,
         restaurantId,
         customerName,
         customerPhone,
@@ -3454,6 +3610,8 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
 document.getElementById("printBillBtn")?.addEventListener("click", async () => {
   const win = window.open("", "_blank", "width=380,height=700");
   if (!win) return alert("Allow popup to print.");
+  const order = currentBillOrder;
+  if (!order) { win.close(); return alert("Bill order is unavailable."); }
   const liveLogo = document.getElementById("billLogo");
   if (liveLogo && liveLogo.style.display !== "none" && liveLogo.src) {
     try {
@@ -3463,22 +3621,11 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
       liveLogo.removeAttribute("src");
     }
   }
-  const printRoot = document.getElementById("billPreview")?.cloneNode(true);
-  if (!printRoot) { win.close(); return alert("Bill preview is unavailable."); }
-  const printQr = printRoot.querySelector("#billUpiQrImg");
-  const unavailable = printRoot.querySelector("#billUpiMissing");
-  const qrSection = printRoot.querySelector("#billUpiQrSection");
-  const needsQr = Boolean((upiFieldEl?.value.trim() || restaurantSettings.upiId || "").trim()) && qrSection?.style.display !== "none";
+  const needsQr = Boolean((upiFieldEl?.value.trim() || restaurantSettings.upiId || "").trim()) &&
+    (String(order.paymentStatus || "unpaid").toLowerCase() !== "paid" || restaurantSettings.showQrOnPaidBills !== false);
+  let qrDataUrl = "";
   try {
-    // Embed the fully-loaded QR as PNG so print never depends on an external URL.
-    const qrDataUrl = await billQrAsPngDataUrl();
-    if (printQr) {
-      printQr.src = qrDataUrl;
-      printQr.style.display = "block";
-      printQr.style.visibility = "visible";
-      printQr.style.opacity = "1";
-    }
-    if (unavailable) unavailable.style.display = "none";
+    if (needsQr) qrDataUrl = await billQrAsPngDataUrl();
   } catch (error) {
     console.warn("Bill QR could not be embedded for printing", error);
     if (needsQr) {
@@ -3486,22 +3633,21 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
       alert("UPI QR could not be generated. Bill was not printed with a blank QR. Check internet connection or UPI settings and try again.");
       return;
     }
-    if (printQr) printQr.style.display = "none";
-    if (unavailable) { unavailable.textContent = "UPI QR unavailable"; unavailable.style.display = "block"; }
   }
-  const html = printRoot.outerHTML;
-  win.document.write(`
-    <html>
-      <head>
-        <title>Bill</title>
-        <style>
-          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.bill-logo{width:22mm!important;max-height:18mm!important;object-fit:contain!important;display:block;margin:0 auto 2mm auto;image-rendering:crisp-edges;image-rendering:pixelated;filter:grayscale(1) contrast(1.3)}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img:not(.bill-logo){max-width:118px!important;height:auto!important}#billUpiQrSection{background:#fff!important;padding-top:14px!important}#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;aspect-ratio:1 / 1!important;object-fit:contain!important;padding:4mm!important;box-sizing:border-box!important;margin:6px auto 4px!important;border:0!important;border-radius:0!important;display:block!important;visibility:visible!important;opacity:1!important;background:#fff!important;image-rendering:crisp-edges!important;image-rendering:pixelated!important;print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}#billQrUpiId{display:inline-block;max-width:100%;font-size:9px;line-height:1.2;word-break:break-all;overflow-wrap:anywhere}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.bill-logo{width:22mm!important;max-height:18mm!important;object-fit:contain!important;display:block;margin:0 auto 2mm auto;image-rendering:crisp-edges;image-rendering:pixelated;filter:grayscale(1) contrast(1.3)}#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;object-fit:contain!important;aspect-ratio:1 / 1!important;display:block!important;visibility:visible!important;opacity:1!important}}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}}
-        </style>
-      </head>
-      <body>${html}</body>
-    </html>
-  `);
+  win.document.write(buildThermalBillHtml(order, qrDataUrl));
   win.document.close();
+  const images = [...win.document.images].filter(img => img.src);
+  let imagesReady = true;
+  await Promise.all(images.map(img => waitForImageLoad(img, img.classList.contains("bill-logo") ? 2000 : 8000).catch(error => {
+    if (img.classList.contains("bill-logo")) img.remove();
+    else throw error;
+  }))).catch(error => {
+    console.warn("Bill print image was not ready", error);
+    imagesReady = false;
+    win.close();
+    alert("Bill image/QR was not ready for printing. Please try again.");
+  });
+  if (!imagesReady) return;
   setTimeout(() => {
     win.print();
     win.close();

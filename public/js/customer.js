@@ -424,6 +424,18 @@ async function nextVendorToken() {
   return { tokenDate, tokenNumber };
 }
 
+async function nextDailyOrderMeta() {
+  const dailyOrderDate = localTokenDate();
+  const counterRef = doc(db, 'restaurants', restaurantId, 'counters', `daily-order-${dailyOrderDate}`);
+  const dailyOrderNo = await runTransaction(db, async transaction => {
+    const counter = await transaction.get(counterRef);
+    const next = Number(counter.exists() ? counter.data().lastDailyOrderNo || 0 : 0) + 1;
+    transaction.set(counterRef, { dailyOrderDate, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    return next;
+  });
+  return { dailyOrderNo, dailyOrderDate, displayOrderNo: String(dailyOrderNo) };
+}
+
 function mergeItems(existing = [], incoming = []) {
   const map = new Map();
 
@@ -596,8 +608,10 @@ async function placeOrder() {
 
       const vendorToken = isVendorMode() ? await nextVendorToken() : { tokenDate: null, tokenNumber: null };
       createdTokenNumber = vendorToken.tokenNumber;
+      const dailyOrder = await nextDailyOrderMeta();
       const payload = {
         orderId,
+        ...dailyOrder,
         restaurantId,
         restaurantName: settings.restaurantName || 'Restaurant',
         businessMode: isVendorMode() ? 'vendor' : 'restaurant',
