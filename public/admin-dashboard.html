@@ -776,6 +776,10 @@
           <div class="card">
             <div class="card-header"><h3 class="card-title"><i class="fas fa-utensils"></i> Select Items</h3></div>
             <div class="card-body">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <input class="form-input" id="manualMenuSearch" type="search" placeholder="Search menu item..." style="min-width:min(260px,100%);flex:1;" />
+                <button class="btn btn-sm btn-outline" id="clearManualMenuSearchBtn" type="button">X</button>
+              </div>
               <div class="tab-pills" id="manualCategoryTabs"><button class="tab-pill active" data-category="all">All</button></div>
               <div class="menu-grid" id="manualMenuPicker"></div>
             </div>

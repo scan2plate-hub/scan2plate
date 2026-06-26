@@ -310,6 +310,8 @@ const manualBillMsgEl = document.getElementById("manualBillMsg");
 const manualUpiQrWrap = document.getElementById("manualUpiQrWrap");
 const manualUpiQrImg = document.getElementById("manualUpiQrImg");
 const manualMenuPickerEl = document.getElementById("manualMenuPicker");
+const manualMenuSearchEl = document.getElementById("manualMenuSearch");
+const clearManualMenuSearchBtn = document.getElementById("clearManualMenuSearchBtn");
 const manualCartListEl = document.getElementById("manualCartList");
 const manualItemsTotalEl = document.getElementById("manualItemsTotal");
 const manualTaxTotalEl = document.getElementById("manualTaxTotal");
@@ -2500,16 +2502,19 @@ function renderManualMenuPicker() {
     renderManualMenuPicker();
   });
 
-  const filteredItems = selectedManualCategory === "all"
-    ? manualMenuItems
-    : manualMenuItems.filter(item => normalizeCategory(item.category) === selectedManualCategory);
+  const search = String(manualMenuSearchEl?.value || "").trim().toLowerCase();
+  const filteredItems = manualMenuItems.filter(item => {
+    const categoryOk = selectedManualCategory === "all" || normalizeCategory(item.category) === selectedManualCategory;
+    const text = `${item.name || ""} ${item.category || ""} ${item.description || ""}`.toLowerCase();
+    return categoryOk && (!search || text.includes(search));
+  });
 
   if (!filteredItems.length) {
     manualMenuPickerEl.innerHTML = `
       <div class="empty-state">
         <i class="fas fa-filter"></i>
-        <h4>No items in this category</h4>
-        <p>Choose another category</p>
+        <h4>${search ? "No matching menu items found" : "No items in this category"}</h4>
+        <p>${search ? "Clear search or choose another category" : "Choose another category"}</p>
       </div>
     `;
     return;
@@ -3867,6 +3872,11 @@ clearMenuSearchBtn?.addEventListener("click", () => {
   renderMenuManagement();
 });
 tableSearchEl?.addEventListener("input", renderTablesSection);
+manualMenuSearchEl?.addEventListener("input", renderManualMenuPicker);
+clearManualMenuSearchBtn?.addEventListener("click", () => {
+  if (manualMenuSearchEl) manualMenuSearchEl.value = "";
+  renderManualMenuPicker();
+});
 uploadMenuPdfBtn?.addEventListener("click", () => menuPdfInput?.click());
 menuPdfInput?.addEventListener("change", async () => {
   const file = menuPdfInput.files?.[0];
