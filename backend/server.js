@@ -10,10 +10,21 @@ import { getStorage } from "firebase-admin/storage";
 
 dotenv.config();
 const app = express();
-app.use(cors());
+const corsAllowedOrigins = new Set([
+  "https://scan2plate.com",
+  "http://localhost:5502",
+  "http://127.0.0.1:5502"
+]);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || corsAllowedOrigins.has(origin) || process.env.CORS_STRICT !== "true") return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  }
+}));
 app.use(express.json({ limit: "2mb" }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const twilioRequired = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"];
 const missing = twilioRequired.filter(key => !process.env[key]);
@@ -216,18 +227,26 @@ app.post("/notify-order", async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, upload.single("file"), async (req, res) => {
+app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) => {
+  logoUpload.single("file")(req, res, error => {
+    if (!error) return next();
+    if (error.code === "LIMIT_FILE_SIZE") return res.status(413).json({ ok: false, error: "Logo image must be 1MB or smaller after compression." });
+    return res.status(400).json({ ok: false, error: error.message || "Logo upload failed." });
+  });
+}, async (req, res) => {
   try {
     const restaurantIdParam = String(req.params.restaurantId || "").trim();
     if (!restaurantIdParam) return res.status(400).json({ ok: false, error: "restaurantId missing" });
     if (!req.file) return res.status(400).json({ ok: false, error: "Logo file is required." });
-    if (!["image/jpeg", "image/png", "image/webp"].includes(req.file.mimetype)) return res.status(415).json({ ok: false, error: "Use JPG, JPEG, PNG, or WEBP logo image." });
-    if (req.file.size > 2 * 1024 * 1024) return res.status(413).json({ ok: false, error: "Logo image must be 2MB or smaller." });
-    if (!process.env.FIREBASE_STORAGE_BUCKET) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing." });
+    if (!String(req.file.mimetype || "").startsWith("image/")) return res.status(415).json({ ok: false, error: "Use an image logo file." });
+    if (req.file.size > 1024 * 1024) return res.status(413).json({ ok: false, error: "Logo image must be 1MB or smaller after compression." });
+    if (!adminReady) return res.status(503).json({ ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
+    if (!process.env.FIREBASE_STORAGE_BUCKET) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
 
     await assertRestaurantAccess(req.user.uid, restaurantIdParam);
 
-    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.png`;
+    const extension = req.file.mimetype === "image/webp" ? "webp" : req.file.mimetype === "image/png" ? "png" : "jpg";
+    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
     const file = getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET).file(storagePath);
     await file.save(req.file.buffer, {
       contentType: req.file.mimetype || "image/png",

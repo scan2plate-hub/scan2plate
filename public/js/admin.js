@@ -776,15 +776,21 @@ function withTimeout(promise, ms, message, code = "timeout") {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
+function setSaveSettingsProgress(text = "Save Settings", saving = false) {
+  if (!saveSettingsBtn) return;
+  saveSettingsBtn.disabled = Boolean(saving);
+  const icon = saving ? `<i class="fas fa-spinner fa-spin"></i>` : `<i class="fas fa-save"></i>`;
+  saveSettingsBtn.innerHTML = `${icon} ${text}`;
+}
+
 function validateLogoFile(file) {
   if (!file) return;
   const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
   const nameOk = /\.(jpe?g|png|webp)$/i.test(file.name || "");
   if (!acceptedTypes.has(file.type) && !nameOk) throw new Error("Use JPG, JPEG, PNG, or WEBP logo image.");
-  if (file.size > 2 * 1024 * 1024) throw new Error("Logo image must be 2MB or smaller.");
 }
 
-function resizeLogoFile(file) {
+function loadLogoImage(file) {
   return new Promise((resolve, reject) => {
     if (!file) return resolve(null);
     try { validateLogoFile(file); } catch (error) { return reject(error); }
@@ -792,18 +798,7 @@ function resizeLogoFile(file) {
     const objectUrl = URL.createObjectURL(file);
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const maxSize = 400;
-      const scale = Math.min(1, maxSize / Math.max(1, image.naturalWidth), maxSize / Math.max(1, image.naturalHeight));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const ctx = canvas.getContext("2d");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => {
-        if (!blob) return reject(new Error("Logo could not be processed"));
-        resolve(blob);
-      }, "image/png", 0.92);
+      resolve(image);
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
@@ -813,14 +808,55 @@ function resizeLogoFile(file) {
   });
 }
 
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Logo could not be processed")), type, quality);
+  });
+}
+
+async function compressLogoFile(file) {
+  if (!file) return null;
+  validateLogoFile(file);
+  const image = await loadLogoImage(file);
+  if (!image) return null;
+  const maxSize = 300;
+  const scale = Math.min(1, maxSize / Math.max(1, image.naturalWidth || image.width), maxSize / Math.max(1, image.naturalHeight || image.height));
+  const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+  const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  const targetBytes = 250 * 1024;
+  const qualities = [0.75, 0.68, 0.6, 0.52, 0.45];
+  let blob = null;
+  for (const quality of qualities) {
+    blob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (blob.size <= targetBytes) break;
+  }
+  if (!blob) throw new Error("Logo could not be processed");
+  if (blob.size > 1024 * 1024) throw new Error("Logo image must be 1MB or smaller after compression.");
+  const baseName = String(file.name || "logo").replace(/\.[^.]+$/, "") || "logo";
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+function logoBackendUrl() {
+  const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
+  const savedUrl = String(configuredOverride || restaurantSettings.backendUrl || "").trim();
+  if (savedUrl) return savedUrl.replace(/\/+$/, "");
+  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) return "https://scan2serve-backend.onrender.com";
+  throw new Error("Backend URL missing. Please set Backend URL in Payment Settings.");
+}
+
 async function uploadRestaurantLogoWithFirebase(file) {
-  const resized = await resizeLogoFile(file);
-  if (!resized) return null;
   if (!restaurantId) throw new Error("restaurantId missing");
-  const path = `restaurants/${restaurantId}/logo/logo-${Date.now()}.png`;
+  const path = `restaurants/${restaurantId}/logo/logo-${Date.now()}.jpg`;
   const logoRef = storageRef(getStorage(app), path);
   try {
-    await uploadBytes(logoRef, resized, { contentType: "image/png" });
+    await uploadBytes(logoRef, file, { contentType: file.type || "image/jpeg" });
     return { url: await getDownloadURL(logoRef), path };
   } catch (error) {
     throw new Error(logoUploadErrorMessage(error));
@@ -828,12 +864,11 @@ async function uploadRestaurantLogoWithFirebase(file) {
 }
 
 async function uploadRestaurantLogoWithBackend(file) {
-  const resized = await resizeLogoFile(file);
-  if (!resized) return null;
+  if (!file) return null;
   if (!restaurantId) throw new Error("restaurantId missing");
   const form = new FormData();
-  form.append("file", resized, `logo-${Date.now()}.png`);
-  const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/logo`, {
+  form.append("file", file, `logo-${Date.now()}.jpg`);
+  const response = await fetch(`${logoBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/logo`, {
     method: "POST",
     headers: await purchaseAuthHeaders(),
     body: form
@@ -842,7 +877,8 @@ async function uploadRestaurantLogoWithBackend(file) {
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch {}
   if (!response.ok || data.ok === false) {
-    throw new Error(data.error || `HTTP ${response.status}: ${text || response.statusText}`);
+    const detail = data.error || text || response.statusText;
+    throw new Error(data.error ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}: ${detail}`);
   }
   if (!data.logoUrl) throw new Error("Backend upload did not return logoUrl.");
   return { url: data.logoUrl, path: data.storagePath || "" };
@@ -857,32 +893,18 @@ async function uploadRestaurantLogo(file) {
     fileSize: file?.size || 0
   });
   try {
-    console.log("[Settings Save] upload method: firebase-storage");
+    console.log("[Settings Save] upload method: backend");
     const uploaded = await withTimeout(
-      uploadRestaurantLogoWithFirebase(file),
-      20000,
+      uploadRestaurantLogoWithBackend(file),
+      45000,
       "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.",
       "logo-upload-timeout"
     );
     console.log("[Settings Save] upload success URL", uploaded?.url || "");
     return uploaded;
-  } catch (firebaseError) {
-    console.warn("[Settings Save] firebase logo upload failed", detailedErrorMessage(firebaseError));
-    if (firebaseError.code === "logo-upload-timeout") throw firebaseError;
-    try {
-      console.log("[Settings Save] upload method: backend");
-      const uploaded = await withTimeout(
-        uploadRestaurantLogoWithBackend(file),
-        20000,
-        "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.",
-        "logo-upload-timeout"
-      );
-      console.log("[Settings Save] upload success URL", uploaded?.url || "");
-      return uploaded;
-    } catch (backendError) {
-      backendError.message = `${logoUploadErrorMessage(firebaseError)}; backend fallback failed: ${detailedErrorMessage(backendError)}`;
-      throw backendError;
-    }
+  } catch (backendError) {
+    console.warn("[Settings Save] backend logo upload failed", detailedErrorMessage(backendError));
+    throw backendError;
   }
 }
 
@@ -1323,10 +1345,7 @@ async function loadSettings() {
 async function saveSettings() {
   try {
     if (!restaurantId) throw new Error("restaurantId missing");
-    if (saveSettingsBtn) {
-      saveSettingsBtn.disabled = true;
-      saveSettingsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving...`;
-    }
+    setSaveSettingsProgress("Saving...", true);
     const restaurantLatRaw = restaurantLatFieldEl?.value.trim() || "";
     const restaurantLngRaw = restaurantLngFieldEl?.value.trim() || "";
     const radiusRaw = allowedOrderRadiusFieldEl?.value || "150";
@@ -1343,7 +1362,16 @@ async function saveSettings() {
       return;
     }
 
-    const logoFile = selectedRestaurantLogoFile || window.scan2plateSelectedRestaurantLogoFile || restaurantLogoUploadEl?.files?.[0] || null;
+    let logoFile = selectedRestaurantLogoFile || window.scan2plateSelectedRestaurantLogoFile || null;
+    if (!logoFile && restaurantLogoUploadEl?.files?.[0]) {
+      setSaveSettingsProgress("Compressing logo...", true);
+      logoFile = await compressLogoFile(restaurantLogoUploadEl.files[0]);
+      selectedRestaurantLogoFile = logoFile;
+      window.scan2plateSelectedRestaurantLogoFile = logoFile;
+      if (restaurantLogoPreviewObjectUrl) URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
+      restaurantLogoPreviewObjectUrl = URL.createObjectURL(logoFile);
+      setLogoPreview(restaurantLogoPreviewObjectUrl);
+    }
     console.log("[Settings Save] start", {
       restaurantId,
       hasSelectedLogoFile: Boolean(logoFile),
@@ -1353,6 +1381,7 @@ async function saveSettings() {
     });
     if (logoFile) {
       try {
+        setSaveSettingsProgress("Uploading logo...", true);
         uploadedLogo = await uploadRestaurantLogo(logoFile);
       } catch (error) {
         console.error("[Settings Save] logo upload failed", error);
@@ -1397,6 +1426,7 @@ async function saveSettings() {
     };
 
     console.log("[Settings Save] saving Firestore settings", { restaurantId, logoUrl: payload.logoUrl || "", restaurantLogoUrl: payload.restaurantLogoUrl || "" });
+    setSaveSettingsProgress("Saving settings...", true);
     await withTimeout(
       Promise.all([
         setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true }),
@@ -1428,10 +1458,7 @@ async function saveSettings() {
     console.error("[Settings Save] settings save failed", err);
     alert("Failed to save settings: " + detailedErrorMessage(err));
   } finally {
-    if (saveSettingsBtn) {
-      saveSettingsBtn.disabled = false;
-      saveSettingsBtn.innerHTML = `<i class="fas fa-save"></i> Save Settings`;
-    }
+    setSaveSettingsProgress("Save Settings", false);
   }
 }
 
@@ -3699,22 +3726,34 @@ savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 
 saveSettingsBtn?.addEventListener("click", saveSettings);
 useCurrentLocationBtn?.addEventListener("click", useAdminCurrentLocation);
-restaurantLogoUploadEl?.addEventListener("change", () => {
+restaurantLogoUploadEl?.addEventListener("change", async () => {
   restaurantLogoMarkedForRemoval = false;
   const file = restaurantLogoUploadEl.files?.[0];
   if (!file) return;
   try {
     validateLogoFile(file);
-    selectedRestaurantLogoFile = file;
-    window.scan2plateSelectedRestaurantLogoFile = file;
+    setSaveSettingsProgress("Compressing logo...", true);
+    const compressedFile = await compressLogoFile(file);
+    selectedRestaurantLogoFile = compressedFile;
+    window.scan2plateSelectedRestaurantLogoFile = compressedFile;
     if (restaurantLogoPreviewObjectUrl) URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
-    restaurantLogoPreviewObjectUrl = URL.createObjectURL(file);
+    restaurantLogoPreviewObjectUrl = URL.createObjectURL(compressedFile);
     setLogoPreview(restaurantLogoPreviewObjectUrl);
+    console.log("[Settings Save] logo compressed", {
+      originalName: file.name || "",
+      originalType: file.type || "",
+      originalSize: file.size || 0,
+      fileName: compressedFile?.name || "",
+      fileType: compressedFile?.type || "",
+      fileSize: compressedFile?.size || 0
+    });
   } catch (error) {
     selectedRestaurantLogoFile = null;
     window.scan2plateSelectedRestaurantLogoFile = null;
     restaurantLogoUploadEl.value = "";
     alert("Logo upload failed: " + (error.message || String(error)));
+  } finally {
+    setSaveSettingsProgress("Save Settings", false);
   }
 });
 removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
