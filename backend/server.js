@@ -179,6 +179,7 @@ async function assertRestaurantAccess(uid, restaurantId) {
   }
 }
 
+app.get("/", (_, res) => res.send("Scan2Plate backend is running"));
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
 app.get("/api/health", (_, res) => res.json({ ok: true, service: "scan2plate-backend", time: new Date().toISOString() }));
 app.get("/api/ocr/status", (_, res) => {
