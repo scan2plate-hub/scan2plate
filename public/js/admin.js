@@ -1,4 +1,4 @@
-import { db, auth } from "./firebase.js";
+import { app, db, auth } from "./firebase.js";
 import {
   collection,
   doc,
@@ -13,6 +13,7 @@ import {
   runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
 
@@ -273,6 +274,10 @@ const taxFieldEl = document.getElementById("taxField");
 const phoneFieldEl = document.getElementById("phoneField");
 const addressFieldEl = document.getElementById("addressField");
 const logoFieldEl = document.getElementById("logoField");
+const restaurantLogoUploadEl = document.getElementById("restaurantLogoUpload");
+const restaurantLogoPreviewEl = document.getElementById("restaurantLogoPreview");
+const removeRestaurantLogoBtn = document.getElementById("removeRestaurantLogoBtn");
+const restaurantHelpNumberFieldEl = document.getElementById("restaurantHelpNumberField");
 const kitchenWhatsAppFieldEl = document.getElementById("kitchenWhatsAppField");
 const backendUrlFieldEl = document.getElementById("backendUrlField");
 const gstFieldEl = document.getElementById("gstField");
@@ -317,12 +322,14 @@ const kotItemsEl = document.getElementById("kotItems");
 const kotNotesEl = document.getElementById("kotNotes");
 
 const billRestaurantNameEl = document.getElementById("billRestaurantName");
+const billLogoEl = document.getElementById("billLogo");
 const billAddressEl = document.getElementById("billAddress");
 const billPhoneEl = document.getElementById("billPhone");
 const billNumberEl = document.getElementById("billNumber");
 const billTableEl = document.getElementById("billTable");
 const billDateEl = document.getElementById("billDate");
 const billCustomerEl = document.getElementById("billCustomer");
+const billContactEl = document.getElementById("billContact");
 const billItemsEl = document.getElementById("billItems");
 const billSubtotalEl = document.getElementById("billSubtotal");
 const billTaxEl = document.getElementById("billTax");
@@ -351,6 +358,7 @@ let allInventoryItems = [];
 let inventoryLogs = [];
 let purchaseBills = [];
 let reviewedPurchaseFileUrl = "";
+let restaurantLogoMarkedForRemoval = false;
 
 let editingOrderDocId = null;
 let editingOrderPublicId = null;
@@ -640,14 +648,18 @@ function buildQrUrl(upiUrl) {
   return `https://api.qrserver.com/v1/create-qr-code/?format=png&size=1800x1800&ecc=H&margin=4&color=000000&bgcolor=FFFFFF&data=${encodeURIComponent(upiUrl)}`;
 }
 
-function waitForImageLoad(image) {
-  if (!image) return Promise.reject(new Error("QR image is missing"));
+function waitForImageLoad(image, timeoutMs = 8000) {
+  if (!image) return Promise.reject(new Error("Image is missing"));
   if (image.complete && image.naturalWidth > 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("QR image load timed out")), 8000);
+    const timeout = setTimeout(() => reject(new Error("Image load timed out")), timeoutMs);
     image.addEventListener("load", () => { clearTimeout(timeout); resolve(); }, { once: true });
-    image.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("QR image failed to load")); }, { once: true });
+    image.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("Image failed to load")); }, { once: true });
   });
+}
+
+function waitForLogoLoad(image) {
+  return waitForImageLoad(image, 2000);
 }
 
 async function billQrAsPngDataUrl() {
@@ -670,6 +682,87 @@ async function billQrAsPngDataUrl() {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+function getRestaurantLogoUrl() {
+  return String(restaurantSettings.restaurantLogoUrl || restaurantSettings.logoUrl || "").trim();
+}
+
+function setLogoPreview(url = "") {
+  if (!restaurantLogoPreviewEl) return;
+  if (url) {
+    restaurantLogoPreviewEl.src = url;
+    restaurantLogoPreviewEl.style.display = "block";
+  } else {
+    restaurantLogoPreviewEl.removeAttribute("src");
+    restaurantLogoPreviewEl.style.display = "none";
+  }
+}
+
+function markRestaurantLogoRemoved() {
+  restaurantLogoMarkedForRemoval = true;
+  restaurantSettings.restaurantLogoUrl = "";
+  restaurantSettings.restaurantLogoStoragePath = "";
+  if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
+  setLogoPreview("");
+}
+
+function resizeLogoFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve(null);
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const maxWidth = 400;
+      const scale = Math.min(1, maxWidth / Math.max(1, image.naturalWidth));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob) return reject(new Error("Logo could not be processed"));
+        resolve(blob);
+      }, "image/png", 0.92);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Logo image could not be read"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function uploadRestaurantLogo(file) {
+  const resized = await resizeLogoFile(file);
+  if (!resized) return null;
+  const path = `restaurants/${restaurantId}/settings/logo-${Date.now()}.png`;
+  const logoRef = storageRef(getStorage(app), path);
+  await uploadBytes(logoRef, resized, { contentType: "image/png" });
+  return { url: await getDownloadURL(logoRef), path };
+}
+
+function isManualOrder(order = {}) {
+  const source = String(order.source || "").toLowerCase();
+  return order.isManualOrder === true || order.isManualBill === true || source === "manual_admin" || source === "quick_billing" || source === "manual";
+}
+
+function shouldRingForOrder(order = {}) {
+  const source = String(order.source || "").toLowerCase();
+  if (isManualOrder(order)) return false;
+  if (source && !["customer_qr", "qr_order", "online_customer", "customer"].includes(source)) return false;
+  return true;
+}
+
+function displayCustomerName(order = {}) {
+  return order.customerName || (isManualOrder(order) ? "-" : "Walk-in");
+}
+
+function displayCustomerPhone(order = {}) {
+  return order.customerPhone || (isManualOrder(order) ? "-" : "");
 }
 
 function updateUserCard() {
@@ -919,7 +1012,9 @@ function handleRealtimeAdminAlerts(orders) {
     const key = buildRealtimeKey(order);
     const oldKey = adminSeenRealtimeKeys.get(order.id);
 
-    if (!adminFirstRealtimeLoad) {
+    const canAlert = shouldRingForOrder(order);
+
+    if (!adminFirstRealtimeLoad && canAlert) {
       if (!oldKey) {
         shouldPlay = true;
         type = "new_order";
@@ -943,7 +1038,7 @@ function handleRealtimeAdminAlerts(orders) {
   });
 
   adminFirstRealtimeLoad = false;
-  adminPendingAlarmIds = new Set(orders.filter(order => String(order.status || "").toLowerCase() === "pending").map(order => order.id));
+  adminPendingAlarmIds = new Set(orders.filter(order => String(order.status || "").toLowerCase() === "pending" && shouldRingForOrder(order)).map(order => order.id));
   [...adminMutedOrderIds].forEach(id => { if (!adminPendingAlarmIds.has(id)) adminMutedOrderIds.delete(id); });
   localStorage.setItem("scan2plate_muted_order_alerts", JSON.stringify([...adminMutedOrderIds]));
   const unmutedPending = [...adminPendingAlarmIds].filter(id => !adminMutedOrderIds.has(id));
@@ -1052,6 +1147,8 @@ async function loadSettings() {
     if (phoneFieldEl) phoneFieldEl.value = restaurantSettings.phone || "";
     if (addressFieldEl) addressFieldEl.value = restaurantSettings.address || "";
     if (logoFieldEl) logoFieldEl.value = restaurantSettings.logoUrl || "";
+    if (restaurantHelpNumberFieldEl) restaurantHelpNumberFieldEl.value = restaurantSettings.restaurantHelpNumber || "";
+    setLogoPreview(getRestaurantLogoUrl());
     if (kitchenWhatsAppFieldEl) kitchenWhatsAppFieldEl.value = restaurantSettings.kitchenWhatsApp || "";
     if (backendUrlFieldEl) backendUrlFieldEl.value = restaurantSettings.backendUrl || "";
     if (gstFieldEl) gstFieldEl.value = restaurantSettings.gstNumber || "";
@@ -1079,6 +1176,7 @@ async function saveSettings() {
     const restaurantLat = restaurantLatRaw === "" ? null : Number(restaurantLatRaw);
     const restaurantLng = restaurantLngRaw === "" ? null : Number(restaurantLngRaw);
     const allowedOrderRadiusMeters = Number(radiusRaw) > 0 ? Number(radiusRaw) : 150;
+    let uploadedLogo = null;
 
     if (
       (restaurantLatRaw !== "" && !Number.isFinite(restaurantLat)) ||
@@ -1086,6 +1184,16 @@ async function saveSettings() {
     ) {
       alert("Enter valid restaurant latitude and longitude.");
       return;
+    }
+
+    const logoFile = restaurantLogoUploadEl?.files?.[0] || null;
+    if (logoFile) {
+      try {
+        uploadedLogo = await uploadRestaurantLogo(logoFile);
+      } catch (error) {
+        alert("Logo upload failed: " + error.message);
+        return;
+      }
     }
 
     const payload = {
@@ -1097,6 +1205,9 @@ async function saveSettings() {
       phone: phoneFieldEl?.value.trim() || "",
       address: addressFieldEl?.value.trim() || "",
       logoUrl: logoFieldEl?.value.trim() || "",
+      restaurantLogoUrl: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || restaurantSettings.restaurantLogoUrl || ""),
+      restaurantLogoStoragePath: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || ""),
+      restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
       backendUrl: backendUrlFieldEl?.value.trim() || "",
       gstNumber: gstFieldEl?.value.trim() || "",
@@ -1108,9 +1219,16 @@ async function saveSettings() {
       updatedAt: serverTimestamp()
     };
 
+    if (uploadedLogo) {
+      payload.logoUrl = payload.logoUrl || uploadedLogo.url;
+    }
+
     await setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true });
     await setDoc(doc(db, "restaurants", restaurantId), { businessMode: payload.businessMode, orderMode: payload.orderMode, tableCount: payload.tableCount, updatedAt: serverTimestamp() }, { merge: true });
     restaurantSettings = { ...restaurantSettings, ...payload };
+    if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
+    restaurantLogoMarkedForRemoval = false;
+    setLogoPreview(getRestaurantLogoUrl());
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
@@ -2200,6 +2318,7 @@ function fillKotPreviewFromCart(orderId = "") {
   if (kotDateEl) kotDateEl.textContent = now.toLocaleDateString();
   if (kotTimeEl) kotTimeEl.textContent = now.toLocaleTimeString();
   if (kotServerEl) kotServerEl.textContent = currentUser.name || "Admin";
+  if (kotNotesEl) kotNotesEl.textContent = "Source: Manual Order";
 
   if (kotItemsEl) {
     kotItemsEl.innerHTML = manualCart.length
@@ -2211,7 +2330,6 @@ function fillKotPreviewFromCart(orderId = "") {
       : "<div>No items</div>";
   }
 
-  if (kotNotesEl) kotNotesEl.textContent = "";
 }
 
 function fillBillPreview(order) {
@@ -2221,6 +2339,20 @@ function fillBillPreview(order) {
   const upiId = upiFieldEl?.value.trim() || restaurantSettings.upiId || "";
 
   if (billRestaurantNameEl) billRestaurantNameEl.textContent = restaurantName;
+  if (billLogoEl) {
+    const logoUrl = getRestaurantLogoUrl();
+    if (logoUrl) {
+      billLogoEl.src = logoUrl;
+      billLogoEl.style.display = "block";
+      billLogoEl.onerror = () => {
+        billLogoEl.style.display = "none";
+        billLogoEl.removeAttribute("src");
+      };
+    } else {
+      billLogoEl.style.display = "none";
+      billLogoEl.removeAttribute("src");
+    }
+  }
   const gst = String(restaurantSettings.gstNumber || "").trim().toUpperCase();
 
 if (billAddressEl) {
@@ -2233,7 +2365,8 @@ if (billAddressEl) {
   if (billNumberEl) billNumberEl.textContent = order.orderId || "";
   if (billTableEl) billTableEl.textContent = order.tableNo || "-";
   if (billDateEl) billDateEl.textContent = formatDateTime(order.createdAt);
-  if (billCustomerEl) billCustomerEl.textContent = order.customerName || "Walk-in";
+  if (billCustomerEl) billCustomerEl.textContent = displayCustomerName(order);
+  if (billContactEl) billContactEl.textContent = displayCustomerPhone(order) || "-";
 
   if (billItemsEl) {
     billItemsEl.innerHTML = `<div class="thermal-bill-head"><span>Item</span><span>Qty</span><span>Amt</span></div>${thermalBillRows(order.items || []) || "<div class='thermal-item-row'><span>No items</span><span>0</span><span>₹0</span></div>"}`;
@@ -2314,8 +2447,6 @@ async function createManualBill() {
     const paymentMethod = manualPaymentMethodEl?.value || "cash";
     const paymentStatus = manualPaymentStatusEl?.value || "unpaid";
 
-    if (!customerName) return alert("Enter customer name.");
-    if (!customerPhone) return alert("Enter customer phone.");
     if (!manualCart.length) return alert("Select at least one menu item.");
 
     const { itemsTotal, tax, grandTotal } = renderManualTotals();
@@ -2352,7 +2483,9 @@ async function createManualBill() {
         newlyAddedNote: "Updated from admin billing",
         kitchenAlertAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        isManualBill: true
+        isManualBill: true,
+        isManualOrder: oldData.isManualOrder === true,
+        source: oldData.source || "manual_admin"
       });
 
       fillKotPreviewFromCart(editingOrderPublicId || "");
@@ -2387,7 +2520,9 @@ async function createManualBill() {
         kitchenAlertAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        isManualBill: true
+        isManualBill: true,
+        isManualOrder: true,
+        source: "manual_admin"
       });
 
       fillKotPreviewFromCart(orderId);
@@ -2660,7 +2795,8 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   <table class="meta">
     <tr><td>KOT #</td><td><strong>${escapeHtml(order.orderId || "")}</strong></td></tr>
     <tr><td>${order.businessMode === "vendor" || order.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(order.businessMode === "vendor" || order.orderMode === "token" ? (order.tokenNo || `T-${order.tokenNumber || "-"}`) : order.tableNo || "-")}</strong></td></tr>
-    <tr><td>Customer</td><td>${escapeHtml(order.customerName || "Walk-in")}</td></tr>
+    <tr><td>Customer</td><td>${escapeHtml(displayCustomerName(order))}</td></tr>
+    ${isManualOrder(order) ? `<tr><td>Source</td><td><strong>Manual Order</strong></td></tr>` : ""}
     <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
     <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
   </table>
@@ -2729,10 +2865,10 @@ function renderOrdersList(targetEl, orders) {
         </div>
 
         <div class="order-customer">
-          <div class="customer-avatar">${escapeHtml(String(o.customerName || "C").charAt(0).toUpperCase())}</div>
+          <div class="customer-avatar">${escapeHtml(String(displayCustomerName(o) || "C").charAt(0).toUpperCase())}</div>
           <div class="customer-details">
-            <h4>${escapeHtml(o.customerName || "Customer")}</h4>
-            <span>${escapeHtml(o.customerPhone || "-")}</span>
+            <h4>${escapeHtml(displayCustomerName(o))}</h4>
+            <span>${escapeHtml(displayCustomerPhone(o) || "-")}</span>
           </div>
           <div class="table-badge">${o.businessMode === "vendor" || o.orderMode === "token" ? `Token ${escapeHtml(o.tokenNo || `T-${o.tokenNumber || "-"}`)}` : `Table ${escapeHtml(o.tableNo || "-")}`}</div>
         </div>
@@ -3234,6 +3370,12 @@ savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 
 saveSettingsBtn?.addEventListener("click", saveSettings);
 useCurrentLocationBtn?.addEventListener("click", useAdminCurrentLocation);
+restaurantLogoUploadEl?.addEventListener("change", () => {
+  restaurantLogoMarkedForRemoval = false;
+  const file = restaurantLogoUploadEl.files?.[0];
+  if (file) setLogoPreview(URL.createObjectURL(file));
+});
+removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
 
 createManualBillBtn?.addEventListener("click", createManualBill);
 manualUpiBtn?.addEventListener("click", openManualUpi);
@@ -3306,10 +3448,21 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
 document.getElementById("printBillBtn")?.addEventListener("click", async () => {
   const win = window.open("", "_blank", "width=380,height=700");
   if (!win) return alert("Allow popup to print.");
+  const liveLogo = document.getElementById("billLogo");
+  if (liveLogo && liveLogo.style.display !== "none" && liveLogo.src) {
+    try {
+      await waitForLogoLoad(liveLogo);
+    } catch (error) {
+      liveLogo.style.display = "none";
+      liveLogo.removeAttribute("src");
+    }
+  }
   const printRoot = document.getElementById("billPreview")?.cloneNode(true);
   if (!printRoot) { win.close(); return alert("Bill preview is unavailable."); }
   const printQr = printRoot.querySelector("#billUpiQrImg");
   const unavailable = printRoot.querySelector("#billUpiMissing");
+  const qrSection = printRoot.querySelector("#billUpiQrSection");
+  const needsQr = Boolean((upiFieldEl?.value.trim() || restaurantSettings.upiId || "").trim()) && qrSection?.style.display !== "none";
   try {
     // Embed the fully-loaded QR as PNG so print never depends on an external URL.
     const qrDataUrl = await billQrAsPngDataUrl();
@@ -3322,6 +3475,11 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
     if (unavailable) unavailable.style.display = "none";
   } catch (error) {
     console.warn("Bill QR could not be embedded for printing", error);
+    if (needsQr) {
+      win.close();
+      alert("UPI QR could not be generated. Bill was not printed with a blank QR. Check internet connection or UPI settings and try again.");
+      return;
+    }
     if (printQr) printQr.style.display = "none";
     if (unavailable) { unavailable.textContent = "UPI QR unavailable"; unavailable.style.display = "block"; }
   }
@@ -3331,7 +3489,7 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
       <head>
         <title>Bill</title>
         <style>
-          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img{max-width:118px!important;height:auto!important}#billUpiQrSection{background:#fff!important;padding-top:14px!important}#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;aspect-ratio:1 / 1!important;object-fit:contain!important;padding:12px!important;box-sizing:border-box!important;margin:0 auto 14px!important;border:0!important;border-radius:0!important;display:block!important;visibility:visible!important;opacity:1!important;background:#fff!important;image-rendering:pixelated!important;print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}#billQrUpiId{display:inline-block;max-width:100%;font-size:9px;line-height:1.4;word-break:break-all;overflow-wrap:anywhere}@media print{#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;object-fit:contain!important;aspect-ratio:1 / 1!important;display:block!important;visibility:visible!important;opacity:1!important}}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}}
+          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 3px;font-weight:900;overflow-wrap:anywhere}.kot-details div,.kot-item{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.kot-footer{font-weight:800}.kot-preview{padding:0!important;border:0!important}.bill-logo{width:22mm!important;max-height:18mm!important;object-fit:contain!important;display:block;margin:0 auto 2mm auto;image-rendering:crisp-edges;image-rendering:pixelated;filter:grayscale(1) contrast(1.3)}.thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 45px;gap:5px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-bill-head{font-size:10px;text-transform:uppercase;border-bottom:2px solid #000;font-weight:900}.thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}.thermal-bill-head span:last-child,.thermal-item-amount{text-align:right}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-modifier-row{font-size:10px;padding-top:2px;color:#222}.kot-preview img:not(.bill-logo){max-width:118px!important;height:auto!important}#billUpiQrSection{background:#fff!important;padding-top:14px!important}#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;aspect-ratio:1 / 1!important;object-fit:contain!important;padding:4mm!important;box-sizing:border-box!important;margin:6px auto 4px!important;border:0!important;border-radius:0!important;display:block!important;visibility:visible!important;opacity:1!important;background:#fff!important;image-rendering:crisp-edges!important;image-rendering:pixelated!important;print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}#billQrUpiId{display:inline-block;max-width:100%;font-size:9px;line-height:1.2;word-break:break-all;overflow-wrap:anywhere}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.bill-logo{width:22mm!important;max-height:18mm!important;object-fit:contain!important;display:block;margin:0 auto 2mm auto;image-rendering:crisp-edges;image-rendering:pixelated;filter:grayscale(1) contrast(1.3)}#billUpiQrImg{width:42mm!important;height:42mm!important;max-width:42mm!important;max-height:42mm!important;object-fit:contain!important;aspect-ratio:1 / 1!important;display:block!important;visibility:visible!important;opacity:1!important}}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-bill-head,.thermal-item-row{grid-template-columns:minmax(0,1fr) 38px 62px;padding:5px 0}.thermal-bill-head{font-size:12px}.thermal-modifier-row{font-size:11px}}
         </style>
       </head>
       <body>${html}</body>

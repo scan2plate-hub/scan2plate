@@ -1021,7 +1021,17 @@
                 <div style="font-size:11px;color:#6b7280;margin-top:4px;">Will print on bill if entered. Leave blank to hide.</div>
               </div>
               <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="addressField" placeholder="Full address" /></div>
+              <div class="form-group">
+                <label class="form-label">Upload Restaurant Logo</label>
+                <input class="form-input" id="restaurantLogoUpload" type="file" accept="image/png,image/jpeg,image/webp" />
+                <div style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap;">
+                  <img id="restaurantLogoPreview" alt="Preview Logo" style="display:none;width:88px;max-height:72px;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:#fff;padding:6px;" />
+                  <button class="btn btn-sm btn-outline" id="removeRestaurantLogoBtn" type="button">Remove Logo</button>
+                </div>
+                <div style="font-size:11px;color:#6b7280;margin-top:6px;">Uploaded logo is resized before upload. Logo URL below remains an optional fallback.</div>
+              </div>
               <div class="form-group"><label class="form-label">Logo URL</label><input class="form-input" id="logoField" placeholder="https://..." /></div>
+              <div class="form-group"><label class="form-label">Restaurant Help Number</label><input class="form-input" id="restaurantHelpNumberField" placeholder="+91XXXXXXXXXX" /><div style="font-size:11px;color:#6b7280;margin-top:4px;">This number will show on customer track page for help.</div></div>
             </div>
           </div>
           <div class="card">
@@ -1208,6 +1218,7 @@
       <div class="modal-body">
         <div class="kot-preview" id="billPreview">
           <div class="kot-header">
+            <img id="billLogo" class="bill-logo" alt="Restaurant logo" style="display:none;width:22mm;max-height:18mm;object-fit:contain;margin:0 auto 2mm;background:#fff;" />
             <h4 id="billRestaurantName">Restaurant Name</h4>
             <div id="billAddress" style="font-size:10px;margin-top:2px;"></div>
             <div id="billPhone" style="font-size:10px;"></div>
@@ -1219,6 +1230,7 @@
             <div><span>Table:</span><span id="billTable">01</span></div>
             <div><span>Date:</span><span id="billDate">--</span></div>
             <div><span>Customer:</span><span id="billCustomer">Walk-in</span></div>
+            <div><span>Contact:</span><span id="billContact">-</span></div>
           </div>
           <div class="kot-items" id="billItems"></div>
           <div style="border-top:1px dashed #ccc;padding-top:8px;">

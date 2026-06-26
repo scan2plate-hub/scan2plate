@@ -46,6 +46,17 @@ function normalizePhone(value = "") {
   return String(value).replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
 }
 
+function preferredRestaurantContact(data = {}) {
+  return String(
+    data.restaurantHelpNumber ||
+    data.restaurantPhone ||
+    data.phone ||
+    data.kitchenWhatsapp ||
+    data.kitchenWhatsApp ||
+    ""
+  ).trim();
+}
+
 function normalStatus(value) {
   const status = String(value || "pending").toLowerCase();
   return status === "served" ? "completed" : status;
@@ -118,7 +129,7 @@ function render(order) {
   const restaurantName = order.restaurantName || restaurantDetails.name;
   const contact = restaurantDetails.phone
     ? `<a href="tel:${encodeURIComponent(restaurantDetails.phone)}">${escapeHtml(restaurantDetails.phone)}</a>`
-    : "Please ask restaurant staff for help.";
+    : "Contact restaurant staff";
 
   resultWrap.innerHTML = `
     <article class="track-card card">
@@ -196,10 +207,15 @@ async function loadRestaurantDetails(restaurantId) {
   restaurantDetails = { id: restaurantId, name: "Restaurant", phone: "" };
   try {
     const settings = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
+    const root = await getDoc(doc(db, "restaurants", restaurantId));
+    const rootData = root.exists() ? root.data() : {};
     if (settings.exists()) {
       const data = settings.data();
-      restaurantDetails.name = data.restaurantName || restaurantDetails.name;
-      restaurantDetails.phone = data.phone || "";
+      restaurantDetails.name = data.restaurantName || rootData.restaurantName || restaurantDetails.name;
+      restaurantDetails.phone = preferredRestaurantContact(data) || preferredRestaurantContact(rootData);
+    } else {
+      restaurantDetails.name = rootData.restaurantName || restaurantDetails.name;
+      restaurantDetails.phone = preferredRestaurantContact(rootData);
     }
   } catch (error) {
     console.warn("Restaurant contact could not load:", error);
