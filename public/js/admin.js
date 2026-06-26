@@ -747,10 +747,33 @@ function markRestaurantLogoRemoved() {
 function logoUploadErrorMessage(error = {}) {
   const code = error.code || "";
   const message = error.message || String(error || "Unknown error");
+  if (code === "logo-upload-timeout" || /timed out/i.test(message)) {
+    return "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.";
+  }
   if (code === "storage/unauthorized" || code === "storage/unauthenticated" || /permission|unauthorized/i.test(message)) {
-    return `Firebase Storage permission denied. ${code ? `${code}: ` : ""}${message}`;
+    return "Firebase Storage permission denied. Use backend upload or update Storage rules.";
+  }
+  if (/cors|cross-origin/i.test(message)) {
+    return "Storage CORS issue.";
   }
   return `${code ? `${code}: ` : ""}${message}`;
+}
+
+function detailedErrorMessage(error = {}) {
+  if (error?.code || error?.message) return `${error.code ? `${error.code}: ` : ""}${error.message || "Unknown error"}`;
+  return String(error || "Unknown error");
+}
+
+function withTimeout(promise, ms, message, code = "timeout") {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.code = code;
+      reject(error);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 function validateLogoFile(file) {
@@ -790,7 +813,7 @@ function resizeLogoFile(file) {
   });
 }
 
-async function uploadRestaurantLogo(file) {
+async function uploadRestaurantLogoWithFirebase(file) {
   const resized = await resizeLogoFile(file);
   if (!resized) return null;
   if (!restaurantId) throw new Error("restaurantId missing");
@@ -801,6 +824,65 @@ async function uploadRestaurantLogo(file) {
     return { url: await getDownloadURL(logoRef), path };
   } catch (error) {
     throw new Error(logoUploadErrorMessage(error));
+  }
+}
+
+async function uploadRestaurantLogoWithBackend(file) {
+  const resized = await resizeLogoFile(file);
+  if (!resized) return null;
+  if (!restaurantId) throw new Error("restaurantId missing");
+  const form = new FormData();
+  form.append("file", resized, `logo-${Date.now()}.png`);
+  const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/logo`, {
+    method: "POST",
+    headers: await purchaseAuthHeaders(),
+    body: form
+  });
+  const text = await response.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `HTTP ${response.status}: ${text || response.statusText}`);
+  }
+  if (!data.logoUrl) throw new Error("Backend upload did not return logoUrl.");
+  return { url: data.logoUrl, path: data.storagePath || "" };
+}
+
+async function uploadRestaurantLogo(file) {
+  console.log("[Settings Save] Logo upload start", {
+    restaurantId,
+    hasSelectedLogoFile: Boolean(file),
+    fileName: file?.name || "",
+    fileType: file?.type || "",
+    fileSize: file?.size || 0
+  });
+  try {
+    console.log("[Settings Save] upload method: firebase-storage");
+    const uploaded = await withTimeout(
+      uploadRestaurantLogoWithFirebase(file),
+      20000,
+      "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.",
+      "logo-upload-timeout"
+    );
+    console.log("[Settings Save] upload success URL", uploaded?.url || "");
+    return uploaded;
+  } catch (firebaseError) {
+    console.warn("[Settings Save] firebase logo upload failed", detailedErrorMessage(firebaseError));
+    if (firebaseError.code === "logo-upload-timeout") throw firebaseError;
+    try {
+      console.log("[Settings Save] upload method: backend");
+      const uploaded = await withTimeout(
+        uploadRestaurantLogoWithBackend(file),
+        20000,
+        "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.",
+        "logo-upload-timeout"
+      );
+      console.log("[Settings Save] upload success URL", uploaded?.url || "");
+      return uploaded;
+    } catch (backendError) {
+      backendError.message = `${logoUploadErrorMessage(firebaseError)}; backend fallback failed: ${detailedErrorMessage(backendError)}`;
+      throw backendError;
+    }
   }
 }
 
@@ -1239,7 +1321,6 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  const originalButtonHtml = saveSettingsBtn?.innerHTML;
   try {
     if (!restaurantId) throw new Error("restaurantId missing");
     if (saveSettingsBtn) {
@@ -1263,11 +1344,19 @@ async function saveSettings() {
     }
 
     const logoFile = selectedRestaurantLogoFile || window.scan2plateSelectedRestaurantLogoFile || restaurantLogoUploadEl?.files?.[0] || null;
+    console.log("[Settings Save] start", {
+      restaurantId,
+      hasSelectedLogoFile: Boolean(logoFile),
+      fileName: logoFile?.name || "",
+      fileType: logoFile?.type || "",
+      fileSize: logoFile?.size || 0
+    });
     if (logoFile) {
       try {
         uploadedLogo = await uploadRestaurantLogo(logoFile);
       } catch (error) {
-        alert("Logo upload failed: " + (error.message || String(error)));
+        console.error("[Settings Save] logo upload failed", error);
+        alert("Logo upload failed: " + logoUploadErrorMessage(error));
         return;
       }
     }
@@ -1307,16 +1396,25 @@ async function saveSettings() {
       updatedAt: serverTimestamp()
     };
 
-    await setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true });
-    await setDoc(doc(db, "restaurants", restaurantId), {
-      businessMode: payload.businessMode,
-      orderMode: payload.orderMode,
-      tableCount: payload.tableCount,
-      restaurantLogoUrl: payload.restaurantLogoUrl,
-      restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
-      logoUrl: payload.logoUrl,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    console.log("[Settings Save] saving Firestore settings", { restaurantId, logoUrl: payload.logoUrl || "", restaurantLogoUrl: payload.restaurantLogoUrl || "" });
+    await withTimeout(
+      Promise.all([
+        setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true }),
+        setDoc(doc(db, "restaurants", restaurantId), {
+          businessMode: payload.businessMode,
+          orderMode: payload.orderMode,
+          tableCount: payload.tableCount,
+          restaurantLogoUrl: payload.restaurantLogoUrl,
+          restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
+          logoUrl: payload.logoUrl,
+          updatedAt: serverTimestamp()
+        }, { merge: true })
+      ]),
+      15000,
+      "Settings save timed out. Please check your network and try again.",
+      "settings-save-timeout"
+    );
+    console.log("[Settings Save] settings save success", { restaurantId });
     restaurantSettings = { ...restaurantSettings, ...payload };
     if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
     selectedRestaurantLogoFile = null;
@@ -1327,11 +1425,12 @@ async function saveSettings() {
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
-    alert("Failed to save settings: " + (err.code ? `${err.code}: ` : "") + (err.message || String(err)));
+    console.error("[Settings Save] settings save failed", err);
+    alert("Failed to save settings: " + detailedErrorMessage(err));
   } finally {
     if (saveSettingsBtn) {
       saveSettingsBtn.disabled = false;
-      saveSettingsBtn.innerHTML = originalButtonHtml || `<i class="fas fa-save"></i> Save Settings`;
+      saveSettingsBtn.innerHTML = `<i class="fas fa-save"></i> Save Settings`;
     }
   }
 }

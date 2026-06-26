@@ -216,6 +216,31 @@ app.post("/notify-order", async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, upload.single("file"), async (req, res) => {
+  try {
+    const restaurantIdParam = String(req.params.restaurantId || "").trim();
+    if (!restaurantIdParam) return res.status(400).json({ ok: false, error: "restaurantId missing" });
+    if (!req.file) return res.status(400).json({ ok: false, error: "Logo file is required." });
+    if (!["image/jpeg", "image/png", "image/webp"].includes(req.file.mimetype)) return res.status(415).json({ ok: false, error: "Use JPG, JPEG, PNG, or WEBP logo image." });
+    if (req.file.size > 2 * 1024 * 1024) return res.status(413).json({ ok: false, error: "Logo image must be 2MB or smaller." });
+    if (!process.env.FIREBASE_STORAGE_BUCKET) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing." });
+
+    await assertRestaurantAccess(req.user.uid, restaurantIdParam);
+
+    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.png`;
+    const file = getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET).file(storagePath);
+    await file.save(req.file.buffer, {
+      contentType: req.file.mimetype || "image/png",
+      metadata: { firebaseStorageDownloadTokens: crypto.randomUUID() }
+    });
+    const token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens;
+    const logoUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    res.json({ ok: true, logoUrl, storagePath });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message || "Logo upload failed." });
+  }
+});
+
 async function scanSupplierBill(req, res) {
   try {
     const { restaurantId, ocrText = "" } = req.body || {};
