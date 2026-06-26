@@ -61,31 +61,59 @@ function normalizeUnit(quantity, rawUnit) {
 
 function ocrKey() { return String(process.env.OCR_SPACE_API_KEY || "").trim(); }
 function missingOcrKeyMessage() { return "OCR_SPACE_API_KEY missing. Add it in backend environment variables."; }
-function ocrFailure(response, result = {}) {
+function ocrKeyDebug() {
+  const key = ocrKey();
+  return { keyExists: Boolean(key), keyLength: key.length, keyEnding: key ? key.slice(-4) : "" };
+}
+function ocrErrorPayload(response, result = {}, extra = {}) {
+  return {
+    error: extra.error || "OCR Space test failed",
+    OCRExitCode: result.OCRExitCode,
+    IsErroredOnProcessing: result.IsErroredOnProcessing,
+    ErrorMessage: result.ErrorMessage,
+    httpStatus: response?.status,
+    ...extra
+  };
+}
+function ocrFailure(response, result = {}, extra = {}) {
   const detail = Array.isArray(result.ErrorMessage) ? result.ErrorMessage.join(" ") : String(result.ErrorMessage || "");
   let message = detail || "OCR parse failed.";
   if (response.status === 429 || /limit|quota/i.test(detail)) message = "OCR API limit reached. Please try again later.";
   else if (response.status === 401 || /api.?key|invalid key|unauthor/i.test(detail)) message = "OCR API key was rejected by OCR.space.";
   else if (!response.ok) message = "OCR provider is unavailable. Please try again.";
-  const error = new Error(message); error.status = response.status === 429 ? 429 : 422; return error;
+  const error = new Error(message);
+  error.status = response.status === 429 ? 429 : 422;
+  error.ocr = ocrErrorPayload(response, result, extra);
+  return error;
 }
 function debugOcr(event, data) { if (process.env.NODE_ENV !== "production") console.info(`[OCR] ${event}`, data); }
-async function requestOcrSpace(form) {
+async function requestOcrSpace(form, endpoint = "https://api.ocr.space/parse/image", extra = {}) {
   let response;
-  try { response = await fetch("https://api.ocr.space/parse/image", { method: "POST", body: form }); }
+  try { response = await fetch(endpoint, { method: "POST", body: form }); }
   catch { const error = new Error("OCR provider is unreachable. Check backend internet connection."); error.status = 503; throw error; }
   const result = await response.json().catch(() => ({}));
   debugOcr("response", { status: response.status, parsedPages: result.ParsedResults?.length || 0 });
-  if (!response.ok || result.IsErroredOnProcessing) throw ocrFailure(response, result);
+  if (!response.ok || result.IsErroredOnProcessing) throw ocrFailure(response, result, extra);
   return result;
 }
+function getOcrFileType(file = {}) {
+  const mime = String(file.mimetype || "").toLowerCase();
+  const name = String(file.originalname || "").toLowerCase();
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (mime.includes("png") || name.endsWith(".png")) return "PNG";
+  if (mime.includes("webp") || name.endsWith(".webp")) return "WEBP";
+  if (mime.includes("jpeg") || mime.includes("jpg") || name.endsWith(".jpg") || name.endsWith(".jpeg")) return "JPG";
+  return "JPG";
+}
 async function testOcrSpaceConnection() {
-  // A tiny in-memory image checks both the configured key and the provider without exposing the key.
   const form = new FormData();
   form.append("apikey", ocrKey());
+  form.append("url", "https://ocr.space/Content/Images/receipt-ocr-original.jpg");
   form.append("language", "eng");
-  form.append("base64Image", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9VwAAAABJRU5ErkJggg==");
-  await requestOcrSpace(form);
+  form.append("OCREngine", "2");
+  form.append("isOverlayRequired", "false");
+  form.append("filetype", "JPG");
+  await requestOcrSpace(form, "https://api.ocr.space/parse/imageurl");
 }
 
 function asIsoDate(value = "") {
@@ -141,6 +169,7 @@ async function assertRestaurantAccess(uid, restaurantId) {
 }
 
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
+app.get("/api/health", (_, res) => res.json({ ok: true, service: "scan2plate-backend", time: new Date().toISOString() }));
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;
@@ -158,13 +187,12 @@ app.get("/api/ocr/status", (_, res) => {
   });
 });
 app.get("/api/ocr/test", async (_, res) => {
-  if (!ocrKey()) return res.status(503).json({ connected: false, error: missingOcrKeyMessage() });
-  if (!adminReady) return res.status(503).json({ connected: false, error: firebaseAdminError });
+  if (!ocrKey()) return res.json({ ready: false, connected: false, error: "OCR_SPACE_API_KEY missing", debug: ocrKeyDebug() });
   try {
     await testOcrSpaceConnection();
-    res.json({ connected: true });
+    res.json({ ready: true, connected: true, service: "OCR.space", message: "OCR Space connected successfully", debug: ocrKeyDebug() });
   } catch (error) {
-    res.status(502).json({ connected: false, error: "OCR Space API could not be reached or rejected the configured key." });
+    res.json({ ready: false, connected: false, ...(error.ocr || { error: "OCR Space test failed", httpStatus: error.status || 502 }), debug: ocrKeyDebug() });
   }
 });
 app.post("/api/ocr/parse", verifyAdmin, express.json({ limit: "1mb" }), async (req, res) => {
@@ -191,13 +219,15 @@ app.post("/notify-order", async (req, res) => {
 async function scanSupplierBill(req, res) {
   try {
     const { restaurantId, ocrText = "" } = req.body || {};
-    if (!restaurantId || !req.file) return res.status(400).json({ error: "restaurantId and a bill image or PDF are required." });
-    if (!allowedMimeTypes.has(req.file.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, WEBP, or PDF bill." });
+    const uploadedFile = req.file || req.files?.file?.[0] || req.files?.bill?.[0];
+    if (!restaurantId || !uploadedFile) return res.status(400).json({ error: "restaurantId and a bill image or PDF are required." });
+    if (!allowedMimeTypes.has(uploadedFile.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, WEBP, or PDF bill." });
     await assertRestaurantAccess(req.user.uid, restaurantId);
     let text = ocrText;
     if (!text && !ocrKey()) return res.status(503).json({ error: missingOcrKeyMessage() });
     if (!text) {
-      debugOcr("scan", { endpoint: "https://api.ocr.space/parse/image", fileName: req.file.originalname, fileSize: req.file.size, mimeType: req.file.mimetype });
+      const filetype = getOcrFileType(uploadedFile);
+      debugOcr("scan", { endpoint: "https://api.ocr.space/parse/image", fileName: uploadedFile.originalname, fileSize: uploadedFile.size, mimeType: uploadedFile.mimetype, filetype });
       const form = new FormData();
       form.append("apikey", ocrKey());
       form.append("language", "eng");
@@ -206,59 +236,124 @@ async function scanSupplierBill(req, res) {
       form.append("scale", "true");
       form.append("OCREngine", "2");
       form.append("isTable", "true");
-      if (req.file.mimetype === "application/pdf") form.append("filetype", "PDF");
-      form.append("file", new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-      const result = await requestOcrSpace(form);
+      form.append("filetype", filetype);
+      form.append("file", new Blob([uploadedFile.buffer], { type: uploadedFile.mimetype || "image/jpeg" }), uploadedFile.originalname || "supplier_bill.jpg");
+      const result = await requestOcrSpace(form, "https://api.ocr.space/parse/image", { filetype, filename: uploadedFile.originalname, mimetype: uploadedFile.mimetype });
       text = (result.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
     }
     if (!String(text).trim()) return res.status(422).json({ error: "OCR returned empty text. The bill may be too small, blurred, rotated, or unreadable." });
     let fileUrl = "";
     if (process.env.FIREBASE_STORAGE_BUCKET) {
-      const objectName = `purchase-bills/${restaurantId}/${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const objectName = `purchase-bills/${restaurantId}/${Date.now()}-${uploadedFile.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const file = getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET).file(objectName);
-      await file.save(req.file.buffer, { contentType: req.file.mimetype, metadata: { firebaseStorageDownloadTokens: crypto.randomUUID() } });
+      await file.save(uploadedFile.buffer, { contentType: uploadedFile.mimetype, metadata: { firebaseStorageDownloadTokens: crypto.randomUUID() } });
       const token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens;
       fileUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(objectName)}?alt=media&token=${token}`;
     }
     const parsed = parseBillText(text);
     debugOcr("parsed", { rawTextLength: text.length, parsedItemCount: parsed.items.length, parseWarnings: parsed.parseWarnings.length });
-    res.json({ file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, fileUrl }, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
-  } catch (error) { res.status(error.status || 422).json({ error: error.message || "OCR parse failed." }); }
+    res.json({ file: { name: uploadedFile.originalname, mimeType: uploadedFile.mimetype, size: uploadedFile.size, fileUrl }, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
+  } catch (error) { res.status(error.status || 422).json({ ...(error.ocr || {}), error: error.message || error.ocr?.error || "OCR parse failed." }); }
 }
-app.post("/api/ocr/scan", verifyAdmin, upload.single("bill"), scanSupplierBill);
+const uploadPurchaseBill = upload.fields([{ name: "file", maxCount: 1 }, { name: "bill", maxCount: 1 }]);
+app.post("/api/ocr/scan", verifyAdmin, uploadPurchaseBill, scanSupplierBill);
 // Keep this endpoint for already-deployed panels while all current panels use /api/ocr/scan.
-app.post("/api/inventory/upload-bill", verifyAdmin, upload.single("bill"), scanSupplierBill);
+app.post("/api/inventory/upload-bill", verifyAdmin, uploadPurchaseBill, scanSupplierBill);
 
-app.post("/api/inventory/save-purchase", verifyAdmin, async (req, res) => {
+async function saveReviewedPurchase(req, res) {
   try {
-    const { restaurantId, supplierName = "", billNumber = "", billDate = "", taxAmount = 0, grandTotal = 0, fileUrl = "", inventoryCollection = "inventory", items = [] } = req.body || {};
-    if (!restaurantId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: "restaurantId and reviewed purchase items are required." });
+    const { restaurantId, supplierName = "", billNumber = "", billDate = "", taxAmount, gstTax, grandTotal, total, fileUrl = "", inventoryCollection = "inventory", items = [] } = req.body || {};
+    if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
+    if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: "items must have at least 1 valid item." });
     await assertRestaurantAccess(req.user.uid, restaurantId);
     const safeInventoryCollection = inventoryCollection === "inventory_items" ? "inventory_items" : "inventory";
-    const db = getFirestore(); const billRef = db.collection(`restaurants/${restaurantId}/purchase_bills`).doc();
-    await db.runTransaction(async transaction => {
-      const prepared = items.map(item => ({ ...item, ...normalizeUnit(item.quantity, item.unit), itemName: String(item.itemName || "").trim(), normalizedName: normalizedName(item.itemName) })).filter(item => item.itemName && item.quantity > 0);
-      if (!prepared.length) throw new Error("Add at least one valid reviewed item.");
-      for (const item of prepared) {
-        const inventoryPath = `restaurants/${restaurantId}/${safeInventoryCollection}`;
-        let existing = await db.collection(inventoryPath).where("normalizedName", "==", item.normalizedName).where("unit", "==", item.unit).limit(1).get();
-        // Older manually-created inventory rows did not have normalizedName.
-        if (existing.empty) {
-          const sameName = await db.collection(inventoryPath).where("itemName", "==", item.itemName).limit(10).get();
-          const sameUnit = sameName.docs.find(candidate => normalizeUnit(1, candidate.data().unit).unit === item.unit);
-          existing = sameUnit ? { empty: false, docs: [sameUnit] } : sameName;
-          if (!sameUnit) existing = { empty: true, docs: [] };
-        }
-        const inventoryRef = existing.empty ? db.collection(inventoryPath).doc() : existing.docs[0].ref;
-        const old = existing.empty ? {} : existing.docs[0].data();
-        transaction.set(inventoryRef, { restaurantId, itemName: item.itemName, normalizedName: item.normalizedName, currentStock: Number(old.currentStock || 0) + Number(item.quantity), unit: item.unit, category: item.category || old.category || "", lastPurchasePrice: Number(item.unitPrice || 0), purchasePrice: Number(item.unitPrice || 0), supplierName: item.supplierName || supplierName || old.supplierName || "", lowStockLimit: Number(old.lowStockLimit || old.minStockAlert || 0), minStockAlert: Number(old.minStockAlert || 0), updatedAt: FieldValue.serverTimestamp(), lastUpdated: FieldValue.serverTimestamp() }, { merge: true });
-        transaction.set(db.collection(`restaurants/${restaurantId}/inventory_logs`).doc(), { inventoryItemId: inventoryRef.id, itemName: item.itemName, type: "stock_in", quantity: Number(item.quantity), unit: item.unit, reason: "Purchase bill", billId: billRef.id, createdAt: FieldValue.serverTimestamp(), createdBy: req.user.email || req.user.uid });
-        transaction.set(billRef.collection("purchase_bill_items").doc(), { billId: billRef.id, inventoryItemId: inventoryRef.id, itemName: item.itemName, quantity: Number(item.quantity), unit: item.unit, unitPrice: Number(item.unitPrice || 0), totalPrice: Number(item.totalPrice || 0) });
+    const db = getFirestore();
+    const preparedMap = new Map();
+
+    for (const raw of items) {
+      const itemName = String(raw.itemName || "").trim();
+      const quantityRaw = Number(raw.quantity || 0);
+      if (!itemName) throw new Error("itemName required for every reviewed item.");
+      if (!Number.isFinite(quantityRaw) || quantityRaw <= 0) throw new Error(`quantity must be number > 0 for ${itemName}.`);
+      const normalized = normalizeUnit(quantityRaw, raw.unit);
+      const rate = Number(raw.rate ?? raw.unitPrice ?? 0);
+      const amountRaw = Number(raw.amount ?? raw.totalPrice ?? 0);
+      const amount = Number.isFinite(amountRaw) && amountRaw > 0 ? amountRaw : Number(normalized.quantity) * (Number.isFinite(rate) ? rate : 0);
+      const key = `${normalizedName(itemName)}__${normalized.unit}`;
+      const existing = preparedMap.get(key);
+      const item = {
+        itemName,
+        normalizedName: normalizedName(itemName),
+        quantity: Number(normalized.quantity),
+        unit: normalized.unit,
+        rate: Number.isFinite(rate) ? rate : 0,
+        amount: Number.isFinite(amount) ? amount : 0,
+        category: String(raw.category || "").trim(),
+        supplierName: String(raw.supplierName || supplierName || "").trim()
+      };
+      if (existing) {
+        existing.quantity += item.quantity;
+        existing.amount += item.amount;
+        existing.rate = item.rate || existing.rate;
+      } else {
+        preparedMap.set(key, item);
       }
-      transaction.set(billRef, { restaurantId, supplierName, billNumber, billDate, taxAmount: Number(taxAmount || 0), grandTotal: Number(grandTotal || 0), fileUrl, uploadedAt: FieldValue.serverTimestamp(), uploadedBy: req.user.email || req.user.uid, status: "saved" });
+    }
+
+    const prepared = [...preparedMap.values()].filter(item => item.itemName && item.quantity > 0);
+    if (!prepared.length) return res.status(400).json({ ok: false, error: "items must have at least 1 valid item." });
+
+    const inventoryPath = `restaurants/${restaurantId}/${safeInventoryCollection}`;
+    const matches = await Promise.all(prepared.map(async item => {
+      let existing = await db.collection(inventoryPath).where("normalizedName", "==", item.normalizedName).where("unit", "==", item.unit).limit(1).get();
+      if (existing.empty) {
+        const sameName = await db.collection(inventoryPath).where("itemName", "==", item.itemName).limit(10).get();
+        const sameUnit = sameName.docs.find(candidate => normalizeUnit(1, candidate.data().unit).unit === item.unit);
+        existing = sameUnit ? { empty: false, docs: [sameUnit] } : { empty: true, docs: [] };
+      }
+      return { item, inventoryRef: existing.empty ? db.collection(inventoryPath).doc() : existing.docs[0].ref };
+    }));
+
+    const billRef = db.collection(`restaurants/${restaurantId}/purchase_bills`).doc();
+    const publicBillRef = db.collection("inventoryPurchases").doc(billRef.id);
+    const subtotal = prepared.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const taxValue = Number(gstTax ?? taxAmount ?? 0);
+    const totalValue = Number(grandTotal ?? total ?? (subtotal + taxValue));
+
+    await db.runTransaction(async transaction => {
+      const freshSnaps = await Promise.all(matches.map(({ inventoryRef }) => transaction.get(inventoryRef)));
+      for (let index = 0; index < matches.length; index++) {
+        const { item, inventoryRef } = matches[index];
+        const old = freshSnaps[index].exists ? freshSnaps[index].data() : {};
+        const movement = {
+          restaurantId,
+          inventoryItemId: inventoryRef.id,
+          itemName: item.itemName,
+          type: "stock_in",
+          quantity: Number(item.quantity),
+          unit: item.unit,
+          rate: Number(item.rate || 0),
+          amount: Number(item.amount || 0),
+          source: "purchase_bill_ocr",
+          purchaseBillId: billRef.id,
+          reason: "Purchase bill",
+          createdAt: FieldValue.serverTimestamp(),
+          createdBy: req.user.email || req.user.uid
+        };
+        transaction.set(inventoryRef, { restaurantId, itemName: item.itemName, normalizedName: item.normalizedName, currentStock: Number(old.currentStock || 0) + Number(item.quantity), unit: item.unit, category: item.category || old.category || "", lastPurchaseRate: Number(item.rate || 0), lastPurchasePrice: Number(item.rate || 0), purchasePrice: Number(item.rate || 0), supplierName: item.supplierName || supplierName || old.supplierName || "", lowStockLimit: Number(old.lowStockLimit || old.minStockAlert || 0), minStockAlert: Number(old.minStockAlert || 0), updatedAt: FieldValue.serverTimestamp(), lastUpdated: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(db.collection(`restaurants/${restaurantId}/inventory_logs`).doc(), movement);
+        transaction.set(db.collection("stockMovements").doc(), movement);
+        transaction.set(billRef.collection("purchase_bill_items").doc(), { billId: billRef.id, inventoryItemId: inventoryRef.id, itemName: item.itemName, quantity: Number(item.quantity), unit: item.unit, rate: Number(item.rate || 0), amount: Number(item.amount || 0), unitPrice: Number(item.rate || 0), totalPrice: Number(item.amount || 0) });
+      }
+      const billPayload = { restaurantId, supplierName, billNumber, billDate, gstTax: taxValue, taxAmount: taxValue, items: prepared, subtotal, total: totalValue, grandTotal: totalValue, source: "ocr", fileUrl, uploadedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), uploadedBy: req.user.email || req.user.uid, status: "saved" };
+      transaction.set(billRef, billPayload);
+      transaction.set(publicBillRef, billPayload);
     });
-    res.json({ success: true, billId: billRef.id });
-  } catch (error) { res.status(400).json({ error: error.message || "Could not save purchase." }); }
-});
+    res.json({ ok: true, success: true, message: "Purchase saved and inventory updated", purchaseBillId: billRef.id, billId: billRef.id, itemsSaved: prepared.length });
+  } catch (error) { res.status(400).json({ ok: false, error: error.message || "Could not save purchase." }); }
+}
+
+app.post("/api/inventory/save-purchase", verifyAdmin, saveReviewedPurchase);
+app.post("/api/inventory/purchase-review/save", verifyAdmin, saveReviewedPurchase);
 
 app.listen(process.env.PORT || 5000, () => console.log(`Scan2Plate backend running on port ${process.env.PORT || 5000}`));

@@ -1693,10 +1693,12 @@ function renderInventoryHistory() {
 }
 
 function purchaseBackendUrl() {
-  // A saved override is useful for separate backends. Otherwise every hosted panel uses its own origin.
-  // When the field is visible, an intentionally blank value means use this site's API now.
+  // A saved override is useful for separate backends. Hosted static pages use the Render backend by default.
   const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
-  return String(configuredOverride || window.location.origin).replace(/\/+$/, "");
+  const fallback = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? window.location.origin
+    : "https://scan2serve-backend.onrender.com";
+  return String(configuredOverride || restaurantSettings.backendUrl || fallback).replace(/\/+$/, "");
 }
 
 function showPurchaseOcrMessage(message = "", tone = "error") {
@@ -1722,9 +1724,13 @@ async function testOcrConnection() {
   const statusEl = document.getElementById("ocrServiceStatus"); const button = document.getElementById("testOcrConnectionBtn");
   if (statusEl) statusEl.textContent = "Checking…"; if (button) button.disabled = true;
   try {
-    const response = await fetch(`${purchaseBackendUrl()}/api/ocr/test`, { cache: "no-store" });
+    const backendUrl = purchaseBackendUrl();
+    const healthResponse = await fetch(`${backendUrl}/api/health`, { cache: "no-store" });
+    const health = await healthResponse.json().catch(() => ({}));
+    if (!healthResponse.ok || health.ok !== true) throw new Error(health.error || "Backend health check failed.");
+    const response = await fetch(`${backendUrl}/api/ocr/test`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.connected !== true) throw new Error(data.error || "The OCR endpoint did not return a ready status.");
+    if (!response.ok || !(data.ready === true || data.connected === true)) throw new Error(data.error || JSON.stringify(data) || "The OCR endpoint did not return a ready status.");
     if (statusEl) { statusEl.textContent = "Connected ✅"; statusEl.title = "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
   } catch (error) {
     const reason = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : error.message;
@@ -1840,9 +1846,9 @@ async function scanPurchaseBill() {
       catch (error) { throw new Error(error.message || "PDF has no readable text and first-page conversion is unavailable."); }
     }
     const uploadFile = await preparePurchaseBillForUpload(scanFile);
-    const form = new FormData(); form.append("bill", uploadFile); form.append("restaurantId", restaurantId);
+    const form = new FormData(); form.append("file", uploadFile, uploadFile.name || file.name || "supplier_bill.jpg"); form.append("restaurantId", restaurantId);
     const response = await fetch(`${backendUrl}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
-    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not read bill clearly. Please upload a clearer image or enter manually.");
+    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || JSON.stringify(data) || "Could not read bill clearly. Please upload a clearer image or enter manually.");
     reviewedPurchaseFileUrl = data.file?.fileUrl || "";
     applyPurchaseOcrResult(data); rescanPurchaseBillBtn?.classList.remove("hidden");
     if (!data.items?.length) showPurchaseOcrMessage("OCR text was received but no item rows matched. Review the raw text, try parsing again, or enter the bill manually.");
@@ -1855,8 +1861,8 @@ async function saveReviewedPurchase() {
   const backendUrl = purchaseBackendUrl(); showPurchaseOcrMessage("");
   savePurchaseBillBtn.disabled = true; savePurchaseBillBtn.textContent = "Saving…";
   try {
-    const response = await fetch(`${backendUrl}/api/inventory/save-purchase`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billNumber: purchaseBillNumberEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", taxAmount: Number(purchaseTaxAmountEl?.value || 0), grandTotal: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
-    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not save the reviewed purchase.");
+    const response = await fetch(`${backendUrl}/api/inventory/purchase-review/save`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billNumber: purchaseBillNumberEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", gstTax: Number(purchaseTaxAmountEl?.value || 0), total: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
+    const data = await response.json().catch(() => ({})); if (!response.ok || data.ok === false) throw new Error(data.error || JSON.stringify(data) || "Could not save the reviewed purchase.");
     alert("Purchase saved and stock updated."); purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl.value = ""; reviewedPurchaseFileUrl = ""; previewPurchaseFile();
   } catch (error) { showPurchaseOcrMessage(error.message || "Could not save the reviewed purchase."); }
   finally { savePurchaseBillBtn.disabled = false; savePurchaseBillBtn.textContent = "Save to Inventory"; }
