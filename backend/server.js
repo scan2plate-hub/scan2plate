@@ -30,6 +30,9 @@ const twilioRequired = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATS
 const missing = twilioRequired.filter(key => !process.env[key]);
 const twilioEnabled = missing.length === 0;
 const client = twilioEnabled ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
+const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || "";
+const storageBucketName = rawBucket.replace(/^gs:\/\//, "").trim();
+console.log("Firebase Storage bucket:", storageBucketName);
 
 let adminReady = false;
 let firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
@@ -37,7 +40,7 @@ try {
   // FIREBASE_SERVICE_ACCOUNT is the preferred name. Keep the old *_JSON name working for existing deployments.
   const serviceAccountValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "";
   const serviceAccount = serviceAccountValue ? JSON.parse(serviceAccountValue) : null;
-  if (serviceAccount) initializeApp(getApps().length ? undefined : { credential: cert(serviceAccount) });
+  if (serviceAccount) initializeApp(getApps().length ? undefined : { credential: cert(serviceAccount), storageBucket: storageBucketName });
   else if (getApps().length === 0 && (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_PROJECT || process.env.K_SERVICE || process.env.FUNCTION_TARGET)) initializeApp();
   adminReady = getApps().length > 0;
   if (!adminReady) firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
@@ -194,7 +197,13 @@ async function findRestaurantDocByBusinessId(restaurantId) {
 
 app.get("/", (_, res) => res.send("Scan2Plate backend is running"));
 app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inventoryBackendReady: adminReady }));
-app.get("/api/health", (_, res) => res.json({ ok: true, service: "scan2plate-backend", time: new Date().toISOString() }));
+app.get("/api/health", (_, res) => res.json({
+  ok: true,
+  service: "scan2plate-backend",
+  storageBucket: storageBucketName,
+  firebaseAdminReady: adminReady,
+  time: new Date().toISOString()
+}));
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;
@@ -260,7 +269,7 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
     if (!String(req.file.mimetype || "").startsWith("image/")) return res.status(415).json({ ok: false, error: "Use an image logo file." });
     if (req.file.size > 1024 * 1024) return res.status(413).json({ ok: false, error: "Logo image must be 1MB or smaller after compression." });
     if (!adminReady) return res.status(503).json({ ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
-    if (!process.env.FIREBASE_STORAGE_BUCKET) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
+    if (!storageBucketName) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
 
     const restaurantSnap = await findRestaurantDocByBusinessId(restaurantIdParam);
     if (!restaurantSnap) return res.status(404).json({ ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
@@ -268,13 +277,25 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
 
     const extension = req.file.mimetype === "image/webp" ? "webp" : req.file.mimetype === "image/png" ? "png" : "jpg";
     const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
-    const file = getStorage().bucket(process.env.FIREBASE_STORAGE_BUCKET).file(storagePath);
-    await file.save(req.file.buffer, {
-      contentType: req.file.mimetype || "image/png",
-      metadata: { firebaseStorageDownloadTokens: crypto.randomUUID() }
-    });
-    const token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens;
-    const logoUrl = `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    const bucket = getStorage().bucket(storageBucketName);
+    const file = bucket.file(storagePath);
+    let token = "";
+    try {
+      token = crypto.randomUUID();
+      await file.save(req.file.buffer, {
+        contentType: req.file.mimetype || "image/png",
+        metadata: { firebaseStorageDownloadTokens: token }
+      });
+      token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens || token;
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: "Firebase Storage bucket upload failed",
+        bucket: storageBucketName,
+        details: error.message || "Storage upload failed"
+      });
+    }
+    const logoUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
     await restaurantSnap.ref.set({
       restaurantLogoUrl: logoUrl,
       restaurantLogoStoragePath: storagePath,
