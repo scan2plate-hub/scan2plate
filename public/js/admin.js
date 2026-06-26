@@ -301,6 +301,8 @@ const manualPaymentMethodEl = document.getElementById("manualPaymentMethod");
 const manualPaymentStatusEl = document.getElementById("manualPaymentStatus");
 const createManualBillBtn = document.getElementById("createManualBillBtn");
 const printKotFromBillingBtn = document.getElementById("printKotFromBilling");
+const printKotNewItemsBtn = document.getElementById("printKotNewItemsBtn");
+const printKotAllItemsBtn = document.getElementById("printKotAllItemsBtn");
 const manualUpiBtn = document.getElementById("manualUpiBtn");
 const clearCartBtn = document.getElementById("clearCartBtn");
 
@@ -1964,11 +1966,14 @@ async function testOcrConnection() {
     if (!healthResponse.ok || health.ok !== true) throw new Error(health.error || "Backend health check failed.");
     const response = await fetch(`${backendUrl}/api/ocr/test`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || !(data.ready === true || data.connected === true)) throw new Error(data.error || JSON.stringify(data) || "The OCR endpoint did not return a ready status.");
-    if (statusEl) { statusEl.textContent = "Connected ✅"; statusEl.title = "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
+    if (!response.ok || data.connected !== true) {
+      const detail = Array.isArray(data.errorMessage) ? data.errorMessage.join(" ") : (data.errorMessage || data.error || JSON.stringify(data) || "The OCR endpoint did not return a ready status.");
+      throw new Error(detail);
+    }
+    if (statusEl) { statusEl.textContent = "Connected - OCR Space connected"; statusEl.title = data.message || "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
   } catch (error) {
     const reason = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : error.message;
-    if (statusEl) { statusEl.textContent = `Disconnected ❌ — ${reason}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
+    if (statusEl) { statusEl.textContent = `Disconnected - ${reason}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
   } finally { if (button) button.disabled = false; }
 }
 
@@ -2347,11 +2352,49 @@ function renderManualTotals() {
   return { itemsTotal, tax, grandTotal };
 }
 
-function updateManualQty(id, delta) {
-  const found = manualCart.find(x => x.id === id);
+function manualItemLineId() {
+  return `MIL${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function normalizeManualCartItem(item = {}) {
+  return {
+    id: item.id || item.menuItemId || "",
+    menuItemId: item.menuItemId || item.id || "",
+    itemLineId: item.itemLineId || manualItemLineId(),
+    name: item.name || "",
+    price: Number(item.price || 0),
+    qty: Number(item.qty || 1),
+    addedAt: item.addedAt || nowIso(),
+    kotPrinted: item.kotPrinted === true,
+    kotPrintedAt: item.kotPrintedAt || null
+  };
+}
+
+function manualCartPayload(items = manualCart) {
+  return items.map(normalizeManualCartItem);
+}
+
+function updateManualQty(lineId, delta) {
+  const found = manualCart.find(x => x.itemLineId === lineId);
   if (!found) return;
+  if (found.kotPrinted === true && delta > 0) {
+    manualCart.push({
+      ...found,
+      itemLineId: manualItemLineId(),
+      qty: 1,
+      addedAt: nowIso(),
+      kotPrinted: false,
+      kotPrintedAt: null
+    });
+    renderManualCart();
+    return;
+  }
   found.qty += delta;
-  if (found.qty <= 0) manualCart = manualCart.filter(x => x.id !== id);
+  if (found.qty <= 0) manualCart = manualCart.filter(x => x.itemLineId !== lineId);
   renderManualCart();
 }
 
@@ -2359,14 +2402,19 @@ function addManualItem(id) {
   const item = manualMenuItems.find(x => x.id === id);
   if (!item) return;
 
-  const found = manualCart.find(x => x.id === id);
+  const found = manualCart.find(x => x.id === id && x.kotPrinted !== true);
   if (found) found.qty += 1;
   else {
     manualCart.push({
       id: item.id,
+      menuItemId: item.id,
+      itemLineId: manualItemLineId(),
       name: item.name || "",
       price: Number(item.price || 0),
-      qty: 1
+      qty: 1,
+      addedAt: nowIso(),
+      kotPrinted: false,
+      kotPrintedAt: null
     });
   }
   renderManualCart();
@@ -2395,30 +2443,30 @@ function renderManualCart() {
       </div>
 
       <div class="cart-qty-control">
-        <button class="cart-qty-btn manual-minus" data-id="${item.id}">-</button>
+        <button class="cart-qty-btn manual-minus" data-line-id="${escapeHtml(item.itemLineId)}">-</button>
         <div class="cart-qty-value">${item.qty}</div>
-        <button class="cart-qty-btn manual-plus" data-id="${item.id}">+</button>
+        <button class="cart-qty-btn manual-plus" data-line-id="${escapeHtml(item.itemLineId)}">+</button>
       </div>
 
       <div class="cart-item-total">${money(item.price * item.qty)}</div>
 
-      <button class="cart-item-remove manual-remove" data-id="${item.id}">
+      <button class="cart-item-remove manual-remove" data-line-id="${escapeHtml(item.itemLineId)}">
         <i class="fas fa-trash"></i>
       </button>
     </div>
   `).join("");
 
   manualCartListEl.querySelectorAll(".manual-minus").forEach(btn => {
-    btn.addEventListener("click", () => updateManualQty(btn.dataset.id || "", -1));
+    btn.addEventListener("click", () => updateManualQty(btn.dataset.lineId || "", -1));
   });
 
   manualCartListEl.querySelectorAll(".manual-plus").forEach(btn => {
-    btn.addEventListener("click", () => updateManualQty(btn.dataset.id || "", 1));
+    btn.addEventListener("click", () => updateManualQty(btn.dataset.lineId || "", 1));
   });
 
   manualCartListEl.querySelectorAll(".manual-remove").forEach(btn => {
     btn.addEventListener("click", () => {
-      manualCart = manualCart.filter(item => item.id !== (btn.dataset.id || ""));
+      manualCart = manualCart.filter(item => item.itemLineId !== (btn.dataset.lineId || ""));
       renderManualCart();
     });
   });
@@ -2526,12 +2574,7 @@ async function loadOrderIntoManualBill(orderDocId) {
     if (manualPaymentStatusEl) manualPaymentStatusEl.value = order.paymentStatus || "unpaid";
 
     manualCart = Array.isArray(order.items)
-      ? order.items.map(item => ({
-          id: item.id || "",
-          name: item.name || "",
-          price: Number(item.price || 0),
-          qty: Number(item.qty || 1)
-        }))
+      ? order.items.map(normalizeManualCartItem)
       : [];
 
     if (createManualBillBtn) createManualBillBtn.innerHTML = `<i class="fas fa-check"></i> Update Order`;
@@ -2842,6 +2885,10 @@ async function createManualBill() {
     if (!manualCart.length) return alert("Select at least one menu item.");
 
     const { itemsTotal, tax, grandTotal } = renderManualTotals();
+    const cartItems = manualCartPayload();
+    manualCart = cartItems;
+    const newKotItems = cartItems.filter(item => item.kotPrinted !== true);
+    const wasEditingOrder = Boolean(editingOrderDocId);
 
     if (editingOrderDocId) {
       const orderRef = doc(db, "orders", editingOrderDocId);
@@ -2855,8 +2902,8 @@ async function createManualBill() {
         customerName,
         customerPhone,
         tableNo,
-        items: manualCart,
-        itemsText: manualCart.map(i => `${i.name} x${i.qty}`).join(", "),
+        items: cartItems,
+        itemsText: cartItems.map(i => `${i.name} x${i.qty}`).join(", "),
         note: "Bill updated by admin",
         paymentStatus,
         paymentMethod,
@@ -2866,12 +2913,12 @@ async function createManualBill() {
         paidAmount: paymentStatus === "paid" ? grandTotal : 0,
         remainingAmount: paymentStatus === "paid" ? 0 : grandTotal,
         billClosed: paymentStatus === "paid" && ["ready", "served", "completed"].includes(oldStatus),
-        status: ["served", "completed", "cancelled", "rejected", "delivered"].includes(oldStatus) ? "pending" : oldStatus,
+        status: oldData.status || "pending",
         etaMinutes: Number(oldData.etaMinutes || 10),
         etaStartedAt: oldData.etaStartedAt || null,
-        hasNewItems: true,
-        newlyAddedItems: manualCart,
-        newlyAddedItemsText: manualCart.map(i => `${i.name} x${i.qty}`).join(", "),
+        hasNewItems: newKotItems.length > 0,
+        newlyAddedItems: newKotItems,
+        newlyAddedItemsText: newKotItems.map(i => `${i.name} x${i.qty}`).join(", "),
         newlyAddedNote: "Updated from admin billing",
         kitchenAlertAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -2893,8 +2940,8 @@ async function createManualBill() {
         customerName,
         customerPhone,
         tableNo,
-        items: manualCart,
-        itemsText: manualCart.map(i => `${i.name} x${i.qty}`).join(", "),
+        items: cartItems,
+        itemsText: cartItems.map(i => `${i.name} x${i.qty}`).join(", "),
         note: "Manual order from admin",
         status: "pending",
         paymentStatus,
@@ -2924,7 +2971,7 @@ async function createManualBill() {
     }
 
     await loadOrders();
-    setTimeout(() => resetManualBillForm(), 700);
+    if (!wasEditingOrder) setTimeout(() => resetManualBillForm(), 700);
   } catch (err) {
     console.error("createManualBill error", err);
     alert("Failed to create/update bill: " + err.message);
@@ -3199,6 +3246,7 @@ function buildKotPrintHtml(order = {}, items = [], label = "") {
   const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
   const kotNumber = order.kotNo || order.kotNumber || order.orderId || `KOT${Date.now()}`;
   const rows = thermalKotRows(items);
+  const kotType = String(label || "").toUpperCase();
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -3211,7 +3259,7 @@ function buildKotPrintHtml(order = {}, items = [], label = "") {
     <div class="kot-restaurant">${escapeHtml(restaurantName)}</div>
     <div class="kot-title">KITCHEN ORDER TICKET</div>
     <div class="kot-divider"></div>
-    ${label ? `<div class="kot-label-banner">${escapeHtml(label)}</div>` : ""}
+    ${label ? `<div class="kot-label-banner">${escapeHtml(label)}</div><div class="kot-row"><span class="kot-label">KOT Type:</span><span class="kot-value">${escapeHtml(kotType)}</span></div>${kotType.includes("NEW") ? `<div class="kot-center" style="font-weight:800;">Add-on KOT</div>` : ""}<div class="kot-divider"></div>` : ""}
     <div class="kot-row"><span class="kot-label">KOT #:</span><span class="kot-value">${escapeHtml(kotNumber)}</span></div>
     <div class="kot-row"><span class="kot-label">${escapeHtml(kotLocationLabel(order))}:</span><span class="kot-value">${escapeHtml(kotLocationValue(order))}</span></div>
     <div class="kot-row"><span class="kot-label">Customer:</span><span class="kot-value">${escapeHtml(order.customerName || "-")}</span></div>
@@ -3246,7 +3294,7 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   const win = window.open("", "_blank", "width=360,height=600");
   if (!win) {
     alert("Allow popups to print KOT.");
-    return;
+    return false;
   }
 
   win.document.open();
@@ -3267,6 +3315,63 @@ function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   };
 
   setTimeout(startPrint, 900);
+  return true;
+}
+
+async function markManualKotItemsPrinted(itemsToMark = []) {
+  const printedLineIds = new Set(itemsToMark.map(item => item.itemLineId).filter(Boolean));
+  const printedAt = nowIso();
+  manualCart = manualCart.map(item => printedLineIds.has(item.itemLineId)
+    ? { ...item, kotPrinted: true, kotPrintedAt: printedAt }
+    : item);
+  renderManualCart();
+  if (!editingOrderDocId) return;
+  await updateDoc(doc(db, "orders", editingOrderDocId), {
+    items: manualCartPayload(),
+    hasNewItems: manualCart.some(item => item.kotPrinted !== true),
+    newlyAddedItems: manualCart.filter(item => item.kotPrinted !== true),
+    newlyAddedItemsText: manualCart.filter(item => item.kotPrinted !== true).map(i => `${i.name} x${i.qty}`).join(", "),
+    updatedAt: serverTimestamp()
+  });
+}
+
+async function printManualKotItems(mode = "all") {
+  if (!manualCart.length) return alert("No items in current bill.");
+  if (!editingOrderDocId) {
+    const kotOrder = {
+      orderId: editingOrderPublicId || `KOT${Date.now()}`,
+      tableNo: manualTableNoEl?.value || "01",
+      customerName: manualCustomerNameEl?.value.trim() || "",
+      source: "manual_admin",
+      isManualOrder: true,
+      items: manualCart
+    };
+    printKOTFromOrder(kotOrder, manualCartPayload(), mode === "new" ? "NEW ITEMS ONLY" : "ALL ITEMS");
+    return;
+  }
+
+  const itemsToPrint = mode === "new"
+    ? manualCart.filter(item => item.kotPrinted !== true)
+    : manualCart;
+  if (!itemsToPrint.length) return alert("No new items to print for KOT. Use Print All Items if needed.");
+
+  const kotOrder = {
+    orderId: editingOrderPublicId || `KOT${Date.now()}`,
+    tableNo: manualTableNoEl?.value || "01",
+    customerName: manualCustomerNameEl?.value.trim() || "",
+    source: "manual_admin",
+    isManualOrder: true,
+    items: manualCart
+  };
+  const printed = printKOTFromOrder(kotOrder, itemsToPrint, mode === "new" ? "NEW ITEMS ONLY" : "ALL ITEMS");
+  if (!printed) return;
+  try {
+    await markManualKotItemsPrinted(itemsToPrint);
+    setNotice(mode === "new" ? "New item KOT printed." : "All item KOT printed.", "success");
+  } catch (error) {
+    console.error("markManualKotItemsPrinted error", error);
+    alert("KOT printed, but item print status could not be saved: " + error.message);
+  }
 }
 
 /* =========================================================
@@ -3868,6 +3973,8 @@ printKotFromBillingBtn?.addEventListener("click", () => {
   fillKotPreviewFromCart(editingOrderPublicId || "");
   kotModal?.classList.add("active");
 });
+printKotNewItemsBtn?.addEventListener("click", () => printManualKotItems("new"));
+printKotAllItemsBtn?.addEventListener("click", () => printManualKotItems("all"));
 
 printAllKotBtn?.addEventListener("click", () => {
   if (!canUseOrdering) { alert("Your Basic plan supports digital menu only. Upgrade to Advance to use KOT."); return; }
@@ -3914,7 +4021,7 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
     isManualOrder: true,
     items: manualCart
   };
-  printKOTFromOrder(kotOrder, manualCart);
+  printKOTFromOrder(kotOrder, manualCartPayload(), "ALL ITEMS");
 });
 
 document.getElementById("printBillBtn")?.addEventListener("click", async () => {

@@ -128,7 +128,8 @@ async function testOcrSpaceConnection() {
   form.append("OCREngine", "2");
   form.append("isOverlayRequired", "false");
   form.append("filetype", "JPG");
-  await requestOcrSpace(form, "https://api.ocr.space/parse/imageurl");
+  const result = await requestOcrSpace(form, "https://api.ocr.space/parse/imageurl");
+  return result;
 }
 
 function asIsoDate(value = "") {
@@ -222,12 +223,18 @@ app.get("/api/ocr/status", (_, res) => {
   });
 });
 app.get("/api/ocr/test", async (_, res) => {
-  if (!ocrKey()) return res.json({ ready: false, connected: false, error: "OCR_SPACE_API_KEY missing", debug: ocrKeyDebug() });
+  if (!ocrKey()) return res.json({ connected: false, error: "OCR_SPACE_API_KEY missing" });
   try {
     await testOcrSpaceConnection();
-    res.json({ ready: true, connected: true, service: "OCR.space", message: "OCR Space connected successfully", debug: ocrKeyDebug() });
+    res.json({ connected: true, message: "OCR Space connected" });
   } catch (error) {
-    res.json({ ready: false, connected: false, ...(error.ocr || { error: "OCR Space test failed", httpStatus: error.status || 502 }), debug: ocrKeyDebug() });
+    const ocr = error.ocr || {};
+    res.json({
+      connected: false,
+      error: "OCR Space test failed",
+      ocrExitCode: ocr.OCRExitCode ?? null,
+      errorMessage: ocr.ErrorMessage || ocr.ErrorDetails || error.message || null
+    });
   }
 });
 app.post("/api/ocr/parse", verifyAdmin, express.json({ limit: "1mb" }), async (req, res) => {
