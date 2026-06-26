@@ -363,6 +363,9 @@ let purchaseBills = [];
 let reviewedPurchaseFileUrl = "";
 let restaurantLogoMarkedForRemoval = false;
 let currentBillOrder = null;
+let selectedRestaurantLogoFile = null;
+let restaurantLogoPreviewObjectUrl = "";
+window.scan2plateSelectedRestaurantLogoFile = null;
 
 let editingOrderDocId = null;
 let editingOrderPublicId = null;
@@ -727,27 +730,52 @@ function setLogoPreview(url = "") {
 
 function markRestaurantLogoRemoved() {
   restaurantLogoMarkedForRemoval = true;
+  selectedRestaurantLogoFile = null;
+  window.scan2plateSelectedRestaurantLogoFile = null;
   restaurantSettings.restaurantLogoUrl = "";
   restaurantSettings.restaurantLogoStoragePath = "";
+  restaurantSettings.logoUrl = "";
   if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
+  if (logoFieldEl) logoFieldEl.value = "";
+  if (restaurantLogoPreviewObjectUrl) {
+    URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
+    restaurantLogoPreviewObjectUrl = "";
+  }
   setLogoPreview("");
+}
+
+function logoUploadErrorMessage(error = {}) {
+  const code = error.code || "";
+  const message = error.message || String(error || "Unknown error");
+  if (code === "storage/unauthorized" || code === "storage/unauthenticated" || /permission|unauthorized/i.test(message)) {
+    return `Firebase Storage permission denied. ${code ? `${code}: ` : ""}${message}`;
+  }
+  return `${code ? `${code}: ` : ""}${message}`;
+}
+
+function validateLogoFile(file) {
+  if (!file) return;
+  const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  const nameOk = /\.(jpe?g|png|webp)$/i.test(file.name || "");
+  if (!acceptedTypes.has(file.type) && !nameOk) throw new Error("Use JPG, JPEG, PNG, or WEBP logo image.");
+  if (file.size > 2 * 1024 * 1024) throw new Error("Logo image must be 2MB or smaller.");
 }
 
 function resizeLogoFile(file) {
   return new Promise((resolve, reject) => {
     if (!file) return resolve(null);
+    try { validateLogoFile(file); } catch (error) { return reject(error); }
     const image = new Image();
     const objectUrl = URL.createObjectURL(file);
     image.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const maxWidth = 400;
-      const scale = Math.min(1, maxWidth / Math.max(1, image.naturalWidth));
+      const maxSize = 400;
+      const scale = Math.min(1, maxSize / Math.max(1, image.naturalWidth), maxSize / Math.max(1, image.naturalHeight));
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
       canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(blob => {
         if (!blob) return reject(new Error("Logo could not be processed"));
@@ -765,10 +793,15 @@ function resizeLogoFile(file) {
 async function uploadRestaurantLogo(file) {
   const resized = await resizeLogoFile(file);
   if (!resized) return null;
-  const path = `restaurants/${restaurantId}/settings/logo-${Date.now()}.png`;
+  if (!restaurantId) throw new Error("restaurantId missing");
+  const path = `restaurants/${restaurantId}/logo/logo-${Date.now()}.png`;
   const logoRef = storageRef(getStorage(app), path);
-  await uploadBytes(logoRef, resized, { contentType: "image/png" });
-  return { url: await getDownloadURL(logoRef), path };
+  try {
+    await uploadBytes(logoRef, resized, { contentType: "image/png" });
+    return { url: await getDownloadURL(logoRef), path };
+  } catch (error) {
+    throw new Error(logoUploadErrorMessage(error));
+  }
 }
 
 function isManualOrder(order = {}) {
@@ -1160,6 +1193,14 @@ function showPaymentMethodModal(orderId) {
 ========================================================= */
 async function loadSettings() {
   try {
+    selectedRestaurantLogoFile = null;
+    window.scan2plateSelectedRestaurantLogoFile = null;
+    restaurantLogoMarkedForRemoval = false;
+    if (restaurantLogoPreviewObjectUrl) {
+      URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
+      restaurantLogoPreviewObjectUrl = "";
+    }
+    if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
     const snap = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
     const restaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
     // Root fallback keeps legacy restaurants in Restaurant Mode and supports mode set by Super Admin.
@@ -1198,7 +1239,13 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  const originalButtonHtml = saveSettingsBtn?.innerHTML;
   try {
+    if (!restaurantId) throw new Error("restaurantId missing");
+    if (saveSettingsBtn) {
+      saveSettingsBtn.disabled = true;
+      saveSettingsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving...`;
+    }
     const restaurantLatRaw = restaurantLatFieldEl?.value.trim() || "";
     const restaurantLngRaw = restaurantLngFieldEl?.value.trim() || "";
     const radiusRaw = allowedOrderRadiusFieldEl?.value || "150";
@@ -1215,15 +1262,24 @@ async function saveSettings() {
       return;
     }
 
-    const logoFile = restaurantLogoUploadEl?.files?.[0] || null;
+    const logoFile = selectedRestaurantLogoFile || window.scan2plateSelectedRestaurantLogoFile || restaurantLogoUploadEl?.files?.[0] || null;
     if (logoFile) {
       try {
         uploadedLogo = await uploadRestaurantLogo(logoFile);
       } catch (error) {
-        alert("Logo upload failed: " + error.message);
+        alert("Logo upload failed: " + (error.message || String(error)));
         return;
       }
     }
+
+    const logoUrlValue = logoFieldEl?.value.trim() || "";
+    const existingUploadedLogo = restaurantSettings.restaurantLogoUrl || "";
+    const existingLogoUrl = restaurantSettings.logoUrl || "";
+    const finalUploadedLogoUrl = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || existingUploadedLogo);
+    const finalStoragePath = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || "");
+    const finalLogoUrl = restaurantLogoMarkedForRemoval
+      ? ""
+      : (uploadedLogo?.url || logoUrlValue || existingLogoUrl || finalUploadedLogoUrl);
 
     const payload = {
       restaurantName: restaurantFieldEl?.value.trim() || "",
@@ -1233,9 +1289,9 @@ async function saveSettings() {
       taxPercent: Number(taxFieldEl?.value || 0),
       phone: phoneFieldEl?.value.trim() || "",
       address: addressFieldEl?.value.trim() || "",
-      logoUrl: logoFieldEl?.value.trim() || "",
-      restaurantLogoUrl: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || restaurantSettings.restaurantLogoUrl || ""),
-      restaurantLogoStoragePath: restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || ""),
+      logoUrl: finalLogoUrl,
+      restaurantLogoUrl: finalUploadedLogoUrl,
+      restaurantLogoStoragePath: finalStoragePath,
       restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
       restaurantSignatureMessage: restaurantSignatureMessageFieldEl?.value.trim() || "",
       billFooterMessage: billFooterMessageFieldEl?.value.trim() || "",
@@ -1251,20 +1307,32 @@ async function saveSettings() {
       updatedAt: serverTimestamp()
     };
 
-    if (uploadedLogo) {
-      payload.logoUrl = payload.logoUrl || uploadedLogo.url;
-    }
-
     await setDoc(doc(db, "restaurants", restaurantId, "settings", "general"), payload, { merge: true });
-    await setDoc(doc(db, "restaurants", restaurantId), { businessMode: payload.businessMode, orderMode: payload.orderMode, tableCount: payload.tableCount, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(doc(db, "restaurants", restaurantId), {
+      businessMode: payload.businessMode,
+      orderMode: payload.orderMode,
+      tableCount: payload.tableCount,
+      restaurantLogoUrl: payload.restaurantLogoUrl,
+      restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
+      logoUrl: payload.logoUrl,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
     restaurantSettings = { ...restaurantSettings, ...payload };
     if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
+    selectedRestaurantLogoFile = null;
+    window.scan2plateSelectedRestaurantLogoFile = null;
     restaurantLogoMarkedForRemoval = false;
-    setLogoPreview(getRestaurantLogoUrl());
+    if (logoFieldEl) logoFieldEl.value = payload.logoUrl || "";
+    await loadSettings();
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
-    alert("Failed to save settings: " + err.message);
+    alert("Failed to save settings: " + (err.code ? `${err.code}: ` : "") + (err.message || String(err)));
+  } finally {
+    if (saveSettingsBtn) {
+      saveSettingsBtn.disabled = false;
+      saveSettingsBtn.innerHTML = originalButtonHtml || `<i class="fas fa-save"></i> Save Settings`;
+    }
   }
 }
 
@@ -3535,7 +3603,20 @@ useCurrentLocationBtn?.addEventListener("click", useAdminCurrentLocation);
 restaurantLogoUploadEl?.addEventListener("change", () => {
   restaurantLogoMarkedForRemoval = false;
   const file = restaurantLogoUploadEl.files?.[0];
-  if (file) setLogoPreview(URL.createObjectURL(file));
+  if (!file) return;
+  try {
+    validateLogoFile(file);
+    selectedRestaurantLogoFile = file;
+    window.scan2plateSelectedRestaurantLogoFile = file;
+    if (restaurantLogoPreviewObjectUrl) URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
+    restaurantLogoPreviewObjectUrl = URL.createObjectURL(file);
+    setLogoPreview(restaurantLogoPreviewObjectUrl);
+  } catch (error) {
+    selectedRestaurantLogoFile = null;
+    window.scan2plateSelectedRestaurantLogoFile = null;
+    restaurantLogoUploadEl.value = "";
+    alert("Logo upload failed: " + (error.message || String(error)));
+  }
 });
 removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
 
