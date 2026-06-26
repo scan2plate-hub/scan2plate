@@ -948,7 +948,7 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title"><i class="fas fa-utensils"></i> Menu Items</h3>
-              <div class="btn-group"><button class="btn btn-sm btn-outline" id="uploadMenuPdfBtn" type="button"><i class="fas fa-file-pdf"></i> Upload Menu PDF</button><input id="menuPdfInput" type="file" accept="application/pdf,.pdf" hidden /><button class="btn btn-sm btn-outline" id="downloadMenuPdfSampleBtn" type="button"><i class="fas fa-download"></i> Download sample PDF format</button><input type="text" class="form-input" placeholder="Search..." id="menuSearch" style="width:200px;" /></div>
+              <div class="btn-group"><button class="btn btn-sm btn-outline" id="uploadMenuPdfBtn" type="button"><i class="fas fa-file-pdf"></i> Upload Menu PDF</button><input id="menuPdfInput" type="file" accept="application/pdf,.pdf" hidden /><button class="btn btn-sm btn-outline" id="downloadMenuPdfSampleBtn" type="button"><i class="fas fa-download"></i> Download sample PDF format</button><input type="text" class="form-input" placeholder="Search menu item..." id="menuSearch" style="width:min(260px,100%);" /><button class="btn btn-sm btn-outline" id="clearMenuSearchBtn" type="button">X</button></div>
             </div>
             <div class="card-body">
               <div class="tab-pills" id="menuCategoryTabs"><button class="tab-pill active" data-category="all">All</button></div>
@@ -1058,6 +1058,25 @@
               <div style="font-size:11px;color:#6b7280;margin-top:8px;">Customers can place QR orders only when their device is inside this radius.</div>
             </div>
           </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-print"></i> Print Settings</h3></div>
+            <div class="card-body">
+              <div class="form-group"><label class="form-label">Print Mode</label><select class="form-input" id="printModeField"><option value="browser">Browser Print Mode</option><option value="kiosk">Direct Thermal / Kiosk Print Mode</option></select></div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;"><input id="autoClosePrintWindowField" type="checkbox" checked /> Auto close KOT print window after printing</label>
+              <div class="notice-box info" style="margin-top:12px;"><i class="fas fa-circle-info"></i><span>For true one-click printing without popup, open Chrome with --kiosk-printing or use a local ESC/POS print service.</span></div>
+              <div style="font-size:12px;color:#4b5563;line-height:1.55;margin-top:10px;">
+                <strong>Windows one-click setup:</strong><br />
+                1. Close Chrome.<br />
+                2. Right click Chrome shortcut and open Properties.<br />
+                3. In Target, add at end: <code>--kiosk-printing</code><br />
+                4. Open Scan2Plate from this shortcut.<br />
+                5. Select POS-90 printer as default printer in Windows.
+              </div>
+              <div style="font-size:12px;color:#4b5563;line-height:1.55;margin-top:10px;">
+                <strong>KOT print reminder:</strong> Paper size Roll Paper 80 x 297 mm, Margins None or Minimum, Scale 100, Headers and footers OFF, Background graphics ON.
+              </div>
+            </div>
+          </div>
         </div>
         <div class="card" style="margin-top:18px;">
           <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -1109,7 +1128,7 @@
       <!-- TABLES -->
       <section class="content-section" id="section-tables">
 
-        <div class="card" style="margin-bottom:18px;"><div class="card-body" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;"><div class="form-group" style="margin:0;min-width:170px;"><label class="form-label">Add More Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add More Tables</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button">Download All Table QRs</button></div></div>
+        <div class="card" style="margin-bottom:18px;"><div class="card-body" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;"><div class="form-group" style="margin:0;min-width:170px;"><label class="form-label">Add More Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><div class="form-group" style="margin:0;min-width:min(260px,100%);flex:1;"><label class="form-label">Search Tables</label><input id="tableSearch" class="form-input" type="search" placeholder="Search table number..." /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add More Tables</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button">Download All Table QRs</button></div></div>
 
         <!-- Summary stats -->
         <div class="stats-grid" id="tableSummary" style="grid-template-columns:repeat(2,1fr);max-width:500px;margin-bottom:20px;"></div>

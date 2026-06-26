@@ -193,6 +193,7 @@ const kotHistoryDateEl = document.getElementById("kotHistoryDate");
 
 const tablesGridEl = document.getElementById("tablesGrid");
 const tableSummaryEl = document.getElementById("tableSummary");
+const tableSearchEl = document.getElementById("tableSearch");
 const addTablesCountEl = document.getElementById("addTablesCount");
 const addTablesBtn = document.getElementById("addTablesBtn");
 const downloadAllTableQrsBtn = document.getElementById("downloadAllTableQrsBtn");
@@ -218,6 +219,7 @@ const saveMenuBtn = document.getElementById("saveMenuBtn");
 const deleteMenuBtn = document.getElementById("deleteMenuBtn");
 const clearMenuFormBtn = document.getElementById("clearMenuForm");
 const menuSearchEl = document.getElementById("menuSearch");
+const clearMenuSearchBtn = document.getElementById("clearMenuSearchBtn");
 const uploadMenuPdfBtn = document.getElementById("uploadMenuPdfBtn");
 const menuPdfInput = document.getElementById("menuPdfInput");
 const downloadMenuPdfSampleBtn = document.getElementById("downloadMenuPdfSampleBtn");
@@ -287,6 +289,8 @@ const gstFieldEl = document.getElementById("gstField");
 const restaurantLatFieldEl = document.getElementById("restaurantLatField");
 const restaurantLngFieldEl = document.getElementById("restaurantLngField");
 const allowedOrderRadiusFieldEl = document.getElementById("allowedOrderRadiusField");
+const printModeFieldEl = document.getElementById("printModeField");
+const autoClosePrintWindowFieldEl = document.getElementById("autoClosePrintWindowField");
 const useCurrentLocationBtn = document.getElementById("useCurrentLocationBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 
@@ -1329,6 +1333,8 @@ async function loadSettings() {
     if (restaurantLatFieldEl) restaurantLatFieldEl.value = restaurantSettings.restaurantLat ?? "";
     if (restaurantLngFieldEl) restaurantLngFieldEl.value = restaurantSettings.restaurantLng ?? "";
     if (allowedOrderRadiusFieldEl) allowedOrderRadiusFieldEl.value = restaurantSettings.allowedOrderRadiusMeters ?? 150;
+    if (printModeFieldEl) printModeFieldEl.value = restaurantSettings.printMode === "kiosk" ? "kiosk" : "browser";
+    if (autoClosePrintWindowFieldEl) autoClosePrintWindowFieldEl.checked = restaurantSettings.autoClosePrintWindow !== false;
     ensureTableCountControl();
     const tableCountField = document.getElementById("tableCountField");
     if (tableCountField) tableCountField.value = restaurantSettings.tableCount ?? 20;
@@ -1420,6 +1426,8 @@ async function saveSettings() {
       restaurantLat,
       restaurantLng,
       allowedOrderRadiusMeters,
+      printMode: printModeFieldEl?.value === "kiosk" ? "kiosk" : "browser",
+      autoClosePrintWindow: autoClosePrintWindowFieldEl?.checked !== false,
       locationProtectionEnabled: document.getElementById("locationProtectionEnabled")?.checked === true,
       tableCount: Math.max(1, Number(document.getElementById("tableCountField")?.value || restaurantSettings.tableCount || 20)),
       updatedAt: serverTimestamp()
@@ -1730,8 +1738,8 @@ function renderMenuManagement() {
     menuListEl.innerHTML = `
       <div class="empty-state">
         <i class="fas fa-utensils"></i>
-        <h4>No menu items found</h4>
-        <p>Add menu items or change filter</p>
+        <h4>${search ? "No matching menu items found." : "No menu items found"}</h4>
+        <p>${search ? "Clear search or change category filter." : "Add menu items or change filter"}</p>
       </div>
     `;
     return;
@@ -2200,6 +2208,7 @@ function renderTablesSection() {
 
   const tableOptions = getTableOptions();
   const disabledTableNos = new Set(managedTables.filter(table => table.disabled === true || table.active === false).map(table => String(table.tableNo || table.id).padStart(2, "0")));
+  const managedTableByNo = new Map(managedTables.map(table => [String(table.tableNo || table.id).padStart(2, "0"), table]));
 
   const openCount = [...latestOrderByTable.values()].filter(order => {
     if (!order) return false;
@@ -2224,7 +2233,36 @@ function renderTablesSection() {
     <div class="stat-card"><div class="stat-icon danger"><i class="fas fa-ban"></i></div><div class="stat-info"><h3>Disabled Tables</h3><div class="value">${disabledCount}</div></div></div>
   `;
 
-  tablesGridEl.innerHTML = tableOptions.map(tableNo => {
+  const tableSearch = String(tableSearchEl?.value || "").trim().toLowerCase();
+  const visibleTableOptions = tableOptions.filter(tableNo => {
+    const normalizedTableNo = String(tableNo).padStart(2, "0");
+    const disabled = disabledTableNos.has(normalizedTableNo);
+    const managedTable = managedTableByNo.get(normalizedTableNo) || {};
+    const order = latestOrderByTable.get(tableNo);
+    const payment = String(order?.paymentStatus || "").toLowerCase();
+    const status = String(order?.status || "").toLowerCase();
+    const occupied = Boolean(
+      order &&
+      payment !== "paid" &&
+      !["served", "completed", "cancelled", "rejected"].includes(status) &&
+      order.billClosed !== true
+    );
+    const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
+    const searchText = `table ${tableNo} ${normalizedTableNo} ${managedTable.name || managedTable.tableName || ""} ${statusText} ${order?.customerName || ""} ${order?.orderId || ""}`.toLowerCase();
+    return !tableSearch || searchText.includes(tableSearch);
+  });
+
+  if (!visibleTableOptions.length) {
+    tablesGridEl.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1;">
+        <i class="fas fa-table"></i>
+        <h4>No matching tables found.</h4>
+      </div>
+    `;
+    return;
+  }
+
+  tablesGridEl.innerHTML = visibleTableOptions.map(tableNo => {
     const disabled = disabledTableNos.has(String(tableNo).padStart(2, "0"));
     const order = latestOrderByTable.get(tableNo);
 
@@ -3096,8 +3134,99 @@ function printItemExtras(item = {}) {
 function thermalKotRows(items = []) {
   return items.map(item => {
     const extras = printItemExtras(item);
-    return `<div class="thermal-item-row"><div class="thermal-item-name"><strong>${escapeHtml(String(item.name || "Item"))}</strong>${extras.map(extra => `<div class="thermal-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` ×${extra.qty}` : ""}</div>`).join("")}</div><div class="thermal-item-qty">${Number(item.qty || 0)}</div></div>`;
+    return `<div class="kot-item-row"><div class="kot-item-name">${escapeHtml(String(item.name || "Item"))}${extras.map(extra => `<div class="kot-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` x${extra.qty}` : ""}</div>`).join("")}</div><div class="kot-item-qty">${Number(item.qty || 0)}</div></div>`;
   }).join("");
+}
+
+function kotSourceLabel(order = {}) {
+  if (isManualOrder(order)) return "Manual Order";
+  const source = String(order.source || "").toLowerCase();
+  if (["customer_qr", "qr_order", "qr-order", "online_customer", "customer"].includes(source)) return "QR Order";
+  return "QR Order";
+}
+
+function kotLocationLabel(order = {}) {
+  return order.businessMode === "vendor" || order.orderMode === "token" ? "Token" : "Table";
+}
+
+function kotLocationValue(order = {}) {
+  return order.businessMode === "vendor" || order.orderMode === "token"
+    ? (order.tokenNo || `T-${order.tokenNumber || "-"}`)
+    : (order.tableNo || "-");
+}
+
+function kotPrintCss() {
+  return `
+    body{margin:0;padding:0;background:#fff;}
+    .kot-ticket{width:72mm;margin:0 auto;padding:3mm 2mm;box-sizing:border-box;font-family:"Courier New",monospace;color:#000;background:#fff;font-size:13px;line-height:1.35;font-weight:600;}
+    .kot-center{text-align:center;}
+    .kot-restaurant{font-size:17px;font-weight:800;text-align:center;word-break:break-word;}
+    .kot-title{font-size:15px;font-weight:800;text-align:center;letter-spacing:0.5px;}
+    .kot-divider{border-top:1px dashed #000;margin:2mm 0;}
+    .kot-label-banner{background:#000;color:#fff;text-align:center;padding:2mm;font-weight:800;margin-bottom:2mm;}
+    .kot-row{display:flex;justify-content:space-between;gap:2mm;margin:1mm 0;}
+    .kot-label{min-width:20mm;}
+    .kot-value{text-align:right;flex:1;word-break:break-word;}
+    .kot-items-header,.kot-item-row{display:grid;grid-template-columns:1fr 12mm;column-gap:2mm;align-items:start;}
+    .kot-items-header{font-weight:800;text-transform:uppercase;}
+    .kot-item-row{padding:1mm 0;break-inside:avoid;}
+    .kot-item-name{word-break:break-word;overflow-wrap:anywhere;}
+    .kot-modifier{padding-top:1mm;padding-left:3mm;font-size:12px;font-weight:600;}
+    .kot-item-qty{text-align:right;font-weight:800;}
+    .kot-end{text-align:center;font-size:14px;font-weight:800;margin-top:2mm;}
+    @media print{
+      @page{size:80mm auto;margin:0;}
+      html,body{width:80mm;margin:0!important;padding:0!important;background:#fff!important;}
+      .kot-ticket{width:72mm;margin:0 auto;padding:3mm 2mm;box-sizing:border-box;font-family:"Courier New",monospace;color:#000;background:#fff;font-size:13px;line-height:1.35;font-weight:600;}
+      .kot-center{text-align:center;}
+      .kot-restaurant{font-size:17px;font-weight:800;text-align:center;}
+      .kot-title{font-size:15px;font-weight:800;text-align:center;letter-spacing:0.5px;}
+      .kot-divider{border-top:1px dashed #000;margin:2mm 0;}
+      .kot-row{display:flex;justify-content:space-between;gap:2mm;margin:1mm 0;}
+      .kot-label{min-width:20mm;}
+      .kot-value{text-align:right;flex:1;word-break:break-word;}
+      .kot-items-header,.kot-item-row{display:grid;grid-template-columns:1fr 12mm;column-gap:2mm;align-items:start;}
+      .kot-item-name{word-break:break-word;overflow-wrap:anywhere;}
+      .kot-item-qty{text-align:right;font-weight:800;}
+      .kot-end{text-align:center;font-size:14px;font-weight:800;margin-top:2mm;}
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    }
+  `;
+}
+
+function buildKotPrintHtml(order = {}, items = [], label = "") {
+  const now = new Date();
+  const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
+  const kotNumber = order.kotNo || order.kotNumber || order.orderId || `KOT${Date.now()}`;
+  const rows = thermalKotRows(items);
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KOT</title>
+  <style>${kotPrintCss()}</style>
+</head>
+<body>
+  <div class="kot-ticket">
+    <div class="kot-restaurant">${escapeHtml(restaurantName)}</div>
+    <div class="kot-title">KITCHEN ORDER TICKET</div>
+    <div class="kot-divider"></div>
+    ${label ? `<div class="kot-label-banner">${escapeHtml(label)}</div>` : ""}
+    <div class="kot-row"><span class="kot-label">KOT #:</span><span class="kot-value">${escapeHtml(kotNumber)}</span></div>
+    <div class="kot-row"><span class="kot-label">${escapeHtml(kotLocationLabel(order))}:</span><span class="kot-value">${escapeHtml(kotLocationValue(order))}</span></div>
+    <div class="kot-row"><span class="kot-label">Customer:</span><span class="kot-value">${escapeHtml(order.customerName || "-")}</span></div>
+    <div class="kot-row"><span class="kot-label">Source:</span><span class="kot-value">${escapeHtml(kotSourceLabel(order))}</span></div>
+    <div class="kot-row"><span class="kot-label">Date:</span><span class="kot-value">${escapeHtml(now.toLocaleDateString())}</span></div>
+    <div class="kot-row"><span class="kot-label">Time:</span><span class="kot-value">${escapeHtml(now.toLocaleTimeString())}</span></div>
+    <div class="kot-divider"></div>
+    <div class="kot-items-header"><span>ITEM</span><span class="kot-item-qty">QTY</span></div>
+    <div class="kot-divider"></div>
+    ${rows || `<div class="kot-item-row"><span class="kot-item-name">No items</span><span class="kot-item-qty">0</span></div>`}
+    <div class="kot-divider"></div>
+    <div class="kot-end">--- END OF KOT ---</div>
+  </div>
+</body>
+</html>`;
 }
 
 function thermalBillRows(items = []) {
@@ -3111,66 +3240,33 @@ function thermalBillRows(items = []) {
 
 function printKOTFromOrder(order, itemsToPrint = null, label = "") {
   const items = itemsToPrint || order.items || [];
-  const now = new Date();
-  const restaurantName =
-    restaurantFieldEl?.value.trim() ||
-    restaurantSettings.restaurantName ||
-    "Restaurant";
+  const kotHtml = buildKotPrintHtml(order, items, label);
+  const autoClose = restaurantSettings.autoClosePrintWindow !== false;
 
-  const rows = thermalKotRows(items);
-
-  const win = window.open("", "_blank", "width=400,height=650");
+  const win = window.open("", "_blank", "width=360,height=600");
   if (!win) {
     alert("Allow popups to print KOT.");
     return;
   }
 
-  win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <title>KOT</title>
-  <style>
-    @page{margin:2mm} body{font-family:Arial,"Courier New",monospace;font-size:11px;font-weight:700;color:#000;padding:0;width:58mm;max-width:100%;margin:0 auto;line-height:1.25}
-    h2{text-align:center;margin:0 0 2px;font-size:14px;font-weight:900;word-break:break-word}
-    .center{text-align:center}
-    hr{border:none;border-top:2px dashed #000;margin:5px 0}
-    table{width:100%;border-collapse:collapse}
-    .thermal-head{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;font-size:10px;text-transform:uppercase;padding:4px 0;border-bottom:2px solid #000}
-    thead th:nth-child(2){text-align:center}
-    .label{background:#000;color:#fff;text-align:center;padding:6px;font-weight:900;font-size:14px;margin-bottom:5px}
-    .meta td{padding:2px 0;font-size:10px}.meta td:first-child{width:62px;color:#000}
-    .thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-item-qty{text-align:center;font-weight:900}.thermal-modifier{padding:2px 0 0 8px;font-size:10px;font-weight:700;white-space:normal;overflow-wrap:anywhere}
-    @media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-head{grid-template-columns:minmax(0,1fr) 42px;font-size:12px}.thermal-item-row{grid-template-columns:minmax(0,1fr) 42px;padding:5px 0}.meta td{font-size:12px}.thermal-modifier{font-size:11px}h2{font-size:17px}}
-  </style>
-</head>
-<body>
-  <h2>${escapeHtml(restaurantName)}</h2>
-  <div class="center" style="font-size:14px;font-weight:900;margin-bottom:3px;">KITCHEN ORDER TICKET</div>
-  <hr>
-  ${label ? `<div class="label">${escapeHtml(label)}</div>` : ""}
-  <table class="meta">
-    <tr><td>KOT #</td><td><strong>${escapeHtml(order.orderId || "")}</strong></td></tr>
-    <tr><td>${order.businessMode === "vendor" || order.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(order.businessMode === "vendor" || order.orderMode === "token" ? (order.tokenNo || `T-${order.tokenNumber || "-"}`) : order.tableNo || "-")}</strong></td></tr>
-    <tr><td>Customer</td><td>${escapeHtml(displayCustomerName(order))}</td></tr>
-    ${isManualOrder(order) ? `<tr><td>Source</td><td><strong>Manual Order</strong></td></tr>` : ""}
-    <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>
-    <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
-  </table>
-  <hr>
-  <div class="thermal-head"><strong>Item</strong><strong style="text-align:center">Qty</strong></div>
-  <div>${rows || "<div class='thermal-item-row'><span>No items</span><span>0</span></div>"}</div>
-  <hr>
-  <div class="center" style="font-size:12px;">--- END OF KOT ---</div>
-</body>
-</html>`);
-
+  win.document.open();
+  win.document.write(kotHtml);
   win.document.close();
-  win.focus();
-
-  setTimeout(() => {
+  win.onafterprint = () => { if (autoClose) win.close(); };
+  let printStarted = false;
+  const startPrint = () => {
+    if (printStarted) return;
+    printStarted = true;
+    win.focus();
     win.print();
-    win.close();
-  }, 450);
+    if (autoClose) setTimeout(() => win.close(), 500);
+  };
+
+  win.onload = () => {
+    setTimeout(startPrint, 300);
+  };
+
+  setTimeout(startPrint, 900);
 }
 
 /* =========================================================
@@ -3661,6 +3757,11 @@ saveMenuBtn?.addEventListener("click", saveMenuItem);
 deleteMenuBtn?.addEventListener("click", deleteMenuItem);
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
 menuSearchEl?.addEventListener("input", renderMenuManagement);
+clearMenuSearchBtn?.addEventListener("click", () => {
+  if (menuSearchEl) menuSearchEl.value = "";
+  renderMenuManagement();
+});
+tableSearchEl?.addEventListener("input", renderTablesSection);
 uploadMenuPdfBtn?.addEventListener("click", () => menuPdfInput?.click());
 menuPdfInput?.addEventListener("change", async () => {
   const file = menuPdfInput.files?.[0];
@@ -3805,25 +3906,15 @@ itemInCategorySortEl?.addEventListener("change", () => {
 });
 
 document.getElementById("printKotBtn")?.addEventListener("click", () => {
-  const win = window.open("", "_blank", "width=380,height=600");
-  if (!win) return alert("Allow popup to print.");
-  const html = document.getElementById("kotPreview")?.innerHTML || "";
-  win.document.write(`
-    <html>
-      <head>
-        <title>KOT</title>
-        <style>
-          @page{margin:2mm} body{font-family:Arial,'Courier New',monospace;color:#000;font-size:11px;font-weight:700;padding:0;margin:0;width:58mm;max-width:100%;line-height:1.25}.kot-header{text-align:center;border-bottom:1px dashed #000;padding-bottom:4px;margin-bottom:5px}.kot-header h4{font-size:14px;margin:0 0 2px;font-weight:900;overflow-wrap:anywhere}.kot-details div{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:1px dotted #777;break-inside:avoid}.thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.thermal-item-qty{text-align:center;font-weight:900}.thermal-modifier{padding:2px 0 0 8px;font-size:10px;overflow-wrap:anywhere}.thermal-head{display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:6px;padding:4px 0;border-bottom:2px solid #000;font-size:10px;text-transform:uppercase}.kot-item{display:flex;justify-content:space-between;gap:8px;overflow-wrap:anywhere}.kot-preview{padding:0!important;border:0!important}@media print and (min-width:70mm){body{width:80mm;font-size:13px}.thermal-item-row,.thermal-head{grid-template-columns:minmax(0,1fr) 42px}.thermal-modifier{font-size:11px}}
-        </style>
-      </head>
-      <body>${html}</body>
-    </html>
-  `);
-  win.document.close();
-  setTimeout(() => {
-    win.print();
-    win.close();
-  }, 350);
+  const kotOrder = {
+    orderId: kotNumberEl?.textContent || editingOrderPublicId || `KOT${Date.now()}`,
+    tableNo: kotTableEl?.textContent || manualTableNoEl?.value || "01",
+    customerName: manualCustomerNameEl?.value.trim() || "",
+    source: "manual_admin",
+    isManualOrder: true,
+    items: manualCart
+  };
+  printKOTFromOrder(kotOrder, manualCart);
 });
 
 document.getElementById("printBillBtn")?.addEventListener("click", async () => {
