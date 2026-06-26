@@ -121,15 +121,20 @@ function getOcrFileType(file = {}) {
   return "JPG";
 }
 async function testOcrSpaceConnection() {
-  const form = new FormData();
-  form.append("apikey", ocrKey());
-  form.append("url", "https://ocr.space/Content/Images/receipt-ocr-original.jpg");
-  form.append("language", "eng");
-  form.append("OCREngine", "2");
-  form.append("isOverlayRequired", "false");
-  form.append("filetype", "JPG");
-  const result = await requestOcrSpace(form, "https://api.ocr.space/parse/imageurl");
-  return result;
+  const key = String(process.env.OCR_SPACE_API_KEY || "").trim();
+  const params = new URLSearchParams();
+  params.append("apikey", key);
+  params.append("url", "https://ocr.space/Content/Images/receipt-ocr-original.jpg");
+  params.append("language", "eng");
+  params.append("OCREngine", "2");
+  params.append("isOverlayRequired", "false");
+  params.append("filetype", "JPG");
+
+  return fetch("https://api.ocr.space/parse/imageurl", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString()
+  });
 }
 
 function asIsoDate(value = "") {
@@ -204,6 +209,8 @@ app.get("/api/health", (_, res) => res.json({
   service: "scan2plate-backend",
   storageBucket: storageBucketName,
   firebaseAdminReady: adminReady,
+  ocrKeyConfigured: Boolean(ocrKey()),
+  ocrKeyLength: ocrKey().length,
   time: new Date().toISOString()
 }));
 app.get("/api/ocr/status", (_, res) => {
@@ -223,17 +230,44 @@ app.get("/api/ocr/status", (_, res) => {
   });
 });
 app.get("/api/ocr/test", async (_, res) => {
-  if (!ocrKey()) return res.json({ connected: false, error: "OCR_SPACE_API_KEY missing" });
+  const key = String(process.env.OCR_SPACE_API_KEY || "").trim();
+  if (!key) return res.json({ connected: false, error: "OCR_SPACE_API_KEY missing" });
   try {
-    await testOcrSpaceConnection();
-    res.json({ connected: true, message: "OCR Space connected" });
+    const response = await testOcrSpaceConnection();
+    const bodyText = await response.text();
+    let result = null;
+    try { result = bodyText ? JSON.parse(bodyText) : {}; } catch {
+      return res.json({
+        connected: false,
+        error: "OCR provider HTTP error",
+        status: response.status,
+        bodyPreview: bodyText.slice(0, 300)
+      });
+    }
+    if (!response.ok) {
+      return res.json({
+        connected: false,
+        error: "OCR provider HTTP error",
+        status: response.status,
+        bodyPreview: bodyText.slice(0, 300)
+      });
+    }
+    if (result.IsErroredOnProcessing || result.OCRExitCode !== 1) {
+      return res.json({
+        connected: false,
+        error: "OCR Space test failed",
+        ocrExitCode: result.OCRExitCode || null,
+        errorMessage: result.ErrorMessage || result.ErrorDetails || result.error || null,
+        raw: result
+      });
+    }
+    res.json({ connected: true, message: "OCR Space connected", ocrExitCode: result.OCRExitCode });
   } catch (error) {
-    const ocr = error.ocr || {};
     res.json({
       connected: false,
-      error: "OCR Space test failed",
-      ocrExitCode: ocr.OCRExitCode ?? null,
-      errorMessage: ocr.ErrorMessage || ocr.ErrorDetails || error.message || null
+      error: "OCR provider HTTP error",
+      status: error.status || null,
+      bodyPreview: error.message || "OCR provider request failed"
     });
   }
 });
