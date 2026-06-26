@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import twilio from "twilio";
 import multer from "multer";
+import crypto from "crypto";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -275,24 +276,28 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
     if (!restaurantSnap) return res.status(404).json({ ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
     console.info("[Logo Upload] restaurant found", { restaurantId: restaurantIdParam, documentId: restaurantSnap.id });
 
-    const extension = req.file.mimetype === "image/webp" ? "webp" : req.file.mimetype === "image/png" ? "png" : "jpg";
-    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
+    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.jpg`;
     const bucket = getStorage().bucket(storageBucketName);
     const file = bucket.file(storagePath);
     let token = "";
     try {
-      token = crypto.randomUUID();
+      token = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
       await file.save(req.file.buffer, {
-        contentType: req.file.mimetype || "image/png",
-        metadata: { firebaseStorageDownloadTokens: token }
+        metadata: {
+          contentType: req.file.mimetype || "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: token
+          }
+        },
+        resumable: false
       });
-      token = (await file.getMetadata())[0].metadata.firebaseStorageDownloadTokens || token;
     } catch (error) {
       return res.status(500).json({
         ok: false,
-        error: "Firebase Storage bucket upload failed",
+        error: "Firebase Storage logo upload failed",
         bucket: storageBucketName,
-        details: error.message || "Storage upload failed"
+        details: error.message || "Storage upload failed",
+        code: error.code || null
       });
     }
     const logoUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
@@ -300,7 +305,7 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
       restaurantLogoUrl: logoUrl,
       restaurantLogoStoragePath: storagePath,
       logoUrl,
-      updatedAt: FieldValue.serverTimestamp()
+      updatedAt: new Date()
     }, { merge: true });
     res.json({ ok: true, restaurantId: restaurantIdParam, logoUrl, storagePath });
   } catch (error) {
