@@ -881,6 +881,32 @@ import {
     }).format(Number(v || 0));
   }
 
+  function normalizedResetTime(value = "04:00") {
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : "04:00";
+  }
+
+  function businessDateFor(date = new Date(), resetTime = "04:00") {
+    const [hours, minutes] = normalizedResetTime(resetTime).split(":").map(Number);
+    const businessDate = new Date(date);
+    const resetToday = new Date(date);
+    resetToday.setHours(hours, minutes, 0, 0);
+    if (date < resetToday) businessDate.setDate(businessDate.getDate() - 1);
+    return businessDate.toLocaleDateString("en-CA");
+  }
+
+  async function nextDailyOrderMeta(planData = {}) {
+    const dailyResetTime = normalizedResetTime(planData.dailyOrderResetTime || "04:00");
+    const businessDate = businessDateFor(new Date(), dailyResetTime);
+    const counterRef = doc(db, "restaurants", restaurantId, "counters", businessDate);
+    let dailyOrderNo = 0;
+    await runTransaction(db, async transaction => {
+      const counter = await transaction.get(counterRef);
+      dailyOrderNo = Number(counter.exists() ? counter.data().lastDailyOrderNo || 0 : 0) + 1;
+      transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, lastDailyOrderNo: dailyOrderNo, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, displayOrderNo: String(dailyOrderNo) };
+  }
+
   async function bootCustomerPage() {
     const restaurantTitle = document.getElementById("restaurantTitle");
     const tableNoText = document.getElementById("tableNoText");
@@ -1281,6 +1307,7 @@ import {
         const tax = itemsTotal * (taxPercent / 100);
         const grandTotal = itemsTotal + tax;
         const orderId = "ORD" + Date.now();
+        const dailyOrder = await nextDailyOrderMeta(restaurantPlanData);
         let tokenNo = null;
         if (tokenMode) {
           const tokenDate = new Date().toLocaleDateString("en-CA");
@@ -1296,6 +1323,7 @@ import {
 
         await addDoc(collection(db, "orders"), {
           orderId,
+          ...dailyOrder,
           restaurantId,
           tableNo: tokenMode ? null : table,
           tokenNo,
@@ -1327,6 +1355,7 @@ import {
         orderSuccess.classList.remove("hidden");
         orderSuccess.innerHTML = `
           Order placed successfully.<br>
+          <strong>Order No:</strong> ${dailyOrder.displayOrderNo}<br>
           <strong>Order ID:</strong> ${orderId}<br>${tokenNo ? `<strong>Token Number:</strong> ${tokenNo}<br>` : ""}
           <a href="./track.html?orderId=${encodeURIComponent(orderId)}">Track order</a>
         `;

@@ -61,7 +61,8 @@ let settings = {
   restaurantLat: null,
   restaurantLng: null,
   allowedOrderRadiusMeters: 150,
-  locationProtectionEnabled: false
+  locationProtectionEnabled: false,
+  dailyOrderResetTime: '04:00'
 };
 
 // Missing businessMode intentionally remains Restaurant Mode for existing tenants.
@@ -412,6 +413,20 @@ function localTokenDate() {
   return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
 }
 
+function normalizedResetTime(value = '04:00') {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : '04:00';
+}
+
+function businessDateFor(date = new Date(), resetTime = '04:00') {
+  const [hours, minutes] = normalizedResetTime(resetTime).split(':').map(Number);
+  const businessDate = new Date(date);
+  const resetToday = new Date(date);
+  resetToday.setHours(hours, minutes, 0, 0);
+  if (date < resetToday) businessDate.setDate(businessDate.getDate() - 1);
+  const tzOffset = businessDate.getTimezoneOffset() * 60000;
+  return new Date(businessDate.getTime() - tzOffset).toISOString().slice(0, 10);
+}
+
 async function nextVendorToken() {
   const tokenDate = localTokenDate();
   const counterRef = doc(db, 'restaurants', restaurantId, 'counters', `vendor-token-${tokenDate}`);
@@ -425,15 +440,16 @@ async function nextVendorToken() {
 }
 
 async function nextDailyOrderMeta() {
-  const dailyOrderDate = localTokenDate();
-  const counterRef = doc(db, 'restaurants', restaurantId, 'counters', `daily-order-${dailyOrderDate}`);
+  const dailyResetTime = normalizedResetTime(settings.dailyOrderResetTime || '04:00');
+  const businessDate = businessDateFor(new Date(), dailyResetTime);
+  const counterRef = doc(db, 'restaurants', restaurantId, 'counters', businessDate);
   const dailyOrderNo = await runTransaction(db, async transaction => {
     const counter = await transaction.get(counterRef);
     const next = Number(counter.exists() ? counter.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { dailyOrderDate, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
     return next;
   });
-  return { dailyOrderNo, dailyOrderDate, displayOrderNo: String(dailyOrderNo) };
+  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, displayOrderNo: String(dailyOrderNo) };
 }
 
 function mergeItems(existing = [], incoming = []) {
@@ -556,6 +572,7 @@ async function placeOrder() {
     const openOrder = await findOpenOrder();
     let orderId;
     let createdTokenNumber = null;
+    let createdDailyOrder = null;
     const noteVal = customerNote?.value.trim() || '';
     const etaMinutes = 10;
     const fullPhone = `+91${customerPhone.value.trim()}`;
@@ -568,6 +585,7 @@ async function placeOrder() {
       const grandTotal = itemsTotal + tax;
 
       orderId = current.orderId;
+      createdDailyOrder = { displayOrderNo: current.displayOrderNo || current.dailyOrderNo || '-' };
 
       await updateDoc(doc(db, 'orders', openOrder.id), {
         customerName: customerName.value.trim(),
@@ -609,6 +627,7 @@ async function placeOrder() {
       const vendorToken = isVendorMode() ? await nextVendorToken() : { tokenDate: null, tokenNumber: null };
       createdTokenNumber = vendorToken.tokenNumber;
       const dailyOrder = await nextDailyOrderMeta();
+      createdDailyOrder = dailyOrder;
       const payload = {
         orderId,
         ...dailyOrder,
@@ -662,6 +681,7 @@ async function placeOrder() {
       orderSuccess.classList.remove('hidden');
       orderSuccess.innerHTML = `
         Order saved successfully.<br>
+        <b>Order No:</b> ${escapeHtml(createdDailyOrder?.displayOrderNo || '-')}<br>
         <b>${isVendorMode() ? 'Token' : 'Order ID'}:</b> ${escapeHtml(isVendorMode() ? `T-${createdTokenNumber}` : orderId)}<br>
         <a href="./track.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Track this order</a>
         |

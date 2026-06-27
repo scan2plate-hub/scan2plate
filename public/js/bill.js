@@ -92,6 +92,7 @@ async function load() {
             <h1 style="margin:0">${escapeHtml(settings.restaurantName || 'Restaurant')}</h1>
             <div class="muted">${escapeHtml(settings.address || 'Add address in settings')}</div>
             <div class="muted">Phone: ${escapeHtml(settings.phone || '-')}</div>
+            <div class="muted">Order No: ${escapeHtml(order.displayOrderNo || order.dailyOrderNo || '-')}</div>
             <div class="muted">Order ID: ${escapeHtml(order.orderId || '-')}</div>
             <div class="muted">Date: ${nowStr(order.createdAt)}</div>
           </div>

@@ -282,6 +282,7 @@ const removeRestaurantLogoBtn = document.getElementById("removeRestaurantLogoBtn
 const restaurantHelpNumberFieldEl = document.getElementById("restaurantHelpNumberField");
 const restaurantSignatureMessageFieldEl = document.getElementById("restaurantSignatureMessageField");
 const billFooterMessageFieldEl = document.getElementById("billFooterMessageField");
+const dailyOrderResetTimeFieldEl = document.getElementById("dailyOrderResetTimeField");
 const showQrOnPaidBillsFieldEl = document.getElementById("showQrOnPaidBillsField");
 const kitchenWhatsAppFieldEl = document.getElementById("kitchenWhatsAppField");
 const backendUrlFieldEl = document.getElementById("backendUrlField");
@@ -573,16 +574,30 @@ function todayDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function normalizedResetTime(value = "04:00") {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : "04:00";
+}
+
+function businessDateFor(date = new Date(), resetTime = "04:00") {
+  const [hours, minutes] = normalizedResetTime(resetTime).split(":").map(Number);
+  const businessDate = new Date(date);
+  const resetToday = new Date(date);
+  resetToday.setHours(hours, minutes, 0, 0);
+  if (date < resetToday) businessDate.setDate(businessDate.getDate() - 1);
+  return `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, "0")}-${String(businessDate.getDate()).padStart(2, "0")}`;
+}
+
 async function nextDailyOrderMeta() {
-  const dailyOrderDate = todayDateStr();
-  const counterRef = doc(db, "restaurants", restaurantId, "counters", `daily-order-${dailyOrderDate}`);
+  const dailyResetTime = normalizedResetTime(restaurantSettings.dailyOrderResetTime || dailyOrderResetTimeFieldEl?.value || "04:00");
+  const businessDate = businessDateFor(new Date(), dailyResetTime);
+  const counterRef = doc(db, "restaurants", restaurantId, "counters", businessDate);
   const dailyOrderNo = await runTransaction(db, async transaction => {
     const snap = await transaction.get(counterRef);
     const next = Number(snap.exists() ? snap.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { dailyOrderDate, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
     return next;
   });
-  return { dailyOrderNo, dailyOrderDate, displayOrderNo: String(dailyOrderNo) };
+  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, displayOrderNo: String(dailyOrderNo) };
 }
 
 function timestampToDate(ts) {
@@ -1329,6 +1344,7 @@ async function loadSettings() {
     if (restaurantHelpNumberFieldEl) restaurantHelpNumberFieldEl.value = restaurantSettings.restaurantHelpNumber || "";
     if (restaurantSignatureMessageFieldEl) restaurantSignatureMessageFieldEl.value = restaurantSettings.restaurantSignatureMessage || "";
     if (billFooterMessageFieldEl) billFooterMessageFieldEl.value = restaurantSettings.billFooterMessage || "";
+    if (dailyOrderResetTimeFieldEl) dailyOrderResetTimeFieldEl.value = normalizedResetTime(restaurantSettings.dailyOrderResetTime || "04:00");
     if (showQrOnPaidBillsFieldEl) showQrOnPaidBillsFieldEl.checked = restaurantSettings.showQrOnPaidBills !== false;
     setLogoPreview(getRestaurantLogoUrl());
     if (kitchenWhatsAppFieldEl) kitchenWhatsAppFieldEl.value = restaurantSettings.kitchenWhatsApp || "";
@@ -1423,6 +1439,7 @@ async function saveSettings() {
       restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
       restaurantSignatureMessage: restaurantSignatureMessageFieldEl?.value.trim() || "",
       billFooterMessage: billFooterMessageFieldEl?.value.trim() || "",
+      dailyOrderResetTime: normalizedResetTime(dailyOrderResetTimeFieldEl?.value || "04:00"),
       showQrOnPaidBills: showQrOnPaidBillsFieldEl?.checked !== false,
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
       backendUrl: backendUrlFieldEl?.value.trim() || "",
@@ -1446,6 +1463,7 @@ async function saveSettings() {
           businessMode: payload.businessMode,
           orderMode: payload.orderMode,
           tableCount: payload.tableCount,
+          dailyOrderResetTime: payload.dailyOrderResetTime,
           restaurantLogoUrl: payload.restaurantLogoUrl,
           restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
           logoUrl: payload.logoUrl,
@@ -2758,7 +2776,7 @@ if (billAddressEl) {
 }
 
 function billDisplayOrderNo(order = {}) {
-  return order.displayOrderNo || order.dailyOrderNo || (order.orderId ? String(order.orderId).replace(/^ORD/i, "").slice(-4).replace(/^0+/, "") : "-") || "-";
+  return order.displayOrderNo || order.dailyOrderNo || "-";
 }
 
 function thermalBillItemRows(items = []) {
@@ -3265,6 +3283,7 @@ function buildKotPrintHtml(order = {}, items = [], label = "") {
     <div class="kot-title">KITCHEN ORDER TICKET</div>
     <div class="kot-divider"></div>
     ${label ? `<div class="kot-label-banner">${escapeHtml(label)}</div><div class="kot-row"><span class="kot-label">KOT Type:</span><span class="kot-value">${escapeHtml(kotType)}</span></div>${kotType.includes("NEW") ? `<div class="kot-center" style="font-weight:800;">Add-on KOT</div>` : ""}<div class="kot-divider"></div>` : ""}
+    <div class="kot-row"><span class="kot-label">Order No:</span><span class="kot-value">${escapeHtml(billDisplayOrderNo(order))}</span></div>
     <div class="kot-row"><span class="kot-label">KOT #:</span><span class="kot-value">${escapeHtml(kotNumber)}</span></div>
     <div class="kot-row"><span class="kot-label">${escapeHtml(kotLocationLabel(order))}:</span><span class="kot-value">${escapeHtml(kotLocationValue(order))}</span></div>
     <div class="kot-row"><span class="kot-label">Customer:</span><span class="kot-value">${escapeHtml(order.customerName || "-")}</span></div>
@@ -3420,7 +3439,8 @@ function renderOrdersList(targetEl, orders) {
       <div class="order-card">
         <div class="order-header">
           <div>
-            <div class="order-id">${escapeHtml(o.orderId || o.id)}</div>
+            <div class="order-id">Order No: ${escapeHtml(billDisplayOrderNo(o))}</div>
+            <div class="order-time">Order ID: ${escapeHtml(o.orderId || o.id)}</div>
             <div class="order-time">${escapeHtml(formatDateTime(o.createdAt))}</div>
           </div>
           <div class="order-status ${getStatusClass(o.status)}">${escapeHtml(o.businessMode === "vendor" && String(o.status || "").toLowerCase() === "pending" ? "New" : o.status || "pending")}</div>
@@ -3647,7 +3667,7 @@ function renderReportRows(filteredOrders = getFilteredReportOrders()) {
   renderPaymentBreakdown(filteredOrders);
   renderBestSellingReport(filteredOrders);
   renderTableWiseReport(filteredOrders);
-  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${item.name} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="8"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${item.name} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
   reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
 }
 
@@ -3659,7 +3679,7 @@ function reportLabel() {
 }
 
 function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
-  const rows = [["Order ID", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(order => [order.orderId || order.id, formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${item.name} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)])];
+  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(order => [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${item.name} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)])];
   const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
