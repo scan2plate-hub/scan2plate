@@ -25,7 +25,7 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
+const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const twilioRequired = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"];
 const missing = twilioRequired.filter(key => !process.env[key]);
@@ -332,6 +332,7 @@ app.get("/api/health", (_, res) => res.json({
   service: "scan2plate-backend",
   storageBucket: storageBucketName,
   firebaseAdminReady: adminReady,
+  logoUploadRoute: true,
   ocrKeyConfigured: Boolean(ocrKey()),
   ocrKeyLength: ocrKey().length,
   aiHelpEnabled: process.env.AI_HELP_ENABLED !== "false",
@@ -455,39 +456,41 @@ app.post("/notify-order", async (req, res) => {
 });
 
 app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) => {
-  logoUpload.single("file")(req, res, error => {
+  logoUpload.fields([{ name: "logo", maxCount: 1 }, { name: "file", maxCount: 1 }, { name: "image", maxCount: 1 }])(req, res, error => {
     if (!error) return next();
-    if (error.code === "LIMIT_FILE_SIZE") return res.status(413).json({ ok: false, error: "Logo image must be 1MB or smaller after compression." });
+    if (error.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, ok: false, error: "Logo image must be 5MB or smaller." });
     return res.status(400).json({ ok: false, error: error.message || "Logo upload failed." });
   });
 }, async (req, res) => {
   try {
     const restaurantIdParam = String(req.params.restaurantId || "").trim();
+    const uploadedLogo = req.file || req.files?.logo?.[0] || req.files?.file?.[0] || req.files?.image?.[0] || null;
     console.info("[Logo Upload]", {
       restaurantId: restaurantIdParam,
-      fileMimetype: req.file?.mimetype || "",
-      fileSize: req.file?.size || 0
+      fileMimetype: uploadedLogo?.mimetype || "",
+      fileSize: uploadedLogo?.size || 0
     });
-    if (!restaurantIdParam) return res.status(400).json({ ok: false, error: "restaurantId missing" });
-    if (!req.file) return res.status(400).json({ ok: false, error: "Logo file is required." });
-    if (!String(req.file.mimetype || "").startsWith("image/")) return res.status(415).json({ ok: false, error: "Use an image logo file." });
-    if (req.file.size > 1024 * 1024) return res.status(413).json({ ok: false, error: "Logo image must be 1MB or smaller after compression." });
-    if (!adminReady) return res.status(503).json({ ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
-    if (!storageBucketName) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
+    if (!restaurantIdParam) return res.status(400).json({ success: false, ok: false, error: "restaurantId missing" });
+    if (!uploadedLogo) return res.status(400).json({ success: false, ok: false, error: "Logo file is required. Use form-data field logo, file, or image." });
+    if (!String(uploadedLogo.mimetype || "").startsWith("image/")) return res.status(415).json({ success: false, ok: false, error: "Use an image logo file." });
+    if (uploadedLogo.size > 5 * 1024 * 1024) return res.status(413).json({ success: false, ok: false, error: "Logo image must be 5MB or smaller." });
+    if (!adminReady) return res.status(503).json({ success: false, ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
+    if (!storageBucketName) return res.status(503).json({ success: false, ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
 
     const restaurantSnap = await findRestaurantDocByBusinessId(restaurantIdParam);
-    if (!restaurantSnap) return res.status(404).json({ ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
+    if (!restaurantSnap) return res.status(404).json({ success: false, ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
     console.info("[Logo Upload] restaurant found", { restaurantId: restaurantIdParam, documentId: restaurantSnap.id });
 
-    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.jpg`;
+    const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "image/jpg": "jpg" })[String(uploadedLogo.mimetype || "").toLowerCase()] || "jpg";
+    const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
     const bucket = getStorage().bucket(storageBucketName);
     const file = bucket.file(storagePath);
     let token = "";
     try {
       token = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
-      await file.save(req.file.buffer, {
+      await file.save(uploadedLogo.buffer, {
         metadata: {
-          contentType: req.file.mimetype || "image/jpeg",
+          contentType: uploadedLogo.mimetype || "image/jpeg",
           metadata: {
             firebaseStorageDownloadTokens: token
           }
@@ -496,6 +499,7 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
       });
     } catch (error) {
       return res.status(500).json({
+        success: false,
         ok: false,
         error: "Firebase Storage logo upload failed",
         bucket: storageBucketName,
@@ -510,10 +514,13 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
       logoUrl,
       updatedAt: new Date()
     }, { merge: true });
-    res.json({ ok: true, restaurantId: restaurantIdParam, logoUrl, storagePath });
+    res.json({ success: true, ok: true, restaurantId: restaurantIdParam, logoUrl, storagePath });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message || "Logo upload failed." });
+    res.status(500).json({ success: false, ok: false, error: error.message || "Logo upload failed." });
   }
+});
+app.all("/api/restaurants/:restaurantId/logo", (_, res) => {
+  res.status(405).json({ success: false, ok: false, error: "Use POST multipart/form-data with field logo, file, or image." });
 });
 
 async function scanSupplierBill(req, res) {

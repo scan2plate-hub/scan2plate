@@ -46,7 +46,7 @@ export function mountSafeReset({ restaurantId, role, host, panelName = "Admin", 
   const deleteCompletedOrders = async () => { const orders = await getDocs(query(collection(db, "orders"), where("restaurantId", "==", restaurantId))); await deleteSnapshots(orders.docs.filter(row => ["completed", "served", "cancelled", "rejected"].includes(String(row.data().status || "").toLowerCase()) || row.data().billClosed === true)); };
   const resetTableStatus = async () => {
     const tables = await getDocs(collection(db, "restaurants", restaurantId, "tables"));
-    for (const part of chunks(tables.docs)) { const batch = writeBatch(db); part.forEach(row => batch.set(row.ref, { active: true, disabled: false, currentOrderId: null, activeBillId: null, updatedAt: serverTimestamp() }, { merge: true })); await batch.commit(); }
+    for (const part of chunks(tables.docs)) { const batch = writeBatch(db); part.forEach(row => batch.set(row.ref, { status: "available", active: true, disabled: false, currentOrderId: null, activeBillId: null, customerName: null, billStatus: null, updatedAt: serverTimestamp() }, { merge: true })); await batch.commit(); }
   };
   const resetStaffFields = async (field) => {
     const staff = await getDocs(collection(db, "restaurants", restaurantId, "staff"));

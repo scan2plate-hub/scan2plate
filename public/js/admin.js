@@ -1013,8 +1013,11 @@ async function compressLogoFile(file) {
 function logoBackendUrl() {
   const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
   const savedUrl = String(configuredOverride || restaurantSettings.backendUrl || "").trim();
-  if (savedUrl) return savedUrl.replace(/\/+$/, "");
-  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) return "https://scan2serve-backend.onrender.com";
+  if (savedUrl) {
+    const normalized = savedUrl.replace(/\/+$/, "");
+    if (!/^https:\/\/scan2plate\.com$/i.test(normalized) && normalized !== window.location.origin) return normalized;
+  }
+  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) return "https://scan2plate.onrender.com";
   throw new Error("Backend URL missing. Please set Backend URL in Payment Settings.");
 }
 
@@ -1033,9 +1036,10 @@ async function uploadRestaurantLogoWithFirebase(file) {
 async function uploadRestaurantLogoWithBackend(file) {
   if (!file) return null;
   if (!restaurantId) throw new Error("restaurantId missing");
+  const backendUrl = logoBackendUrl();
   const form = new FormData();
-  form.append("file", file, `logo-${Date.now()}.jpg`);
-  const response = await fetch(`${logoBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/logo`, {
+  form.append("logo", file, file.name || `logo-${Date.now()}.jpg`);
+  const response = await fetch(`${backendUrl}/api/restaurants/${encodeURIComponent(restaurantId)}/logo`, {
     method: "POST",
     headers: await purchaseAuthHeaders(),
     body: form
@@ -1045,7 +1049,7 @@ async function uploadRestaurantLogoWithBackend(file) {
   try { data = text ? JSON.parse(text) : {}; } catch {}
   if (!response.ok || data.ok === false) {
     const detail = data.error || text || response.statusText;
-    throw new Error(data.error ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}: ${detail}`);
+    throw new Error(`Logo upload failed. Backend URL: ${backendUrl}; restaurantId: ${restaurantId}; HTTP ${response.status}; ${detail}`);
   }
   if (!data.logoUrl) throw new Error("Backend upload did not return logoUrl.");
   return { url: data.logoUrl, path: data.storagePath || "" };
@@ -1138,12 +1142,6 @@ function getTableOptions() {
   const seen = new Set();
   const count = Math.max(1, Number(restaurantSettings.tableCount || 20));
   for (let i = 1; i <= count; i++) seen.add(String(i).padStart(2, "0"));
-  managedTables.filter(table => table.disabled !== true).forEach(table => seen.add(String(table.tableNo || table.id).padStart(2,"0")));
-
-  allOrders.forEach(order => {
-    const t = String(order.tableNo || "").trim();
-    if (t) seen.add(t);
-  });
 
   return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
@@ -1626,6 +1624,12 @@ async function saveSettings() {
     restaurantLogoMarkedForRemoval = false;
     if (logoFieldEl) logoFieldEl.value = payload.logoUrl || "";
     await loadSettings();
+    if (payload.logoUrl) {
+      document.querySelectorAll(".app-logo").forEach(img => {
+        img.src = payload.logoUrl;
+        img.style.display = "";
+      });
+    }
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
@@ -2442,34 +2446,71 @@ function startInventoryListeners() {
 /* =========================================================
    TABLES
 ========================================================= */
+function tableBusinessDayRange(now = new Date()) {
+  const resetTime = normalizedResetTime(restaurantSettings.businessDayStartTime || restaurantSettings.dailyOrderResetTime || "04:00");
+  const [hours, minutes] = resetTime.split(":").map(Number);
+  const start = new Date(now);
+  start.setHours(hours, minutes, 0, 0);
+  if (now < start) start.setDate(start.getDate() - 1);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  end.setMilliseconds(end.getMilliseconds() - 1);
+  return { start, end };
+}
+
+function orderInRange(order = {}, range = tableBusinessDayRange()) {
+  const date = orderCreatedDate(order);
+  return Boolean(date && date >= range.start && date <= range.end);
+}
+
+function isTableOccupyingOrder(order = {}, range = tableBusinessDayRange()) {
+  if (!order) return false;
+  const status = String(order.status || "pending").toLowerCase();
+  const payment = String(order.paymentStatus || "unpaid").toLowerCase();
+  const closedStatuses = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed"]);
+  if (order.billClosed === true || closedStatuses.has(payment) || closedStatuses.has(status)) return false;
+  const occupyingStatuses = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting"]);
+  const activeUnpaid = occupyingStatuses.has(status) || payment === "unpaid";
+  return activeUnpaid && (orderInRange(order, range) || payment !== "paid");
+}
+
+function getTableStatus(tableNo, tableOrders = [], managedTable = {}, range = tableBusinessDayRange()) {
+  const disabled = managedTable.disabled === true || managedTable.active === false;
+  const sorted = [...tableOrders].sort((a, b) => tsToMs(orderCreatedDate(b)) - tsToMs(orderCreatedDate(a)));
+  const activeOrder = sorted.find(order => isTableOccupyingOrder(order, range));
+  const recentOrder = sorted.find(order => orderInRange(order, range));
+  if (disabled) return { state: "disabled", disabled: true, occupied: false, label: "Disabled", order: recentOrder || activeOrder || null };
+  if (activeOrder) return { state: "occupied", disabled: false, occupied: true, label: "Customer Sitting", order: activeOrder };
+  if (recentOrder && (recentOrder.billClosed === true || ["paid", "completed", "closed", "bill_closed"].includes(String(recentOrder.status || "").toLowerCase()) || String(recentOrder.paymentStatus || "").toLowerCase() === "paid")) {
+    return { state: "available", disabled: false, occupied: false, label: "Bill Closed", order: recentOrder };
+  }
+  return { state: "available", disabled: false, occupied: false, label: "Available", order: null };
+}
+
 function renderTablesSection() {
   if (!tablesGridEl || !tableSummaryEl) return;
 
-  const displayOrderByTable = new Map();
+  const tableOrdersByNo = new Map();
+  const businessRange = tableBusinessDayRange();
 
   allOrders.forEach(order => {
-    const tableNo = String(order.tableNo || "").trim();
+    const tableNo = String(order.tableNo || "").trim().padStart(2, "0");
     if (!tableNo) return;
-
-    const current = displayOrderByTable.get(tableNo);
-    const currentTs = tsToMs(orderCreatedDate(current));
-    const orderTs = tsToMs(orderCreatedDate(order));
-    const currentActive = isOrderActive(current);
-    const orderActive = isOrderActive(order);
-
-    if (!current || (orderActive && !currentActive) || (orderActive === currentActive && orderTs >= currentTs)) {
-      displayOrderByTable.set(tableNo, order);
-    }
+    const orders = tableOrdersByNo.get(tableNo) || [];
+    orders.push(order);
+    tableOrdersByNo.set(tableNo, orders);
   });
 
   const tableOptions = getTableOptions();
-  const disabledTableNos = new Set(managedTables.filter(table => table.disabled === true || table.active === false).map(table => String(table.tableNo || table.id).padStart(2, "0")));
   const managedTableByNo = new Map(managedTables.map(table => [String(table.tableNo || table.id).padStart(2, "0"), table]));
+  const tableStatuses = tableOptions.map(tableNo => ({
+    tableNo,
+    ...getTableStatus(tableNo, tableOrdersByNo.get(tableNo) || [], managedTableByNo.get(tableNo) || {}, businessRange)
+  }));
 
-  const openCount = [...displayOrderByTable.values()].filter(isOrderActive).length;
-
-  const disabledCount = disabledTableNos.size;
-  const closedCount = Math.max(0, tableOptions.length - openCount - disabledCount);
+  const openCount = tableStatuses.filter(table => table.occupied).length;
+  const disabledCount = tableStatuses.filter(table => table.disabled).length;
+  const availableCount = tableStatuses.length - openCount - disabledCount;
 
   tableSummaryEl.innerHTML = `
     <div class="stat-card">
@@ -2478,25 +2519,21 @@ function renderTablesSection() {
     </div>
     <div class="stat-card">
       <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
-      <div class="stat-info"><h3>Available Tables</h3><div class="value">${closedCount}</div></div>
+      <div class="stat-info"><h3>Available Tables</h3><div class="value">${availableCount}</div></div>
     </div>
     <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-table"></i></div><div class="stat-info"><h3>Total Tables</h3><div class="value">${tableOptions.length}</div></div></div>
     <div class="stat-card"><div class="stat-icon danger"><i class="fas fa-ban"></i></div><div class="stat-info"><h3>Disabled Tables</h3><div class="value">${disabledCount}</div></div></div>
   `;
 
   const tableSearch = String(tableSearchEl?.value || "").trim().toLowerCase();
-  const visibleTableOptions = tableOptions.filter(tableNo => {
-    const normalizedTableNo = String(tableNo).padStart(2, "0");
-    const disabled = disabledTableNos.has(normalizedTableNo);
-    const managedTable = managedTableByNo.get(normalizedTableNo) || {};
-    const order = displayOrderByTable.get(tableNo);
-    const occupied = isOrderActive(order);
-    const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
-    const searchText = `table ${tableNo} ${normalizedTableNo} ${managedTable.name || managedTable.tableName || ""} ${statusText} ${order?.customerName || ""} ${order?.orderId || ""}`.toLowerCase();
+  const visibleTableStatuses = tableStatuses.filter(table => {
+    const managedTable = managedTableByNo.get(table.tableNo) || {};
+    const order = table.order;
+    const searchText = `table ${table.tableNo} ${managedTable.name || managedTable.tableName || ""} ${table.label} ${order?.customerName || ""} ${order?.orderId || ""}`.toLowerCase();
     return !tableSearch || searchText.includes(tableSearch);
   });
 
-  if (!visibleTableOptions.length) {
+  if (!visibleTableStatuses.length) {
     tablesGridEl.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1;">
         <i class="fas fa-table"></i>
@@ -2506,17 +2543,14 @@ function renderTablesSection() {
     return;
   }
 
-  tablesGridEl.innerHTML = visibleTableOptions.map(tableNo => {
-    const disabled = disabledTableNos.has(String(tableNo).padStart(2, "0"));
-    const order = displayOrderByTable.get(tableNo);
-    const occupied = isOrderActive(order);
-
-    const cardClass = disabled ? "disabled" : (occupied ? "occupied" : "available");
-    const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
-    const orderText = order?.orderId ? `Order: ${order.orderId}` : "No recent bill";
+  tablesGridEl.innerHTML = visibleTableStatuses.map(table => {
+    const { tableNo, order, occupied, disabled } = table;
+    const cardClass = table.state;
+    const statusText = table.label;
+    const orderText = occupied && order?.orderId ? `Order: ${order.orderId}` : (statusText === "Bill Closed" ? "Bill closed" : "No active bill");
     const customerText = occupied
       ? order.customerName || "Walk-in"
-      : order?.customerName || "Ready for next customer";
+      : "Ready for next customer";
 
     const actionBtn = disabled
       ? `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="false">Enable Table</button>`
