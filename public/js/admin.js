@@ -4,6 +4,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
+  where,
   addDoc,
   setDoc,
   updateDoc,
@@ -49,6 +51,55 @@ if (!restaurantId) {
   alert("Restaurant ID not found. Please login again.");
   window.location.href = "./admin-login.html";
   throw new Error("Restaurant ID missing");
+}
+
+const isDevHost = ["localhost", "127.0.0.1"].includes(location.hostname);
+const devLog = (...args) => { if (isDevHost) console.log("[Scan2Plate Admin]", ...args); };
+let adminInitialLoadDone = false;
+let adminLoadTimeout = null;
+
+function ensureLoadingNotice() {
+  let notice = document.getElementById("adminLoadingNotice");
+  if (notice) return notice;
+  notice = document.createElement("div");
+  notice.id = "adminLoadingNotice";
+  notice.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:99999;display:none;max-width:min(92vw,520px);padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;box-shadow:0 14px 45px rgba(0,0,0,.12);font-size:13px;font-weight:700;";
+  notice.innerHTML = `<div id="adminLoadingNoticeText">Taking longer than expected. Please check internet and retry.</div><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;"><button id="adminRetryLoadBtn" class="btn btn-sm btn-primary" type="button">Retry</button><button id="adminLoginAgainBtn" class="btn btn-sm btn-outline" type="button">Logout/Login Again</button></div><details style="margin-top:8px;font-weight:500;"><summary>Debug</summary><pre id="adminLoadingDebug" style="white-space:pre-wrap;font-size:11px;margin:6px 0 0;"></pre></details>`;
+  document.body.appendChild(notice);
+  document.getElementById("adminRetryLoadBtn")?.addEventListener("click", () => location.reload());
+  document.getElementById("adminLoginAgainBtn")?.addEventListener("click", () => {
+    localStorage.removeItem("scan2plate_user");
+    localStorage.removeItem("scan2serve_user");
+    location.href = "./admin-login.html";
+  });
+  return notice;
+}
+
+function showLoadingNotice(message = "Taking longer than expected. Please check internet and retry.", error = null) {
+  const notice = ensureLoadingNotice();
+  const text = document.getElementById("adminLoadingNoticeText");
+  const debug = document.getElementById("adminLoadingDebug");
+  if (text) text.textContent = message;
+  if (debug) debug.textContent = error ? String(error?.message || error) : `restaurantId: ${restaurantId || "missing"}`;
+  notice.style.display = "block";
+}
+
+function hideLoadingNotice() {
+  const notice = document.getElementById("adminLoadingNotice");
+  if (notice) notice.style.display = "none";
+}
+
+function startInitialLoadTimeout(pageName = "Admin Dashboard") {
+  clearTimeout(adminLoadTimeout);
+  adminLoadTimeout = setTimeout(() => {
+    if (!adminInitialLoadDone) showLoadingNotice("Taking longer than expected. Please check internet and retry.", `${pageName} load exceeded 8 seconds. restaurantId=${restaurantId || "missing"}`);
+  }, 8000);
+}
+
+function markInitialLoadDone() {
+  adminInitialLoadDone = true;
+  clearTimeout(adminLoadTimeout);
+  hideLoadingNotice();
 }
 
 /* =========================================================
@@ -385,7 +436,7 @@ let editingOrderPublicId = null;
 
 let selectedManualCategory = "all";
 let selectedMenuCategory = "all";
-let selectedOrderFilter = "all";
+let selectedOrderFilter = "active";
 let selectedReportType = "daily";
 
 let ordersUnsubscribe = null;
@@ -622,6 +673,47 @@ function formatDateOnly(ts) {
   const d = timestampToDate(ts);
   if (!d) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getTodayRange() {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setHours(23, 59, 59, 999);
+  return { startOfDay, endOfDay };
+}
+
+function orderCreatedDate(order = {}) {
+  return timestampToDate(order.createdAt) ||
+    timestampToDate(order.orderTime) ||
+    timestampToDate(order.timestamp) ||
+    timestampToDate(order.date) ||
+    timestampToDate(order.updatedAt);
+}
+
+function isOrderToday(order = {}) {
+  const date = orderCreatedDate(order);
+  if (!date) return false;
+  const { startOfDay, endOfDay } = getTodayRange();
+  return date >= startOfDay && date <= endOfDay;
+}
+
+function isOrderActive(order = {}) {
+  const status = String(order.status || "pending").toLowerCase();
+  const payment = String(order.paymentStatus || "unpaid").toLowerCase();
+  return ["pending", "accepted", "preparing", "ready"].includes(status) &&
+    payment !== "paid" &&
+    order.billClosed !== true;
+}
+
+function isOrderCompleted(order = {}) {
+  const status = String(order.status || "").toLowerCase();
+  const payment = String(order.paymentStatus || "").toLowerCase();
+  return ["served", "completed"].includes(status) || payment === "paid";
+}
+
+function orderAmount(order = {}) {
+  return Number(order.grandTotal ?? order.totalAmount ?? order.total ?? order.amount ?? 0);
 }
 
 function formatBillDate(ts) {
@@ -2285,16 +2377,16 @@ function startInventoryListeners() {
   inventoryUnsubscribe = onSnapshot(collection(db, "restaurants", restaurantId, "inventory"), snap => {
     allInventoryItems = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => String(a.itemName).localeCompare(String(b.itemName)));
     renderInventory();
-  });
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
   inventoryLogsUnsubscribe = onSnapshot(collection(db, "restaurants", restaurantId, "inventory_logs"), snap => {
     inventoryLogs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     renderInventoryHistory();
     renderInventoryReports(allInventoryItems.filter(inventoryStatus));
-  });
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
   onSnapshot(collection(db, "restaurants", restaurantId, "purchase_bills"), snap => {
     purchaseBills = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.uploadedAt?.seconds || 0) - (a.uploadedAt?.seconds || 0));
     renderPurchaseHistory();
-  });
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
 }
 
 /* =========================================================
@@ -2303,18 +2395,20 @@ function startInventoryListeners() {
 function renderTablesSection() {
   if (!tablesGridEl || !tableSummaryEl) return;
 
-  const latestOrderByTable = new Map();
+  const displayOrderByTable = new Map();
 
   allOrders.forEach(order => {
     const tableNo = String(order.tableNo || "").trim();
     if (!tableNo) return;
 
-    const current = latestOrderByTable.get(tableNo);
-    const currentTs = current?.createdAt?.seconds || 0;
-    const orderTs = order?.createdAt?.seconds || 0;
+    const current = displayOrderByTable.get(tableNo);
+    const currentTs = tsToMs(orderCreatedDate(current));
+    const orderTs = tsToMs(orderCreatedDate(order));
+    const currentActive = isOrderActive(current);
+    const orderActive = isOrderActive(order);
 
-    if (!current || orderTs >= currentTs) {
-      latestOrderByTable.set(tableNo, order);
+    if (!current || (orderActive && !currentActive) || (orderActive === currentActive && orderTs >= currentTs)) {
+      displayOrderByTable.set(tableNo, order);
     }
   });
 
@@ -2322,12 +2416,7 @@ function renderTablesSection() {
   const disabledTableNos = new Set(managedTables.filter(table => table.disabled === true || table.active === false).map(table => String(table.tableNo || table.id).padStart(2, "0")));
   const managedTableByNo = new Map(managedTables.map(table => [String(table.tableNo || table.id).padStart(2, "0"), table]));
 
-  const openCount = [...latestOrderByTable.values()].filter(order => {
-    if (!order) return false;
-    const status = String(order.status || "").toLowerCase();
-    const payment = String(order.paymentStatus || "").toLowerCase();
-    return payment !== "paid" && !["served", "completed", "cancelled", "rejected"].includes(status) && order.billClosed !== true;
-  }).length;
+  const openCount = [...displayOrderByTable.values()].filter(isOrderActive).length;
 
   const disabledCount = disabledTableNos.size;
   const closedCount = Math.max(0, tableOptions.length - openCount - disabledCount);
@@ -2350,15 +2439,8 @@ function renderTablesSection() {
     const normalizedTableNo = String(tableNo).padStart(2, "0");
     const disabled = disabledTableNos.has(normalizedTableNo);
     const managedTable = managedTableByNo.get(normalizedTableNo) || {};
-    const order = latestOrderByTable.get(tableNo);
-    const payment = String(order?.paymentStatus || "").toLowerCase();
-    const status = String(order?.status || "").toLowerCase();
-    const occupied = Boolean(
-      order &&
-      payment !== "paid" &&
-      !["served", "completed", "cancelled", "rejected"].includes(status) &&
-      order.billClosed !== true
-    );
+    const order = displayOrderByTable.get(tableNo);
+    const occupied = isOrderActive(order);
     const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
     const searchText = `table ${tableNo} ${normalizedTableNo} ${managedTable.name || managedTable.tableName || ""} ${statusText} ${order?.customerName || ""} ${order?.orderId || ""}`.toLowerCase();
     return !tableSearch || searchText.includes(tableSearch);
@@ -2376,17 +2458,8 @@ function renderTablesSection() {
 
   tablesGridEl.innerHTML = visibleTableOptions.map(tableNo => {
     const disabled = disabledTableNos.has(String(tableNo).padStart(2, "0"));
-    const order = latestOrderByTable.get(tableNo);
-
-    const payment = String(order?.paymentStatus || "").toLowerCase();
-    const status = String(order?.status || "").toLowerCase();
-
-    const occupied = Boolean(
-      order &&
-      payment !== "paid" &&
-      !["served", "completed", "cancelled", "rejected"].includes(status) &&
-      order.billClosed !== true
-    );
+    const order = displayOrderByTable.get(tableNo);
+    const occupied = isOrderActive(order);
 
     const cardClass = disabled ? "disabled" : (occupied ? "occupied" : "available");
     const statusText = disabled ? "Disabled" : (occupied ? "Customer Sitting" : "Bill Closed");
@@ -3493,17 +3566,10 @@ async function printManualKotItems(mode = "all") {
 ========================================================= */
 function getFilteredActiveOrders() {
   return allOrders.filter(o => {
-    const status = String(o.status || "").toLowerCase();
-    const payment = String(o.paymentStatus || "").toLowerCase();
-
-    const isActive =
-      ["pending", "accepted", "preparing", "ready"].includes(status) &&
-      payment !== "paid" &&
-      o.billClosed !== true;
-
-    if (!isActive) return false;
     if (selectedOrderFilter === "all") return true;
-    return status === selectedOrderFilter;
+    if (selectedOrderFilter === "today") return isOrderToday(o);
+    if (selectedOrderFilter === "completed") return isOrderCompleted(o);
+    return isOrderActive(o);
   });
 }
 
@@ -3689,9 +3755,9 @@ function renderBestSelling(orders) {
 ========================================================= */
 function filterOrdersByReportType(type, date, month, year, startDate, endDate) {
   return allOrders.filter(order => {
-    const orderDate = timestampToDate(order.createdAt);
+    const orderDate = orderCreatedDate(order);
     if (!orderDate) return false;
-    const day = formatDateOnly(order.createdAt);
+    const day = formatDateOnly(orderDate);
     const orderMonth = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, "0")}`;
     if (type === "daily") return !date || day === date;
     if (type === "monthly") return !month || orderMonth === month;
@@ -3873,42 +3939,31 @@ function processOrdersSnapshot(snap) {
   allOrders = snap.docs
     .map(d => ({ id: d.id, ...d.data() }))
     .filter(o => String(o.restaurantId || "") === restaurantId)
-    .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    .sort((a, b) => tsToMs(orderCreatedDate(b)) - tsToMs(orderCreatedDate(a)));
 
-  const today = todayDateStr();
-
-  const todayOrders = allOrders.filter(o => formatDateOnly(o.createdAt) === today);
-
-  const activeOrders = allOrders.filter(o => {
-    const status = String(o.status || "").toLowerCase();
-    const payment = String(o.paymentStatus || "").toLowerCase();
-    return ["pending", "accepted", "preparing", "ready"].includes(status) &&
-      payment !== "paid" &&
-      o.billClosed !== true;
-  });
-
-  const completedOrders = allOrders.filter(o => {
-    const status = String(o.status || "").toLowerCase();
-    const payment = String(o.paymentStatus || "").toLowerCase();
-    return ["served", "completed"].includes(status) || payment === "paid";
-  });
+  const todayOrders = allOrders.filter(isOrderToday);
+  const activeOrders = allOrders.filter(isOrderActive);
+  const todayActiveOrders = todayOrders.filter(isOrderActive);
+  const completedOrders = todayOrders.filter(isOrderCompleted);
 
   const todayRevenue = todayOrders
-    .filter(o => String(o.paymentStatus || "").toLowerCase() === "paid")
-    .reduce((sum, o) => sum + Number(o.grandTotal || 0), 0);
+    .filter(isOrderCompleted)
+    .reduce((sum, o) => sum + orderAmount(o), 0);
 
   if (todayOrdersEl) todayOrdersEl.textContent = String(todayOrders.length);
-  if (pendingOrdersEl) pendingOrdersEl.textContent = String(activeOrders.length);
+  if (pendingOrdersEl) pendingOrdersEl.textContent = String(todayActiveOrders.length);
   if (todayRevenueEl) todayRevenueEl.textContent = money(todayRevenue);
   if (completedOrdersEl) completedOrdersEl.textContent = String(completedOrders.length);
   if (pendingOrdersBadgeEl) pendingOrdersBadgeEl.textContent = String(activeOrders.length);
 
   renderOrdersList(orderListEl, activeOrders.slice(0, 8));
   renderOrdersList(allOrdersListEl, getFilteredActiveOrders());
-  renderBestSelling(allOrders);
+  renderBestSelling(todayOrders);
   renderReportRows();
   renderKotSections();
   renderTablesSection();
+  markInitialLoadDone();
+  devLog("orders snapshot loaded", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
 
   allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
     .forEach(order => deductInventoryForCompletedOrder(order.id));
@@ -3926,11 +3981,18 @@ async function loadOrders() {
       ordersUnsubscribe = null;
     }
 
-    ordersUnsubscribe = onSnapshot(collection(db, "orders"), snap => {
-      processOrdersSnapshot(snap);
-    });
+    devLog("orders query started", { restaurantId });
+    ordersUnsubscribe = onSnapshot(
+      query(collection(db, "orders"), where("restaurantId", "==", restaurantId)),
+      snap => processOrdersSnapshot(snap),
+      err => {
+        console.error("orders listener error", err);
+        showLoadingNotice("Unable to load data. Please retry.", err);
+      }
+    );
   } catch (err) {
     console.error("loadOrders error", err);
+    showLoadingNotice("Unable to load data. Please retry.", err);
   }
 }
 
@@ -4204,25 +4266,40 @@ if (reportDateEl && !reportDateEl.value) reportDateEl.value = todayDateStr();
 if (reportMonthEl && !reportMonthEl.value) reportMonthEl.value = todayDateStr().slice(0, 7);
 if (reportYearEl && !reportYearEl.value) reportYearEl.value = String(new Date().getFullYear());
 
-const subscriptionBlocked = await checkRestaurantSubscription();
-setInterval(checkRestaurantSubscription, 5 * 60 * 1000);
+startInitialLoadTimeout("Admin Dashboard");
+try {
+  const subscriptionBlocked = await checkRestaurantSubscription();
+  setInterval(checkRestaurantSubscription, 5 * 60 * 1000);
 
-if (!subscriptionBlocked) {
-  await loadSettings();
-  mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
-  if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
-    const quickActions = document.querySelector(".quick-actions");
-    if (quickActions && !document.getElementById("quickResetDataBtn")) { const button=document.createElement("div"); button.id="quickResetDataBtn"; button.className="quick-action"; button.innerHTML="<i class=\"fas fa-triangle-exclamation\"></i>Reset Data"; button.addEventListener("click",()=>{document.querySelector('.nav-item[data-section="settings"]')?.click(); document.getElementById("safeResetZone")?.scrollIntoView({behavior:"smooth"});}); quickActions.append(button); }
+  if (!subscriptionBlocked) {
+    await loadSettings();
+    mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
+    if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
+      const quickActions = document.querySelector(".quick-actions");
+      if (quickActions && !document.getElementById("quickResetDataBtn")) { const button=document.createElement("div"); button.id="quickResetDataBtn"; button.className="quick-action"; button.innerHTML="<i class=\"fas fa-triangle-exclamation\"></i>Reset Data"; button.addEventListener("click",()=>{document.querySelector('.nav-item[data-section="settings"]')?.click(); document.getElementById("safeResetZone")?.scrollIntoView({behavior:"smooth"});}); quickActions.append(button); }
+    }
+    await loadMenuData();
+    startInventoryListeners();
+    onSnapshot(
+      collection(db, "restaurants", restaurantId, "tables"),
+      snap => {
+        managedTables = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderTableNumberOptions();
+        renderTablesSection();
+      },
+      error => {
+        console.error("tables listener error", error);
+        showLoadingNotice("Unable to load data. Please retry.", error);
+      }
+    );
+    renderMenuManagement();
+    renderManualMenuPicker();
+    renderManualCart();
+    await loadOrders();
+  } else {
+    markInitialLoadDone();
   }
-  await loadMenuData();
-  startInventoryListeners();
-  onSnapshot(collection(db, "restaurants", restaurantId, "tables"), snap => {
-    managedTables = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderTableNumberOptions();
-    renderTablesSection();
-  });
-  renderMenuManagement();
-  renderManualMenuPicker();
-  renderManualCart();
-  await loadOrders();
+} catch (error) {
+  console.error("Admin startup failed", error);
+  showLoadingNotice("Unable to load data. Please retry.", error);
 }

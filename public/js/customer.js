@@ -72,6 +72,28 @@ const currentOrderMode = () => isVendorMode() ? 'token' : (settings.orderMode ==
 let menu = [];
 let activeCategory = 'All';
 let cart = readLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, []);
+let customerLoadDone = false;
+let customerLoadTimer = null;
+
+function showCustomerLoadNotice(message = 'Taking longer than expected. Please check internet and retry.', error = null) {
+  const target = menuGrid || customerApp || document.body;
+  const debug = error ? `<details style="margin-top:8px"><summary>Debug</summary><pre style="white-space:pre-wrap;font-size:11px">${escapeHtml(error?.message || error)}</pre></details>` : '';
+  const html = `<div class="card" style="padding:18px;text-align:center"><h3 style="margin-top:0">${escapeHtml(message)}</h3><button class="btn btn-primary" type="button" onclick="location.reload()">Retry</button>${debug}</div>`;
+  if (target === menuGrid) target.innerHTML = html;
+  else target.insertAdjacentHTML('afterbegin', html);
+}
+
+function startCustomerLoadTimeout() {
+  clearTimeout(customerLoadTimer);
+  customerLoadTimer = setTimeout(() => {
+    if (!customerLoadDone) showCustomerLoadNotice();
+  }, 8000);
+}
+
+function finishCustomerLoad() {
+  customerLoadDone = true;
+  clearTimeout(customerLoadTimer);
+}
 
 if (brandNameTop) brandNameTop.textContent = 'Scan2Plate';
 
@@ -104,11 +126,20 @@ clearCartBtn?.addEventListener('click', () => {
 placeOrderBtn?.addEventListener('click', placeOrder);
 
 if (restaurantId) {
-  await loadSettings();
-  if (await validateTableAvailability()) {
-    await loadMenu();
-    renderCart();
+  startCustomerLoadTimeout();
+  try {
+    await loadSettings();
+    if (await validateTableAvailability()) {
+      await loadMenu();
+      renderCart();
+    }
+    finishCustomerLoad();
+  } catch (error) {
+    console.error('Customer page startup failed:', error);
+    showCustomerLoadNotice('Unable to load data. Please retry.', error);
   }
+} else {
+  showCustomerLoadNotice('Restaurant ID missing. Please login again.');
 }
 
 async function validateTableAvailability() {

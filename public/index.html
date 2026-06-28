@@ -930,6 +930,11 @@ import {
     const closeCartBtn = document.getElementById("closeCartBtn");
     const digitalMenuBadge = document.getElementById("digitalMenuBadge");
     const planMenuNotice = document.getElementById("planMenuNotice");
+    let customerLoadDone = false;
+    const customerLoadTimer = setTimeout(() => {
+      if (customerLoadDone) return;
+      menuGrid.innerHTML = `<div class="card" style="padding:18px;text-align:center;"><h3>Taking longer than expected. Please check internet and retry.</h3><button class="btn" type="button" onclick="location.reload()">Retry</button></div>`;
+    }, 8000);
 
     if (viewCartBtn) {
       viewCartBtn.onclick = () => document.body.classList.add("cart-open");
@@ -1420,7 +1425,15 @@ import {
 
     searchBox.addEventListener("input", renderMenu);
     renderCart();
-    await loadMenu();
+    try {
+      await loadMenu();
+    } catch (error) {
+      console.error("Customer menu load failed", error);
+      menuGrid.innerHTML = `<div class="card" style="padding:18px;text-align:center;"><h3>Unable to load data. Please retry.</h3><button class="btn" type="button" onclick="location.reload()">Retry</button><details style="margin-top:8px;"><summary>Debug</summary><pre style="white-space:pre-wrap;font-size:11px;">${escapeHtml(String(error?.message || error))}</pre></details></div>`;
+    } finally {
+      customerLoadDone = true;
+      clearTimeout(customerLoadTimer);
+    }
   }
 </script>
 </body>
