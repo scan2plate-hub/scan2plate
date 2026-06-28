@@ -41,6 +41,14 @@ const acceptedSnapshots  = new Map();
 let currentRenderedOrders = [];
 let kitchenTimerInterval = null;
 
+function itemDisplayName(item = {}) {
+  const baseName = String(item.name || "Item").trim() || "Item";
+  const variantName = String(item.variantName || "").trim();
+  return variantName && !baseName.toLowerCase().endsWith(` ${variantName.toLowerCase()}`)
+    ? `${baseName} ${variantName}`
+    : baseName;
+}
+
 const ctx = getRestaurantContext();
 const restaurantId =
   ctx.restaurantId ||
@@ -201,7 +209,7 @@ function printKOT(orderData, items, label = "") {
   const now  = new Date();
   const name = cafeSettings.restaurantName || "Restaurant";
   const modifierList = item => [item.addons,item.addOns,item.modifiers,item.customizations,item.variants,item.selectedAddons,item.options].flatMap(list => Array.isArray(list) ? list : []).map(extra => typeof extra === "string" ? { name:extra, qty:1 } : { name:extra?.name || extra?.title || extra?.label || "Customisation", qty:Number(extra?.qty || extra?.quantity || extra?.count || 1) });
-  const rows = (items || []).map(item => `<div class="thermal-item-row"><div class="thermal-item-name"><strong>${escapeHtml(String(item.name || "Item"))}</strong>${modifierList(item).map(extra => `<div class="thermal-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` ×${extra.qty}` : ""}</div>`).join("")}</div><div class="thermal-item-qty">${Number(item.qty || 0)}</div></div>`).join("");
+  const rows = (items || []).map(item => `<div class="thermal-item-row"><div class="thermal-item-name"><strong>${escapeHtml(itemDisplayName(item))}</strong>${modifierList(item).map(extra => `<div class="thermal-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` ×${extra.qty}` : ""}</div>`).join("")}</div><div class="thermal-item-qty">${Number(item.qty || 0)}</div></div>`).join("");
 
   const w = window.open("", "_blank", "width=400,height=640");
   if (!w) { alert("Allow popups to print KOT."); return; }
@@ -331,7 +339,7 @@ function getAlertKey(x) {
 ───────────────────────────────────────── */
 function cardHtml(d) {
   const x         = d.data();
-  const items     = (x.items || []).map(i => `${escapeHtml(i.name)} x ${i.qty}`).join(", ");
+  const items     = (x.items || []).map(i => `${escapeHtml(itemDisplayName(i))} x ${i.qty}`).join(", ");
   const eta       = Number(x.etaMinutes || 10);
   const hasNew    = x.hasNewItems === true;
   const newText   = escapeHtml(x.newlyAddedItemsText || "");
@@ -441,7 +449,7 @@ function bindActions(orderDocs, root = document) {
         printKOT(current, current.items || []);
         // Save snapshot of all items at accept time so Seen Update can diff later
         const snapshot = new Map();
-        (current.items || []).forEach(i => snapshot.set(String(i.name || ""), Number(i.qty || 0)));
+        (current.items || []).forEach(i => snapshot.set(itemDisplayName(i), Number(i.qty || 0)));
         acceptedSnapshots.set(docId, snapshot);
       }
     };
@@ -492,7 +500,7 @@ function bindActions(orderDocs, root = document) {
       if (prevSnapshot) {
         // Compare current items against the snapshot taken at Accept time
         currItems.forEach(item => {
-          const prevQty = prevSnapshot.get(String(item.name || "")) ?? 0;
+          const prevQty = prevSnapshot.get(itemDisplayName(item)) ?? 0;
           const currQty = Number(item.qty || 0);
           if (currQty > prevQty) {
             // New item or increased qty — only print the DIFFERENCE
@@ -518,7 +526,7 @@ function bindActions(orderDocs, root = document) {
 
       // Update snapshot to current state so next Seen Update diffs correctly
       const newSnapshot = new Map();
-      currItems.forEach(i => newSnapshot.set(String(i.name || ""), Number(i.qty || 0)));
+      currItems.forEach(i => newSnapshot.set(itemDisplayName(i), Number(i.qty || 0)));
       acceptedSnapshots.set(docId, newSnapshot);
 
       // Clear hasNewItems flag in Firestore

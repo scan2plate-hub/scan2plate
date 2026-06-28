@@ -270,6 +270,57 @@ function itemMedia(item) {
     : `<div class="menu-img">${escapeHtml((item.name || 'F').charAt(0))}</div>`;
 }
 
+function validMenuVariants(item = {}) {
+  return item.hasVariants === true && Array.isArray(item.variants)
+    ? item.variants
+        .map(variant => ({ name: String(variant.name || '').trim(), price: Number(variant.price || 0) }))
+        .filter(variant => variant.name && variant.price > 0)
+    : [];
+}
+
+function hasMenuVariants(item = {}) {
+  return validMenuVariants(item).length > 0;
+}
+
+function itemDisplayName(item = {}) {
+  const baseName = String(item.name || 'Item').trim() || 'Item';
+  const variantName = String(item.variantName || '').trim();
+  return variantName && !baseName.toLowerCase().endsWith(` ${variantName.toLowerCase()}`)
+    ? `${baseName} ${variantName}`
+    : baseName;
+}
+
+function cartKeyForItem(item = {}) {
+  return `${item.id || item.menuItemId || ''}::${String(item.variantName || '')}`;
+}
+
+function menuPriceLabel(item = {}) {
+  const variants = validMenuVariants(item);
+  return variants.length
+    ? variants.map(variant => `${escapeHtml(variant.name)} ${fmtCurrency(variant.price)}`).join(' · ')
+    : fmtCurrency(Number(item.price || 0));
+}
+
+function makeCartItem(item = {}, variant = null) {
+  const variantName = variant?.name || '';
+  const price = Number(variant ? variant.price : item.price || 0);
+  return {
+    id: item.id,
+    menuItemId: item.id,
+    itemId: item.id,
+    name: item.name || '',
+    itemName: item.itemName || item.name || '',
+    price,
+    unitPrice: price,
+    qty: 1,
+    variantName,
+    variantPrice: variantName ? price : null,
+    hasVariants: Boolean(variantName),
+    category: item.category || '',
+    imageUrl: item.imageUrl || item.image || ''
+  };
+}
+
 function renderMenu() {
   if (!menuGrid) return;
 
@@ -287,8 +338,10 @@ function renderMenu() {
           <p class="muted small">${escapeHtml(item.description || 'Freshly prepared item')}</p>
         </div>
         <div class="price-row">
-          <strong>${fmtCurrency(Number(item.price || 0))}</strong>
-          <button class="btn btn-primary" data-id="${escapeHtml(item.id)}">Add</button>
+          <strong>${menuPriceLabel(item)}</strong>
+          ${hasMenuVariants(item)
+            ? `<div class="row" style="gap:8px;justify-content:flex-end"><span class="muted small">Choose portion</span>${validMenuVariants(item).map(variant => `<button class="btn btn-primary" data-id="${escapeHtml(item.id)}" data-variant="${escapeHtml(variant.name)}">${escapeHtml(variant.name)}</button>`).join('')}</div>`
+            : `<button class="btn btn-primary" data-id="${escapeHtml(item.id)}">Add</button>`}
         </div>
       </div>
     `
@@ -297,42 +350,39 @@ function renderMenu() {
     : `<div class="card"><p class="muted">No menu items found.</p></div>`;
 
   menuGrid.querySelectorAll('button[data-id]').forEach(btn => {
-    btn.onclick = () => addToCart(btn.dataset.id);
+    btn.onclick = () => addToCart(btn.dataset.id, btn.dataset.variant || '');
   });
 }
 
-function addToCart(id) {
+function addToCart(id, variantName = '') {
   if (String(settings.plan || '').toLowerCase() === 'basic') return;
 
   const item = menu.find(x => x.id === id);
   if (!item) return;
+  const variant = validMenuVariants(item).find(v => v.name === variantName) || null;
+  if (hasMenuVariants(item) && !variant) return toast('Choose portion.');
 
-  const found = cart.find(x => x.id === id);
+  const nextItem = makeCartItem(item, variant);
+  const key = cartKeyForItem(nextItem);
+  const found = cart.find(x => cartKeyForItem(x) === key);
 
   if (found) {
     found.qty += 1;
   } else {
-    cart.push({
-      id: item.id,
-      name: item.name || '',
-      price: Number(item.price || 0),
-      qty: 1,
-      category: item.category || '',
-      imageUrl: item.imageUrl || item.image || ''
-    });
+    cart.push(nextItem);
   }
 
   syncCart();
 }
 
-function updateQty(id, delta) {
-  const item = cart.find(x => x.id === id);
+function updateQty(key, delta) {
+  const item = cart.find(x => cartKeyForItem(x) === key);
   if (!item) return;
 
   item.qty += delta;
 
   if (item.qty <= 0) {
-    cart = cart.filter(x => x.id !== id);
+    cart = cart.filter(x => cartKeyForItem(x) !== key);
   }
 
   syncCart();
@@ -353,13 +403,13 @@ function renderCart() {
       <div class="cart-item">
         <div class="cart-row">
           <div>
-            <strong>${escapeHtml(item.name)}</strong>
+            <strong>${escapeHtml(itemDisplayName(item))}</strong>
             <div class="muted small">${fmtCurrency(item.price)} each</div>
           </div>
           <div class="qty-box">
-            <button class="qty-btn" data-act="minus" data-id="${escapeHtml(item.id)}">-</button>
+            <button class="qty-btn" data-act="minus" data-key="${escapeHtml(cartKeyForItem(item))}">-</button>
             <strong>${item.qty}</strong>
-            <button class="qty-btn" data-act="plus" data-id="${escapeHtml(item.id)}">+</button>
+            <button class="qty-btn" data-act="plus" data-key="${escapeHtml(cartKeyForItem(item))}">+</button>
           </div>
         </div>
         <div class="row" style="margin-top:8px">
@@ -373,7 +423,7 @@ function renderCart() {
     : `<p class="muted">Your cart is empty.</p>`;
 
   cartList.querySelectorAll('.qty-btn').forEach(btn => {
-    btn.onclick = () => updateQty(btn.dataset.id, btn.dataset.act === 'plus' ? 1 : -1);
+    btn.onclick = () => updateQty(btn.dataset.key, btn.dataset.act === 'plus' ? 1 : -1);
   });
 
   const itemsTotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
@@ -456,7 +506,7 @@ function mergeItems(existing = [], incoming = []) {
   const map = new Map();
 
   [...existing, ...incoming].forEach(i => {
-    const key = i.id || i.name;
+    const key = cartKeyForItem(i) || i.name;
     if (!map.has(key)) {
       map.set(key, { ...i, qty: Number(i.qty || 0) });
     } else {

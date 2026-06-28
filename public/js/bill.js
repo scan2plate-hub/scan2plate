@@ -17,6 +17,14 @@ const billRoot = qs('#billRoot');
 const orderId = getParam('orderId');
 const docId = getParam('docId');
 
+function itemDisplayName(item = {}) {
+  const baseName = String(item.name || 'Item').trim() || 'Item';
+  const variantName = String(item.variantName || '').trim();
+  return variantName && !baseName.toLowerCase().endsWith(` ${variantName.toLowerCase()}`)
+    ? `${baseName} ${variantName}`
+    : baseName;
+}
+
 if (!billRoot) {
   console.error('billRoot element not found');
 } else if (!orderId && !docId) {
@@ -136,7 +144,7 @@ async function load() {
         <tbody>
           ${(order.items || []).map(i => `
             <tr>
-              <td>${escapeHtml(i.name || '')}</td>
+              <td>${escapeHtml(itemDisplayName(i))}</td>
               <td>${Number(i.qty || 0)}</td>
               <td>${fmtCurrency(i.price || 0)}</td>
               <td>${fmtCurrency((Number(i.price || 0)) * (Number(i.qty || 0)))}</td>

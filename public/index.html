@@ -1082,6 +1082,55 @@ import {
       });
     }
 
+    function validMenuVariants(item = {}) {
+      return item.hasVariants === true && Array.isArray(item.variants)
+        ? item.variants
+            .map(variant => ({ name: String(variant.name || "").trim(), price: Number(variant.price || 0) }))
+            .filter(variant => variant.name && variant.price > 0)
+        : [];
+    }
+
+    function hasMenuVariants(item = {}) {
+      return validMenuVariants(item).length > 0;
+    }
+
+    function itemDisplayName(item = {}) {
+      const baseName = String(item.name || "Item").trim() || "Item";
+      const variantName = String(item.variantName || "").trim();
+      return variantName && !baseName.toLowerCase().endsWith(` ${variantName.toLowerCase()}`)
+        ? `${baseName} ${variantName}`
+        : baseName;
+    }
+
+    function cartKeyForItem(item = {}) {
+      return `${item.id || item.menuItemId || ""}::${String(item.variantName || "")}`;
+    }
+
+    function menuPriceLabel(item = {}) {
+      const variants = validMenuVariants(item);
+      return variants.length
+        ? variants.map(variant => `${variant.name} ${money(variant.price)}`).join(" · ")
+        : money(item.price);
+    }
+
+    function makeCartItem(item = {}, variant = null) {
+      const variantName = variant?.name || "";
+      const price = Number(variant ? variant.price : item.price || 0);
+      return {
+        id: item.id,
+        menuItemId: item.id,
+        itemId: item.id,
+        name: item.name,
+        itemName: item.itemName || item.name,
+        price,
+        unitPrice: price,
+        qty: 1,
+        variantName,
+        variantPrice: variantName ? price : null,
+        hasVariants: Boolean(variantName)
+      };
+    }
+
     function renderMenu() {
       const items = filteredMenu();
 
@@ -1104,46 +1153,45 @@ import {
             <h3>${item.name || ""}</h3>
             <div class="muted small">${item.category || "Other"}</div>
             <div class="price-row">
-              <strong>${money(item.price)}</strong>
-              ${canUseOrdering ? `<button class="btn btn-dark add-btn" data-id="${item.id}">Add</button>` : ``}
+              <strong>${menuPriceLabel(item)}</strong>
+              ${canUseOrdering ? (hasMenuVariants(item)
+                ? `<div class="qty-row" style="gap:8px;"><span class="muted">Choose portion</span>${validMenuVariants(item).map(variant => `<button class="btn btn-dark add-btn" data-id="${item.id}" data-variant="${variant.name}">${variant.name}</button>`).join("")}</div>`
+                : `<button class="btn btn-dark add-btn" data-id="${item.id}">Add</button>`) : ``}
             </div>
           </div>
         </div>
       `).join("");
 
       menuGrid.querySelectorAll(".add-btn").forEach(btn => {
-        btn.onclick = () => addToCart(btn.dataset.id);
+        btn.onclick = () => addToCart(btn.dataset.id, btn.dataset.variant || "");
       });
     }
 
-    function addToCart(id) {
+    function addToCart(id, variantName = "") {
       if (!canUseOrdering) return;
       const item = menu.find(x => x.id === id);
       if (!item) return;
+      const variant = validMenuVariants(item).find(v => v.name === variantName) || null;
+      if (hasMenuVariants(item) && !variant) return;
 
-      const found = cart.find(x => x.id === id);
+      const nextItem = makeCartItem(item, variant);
+      const key = cartKeyForItem(nextItem);
+      const found = cart.find(x => cartKeyForItem(x) === key);
 
       if (found) found.qty += 1;
-      else {
-        cart.push({
-          id: item.id,
-          name: item.name,
-          price: Number(item.price || 0),
-          qty: 1
-        });
-      }
+      else cart.push(nextItem);
 
       renderCart();
     }
 
-    function updateQty(id, delta) {
-      const found = cart.find(x => x.id === id);
+    function updateQty(key, delta) {
+      const found = cart.find(x => cartKeyForItem(x) === key);
       if (!found) return;
 
       found.qty += delta;
 
       if (found.qty <= 0) {
-        cart = cart.filter(x => x.id !== id);
+        cart = cart.filter(x => cartKeyForItem(x) !== key);
       }
 
       renderCart();
@@ -1172,13 +1220,13 @@ import {
       } else {
         cartList.innerHTML = cart.map(item => `
           <div style="border:1px solid #eee;border-radius:16px;padding:12px;margin-bottom:10px">
-            <strong>${item.name}</strong>
+            <strong>${itemDisplayName(item)}</strong>
             <div class="qty-row">
               <span class="muted">${money(item.price)} each</span>
               <div class="qty-box">
-                <button class="qty-btn" data-id="${item.id}" data-type="minus">-</button>
+                <button class="qty-btn" data-key="${cartKeyForItem(item)}" data-type="minus">-</button>
                 <strong>${item.qty}</strong>
-                <button class="qty-btn" data-id="${item.id}" data-type="plus">+</button>
+                <button class="qty-btn" data-key="${cartKeyForItem(item)}" data-type="plus">+</button>
               </div>
             </div>
           </div>
@@ -1186,7 +1234,7 @@ import {
 
         cartList.querySelectorAll(".qty-btn").forEach(btn => {
           btn.onclick = () => updateQty(
-            btn.dataset.id,
+            btn.dataset.key,
             btn.dataset.type === "plus" ? 1 : -1
           );
         });

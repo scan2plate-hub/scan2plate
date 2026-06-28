@@ -208,6 +208,10 @@ const itemCategoryQuickPickEl = document.getElementById("itemCategoryQuickPick")
 const itemCategoryStatusEl = document.getElementById("itemCategoryStatus");
 const itemCategorySuggestionsEl = document.getElementById("itemCategorySuggestions");
 const itemPriceEl = document.getElementById("itemPrice");
+const itemHasVariantsEl = document.getElementById("itemHasVariants");
+const itemVariantPriceFieldsEl = document.getElementById("itemVariantPriceFields");
+const itemHalfPriceEl = document.getElementById("itemHalfPrice");
+const itemFullPriceEl = document.getElementById("itemFullPrice");
 const itemAvailableEl = document.getElementById("itemAvailable");
 const itemImageEl = document.getElementById("itemImage");
 const itemSortOrderEl = document.getElementById("itemSortOrder");
@@ -546,7 +550,7 @@ async function importReviewedMenuItems() {
       const categoryKey = normalizedMenuName(item.category);
       const sortOrder = nextSortByCategory.get(categoryKey) || 1;
       nextSortByCategory.set(categoryKey, sortOrder + 1);
-      const payload = { name:item.name, category:item.category, price:item.price, available:true, sortOrder, updatedAt:serverTimestamp() };
+      const payload = { name:item.name, category:item.category, price:item.price, hasVariants:false, variants:[], available:true, sortOrder, updatedAt:serverTimestamp() };
       if (duplicate) { await setDoc(doc(db, "restaurants", restaurantId, "menu", duplicate.id), payload, { merge:true }); updated++; }
       else { await addDoc(collection(db, "restaurants", restaurantId, "menu"), { ...payload, imageUrl:"", image:"", description:"", createdAt:serverTimestamp() }); added++; }
     }
@@ -1622,6 +1626,66 @@ function getItemsInCategory(category) {
     .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
 }
 
+function validMenuVariants(item = {}) {
+  return item.hasVariants === true && Array.isArray(item.variants)
+    ? item.variants
+        .map(variant => ({ name: String(variant.name || "").trim(), price: Number(variant.price || 0) }))
+        .filter(variant => variant.name && variant.price > 0)
+    : [];
+}
+
+function hasMenuVariants(item = {}) {
+  return validMenuVariants(item).length > 0;
+}
+
+function itemDisplayName(item = {}) {
+  const baseName = String(item.name || item.itemName || "Item").trim() || "Item";
+  const variantName = String(item.variantName || "").trim();
+  return variantName && !baseName.toLowerCase().endsWith(` ${variantName.toLowerCase()}`)
+    ? `${baseName} ${variantName}`
+    : baseName;
+}
+
+function menuPriceLabel(item = {}) {
+  const variants = validMenuVariants(item);
+  if (!variants.length) return money(item.price || 0);
+  return variants.map(variant => `${escapeHtml(variant.name)} ${money(variant.price)}`).join(" · ");
+}
+
+function setVariantFieldsEnabled(enabled) {
+  if (itemVariantPriceFieldsEl) itemVariantPriceFieldsEl.style.display = enabled ? "" : "none";
+  if (itemPriceEl) {
+    itemPriceEl.disabled = enabled;
+    itemPriceEl.closest(".form-group")?.querySelector(".form-label")?.classList.toggle("muted", enabled);
+  }
+}
+
+function cartKeyForItem(item = {}) {
+  return `${item.menuItemId || item.id || ""}::${String(item.variantName || "")}`;
+}
+
+function makeOrderItemFromMenu(item = {}, variant = null) {
+  const variantName = variant?.name || "";
+  const price = Number(variant ? variant.price : item.price || 0);
+  return {
+    id: item.id,
+    menuItemId: item.id,
+    itemId: item.id,
+    itemLineId: manualItemLineId(),
+    name: item.name || "",
+    itemName: item.itemName || item.name || "",
+    price,
+    unitPrice: price,
+    qty: 1,
+    variantName,
+    variantPrice: variantName ? price : null,
+    hasVariants: Boolean(variantName),
+    addedAt: nowIso(),
+    kotPrinted: false,
+    kotPrintedAt: null
+  };
+}
+
 function renderMenuSortSelectors() {
   const typedCategory = normalizeCategory(itemCategoryEl?.value || "");
   const categoryOrder = getCategoryOrderMap();
@@ -1652,6 +1716,10 @@ function clearMenuForm() {
   if (itemNameEl) itemNameEl.value = "";
   if (itemCategoryEl) itemCategoryEl.value = "";
   if (itemPriceEl) itemPriceEl.value = "";
+  if (itemHasVariantsEl) itemHasVariantsEl.checked = false;
+  if (itemHalfPriceEl) itemHalfPriceEl.value = "";
+  if (itemFullPriceEl) itemFullPriceEl.value = "";
+  setVariantFieldsEnabled(false);
   if (itemAvailableEl) itemAvailableEl.value = "true";
   if (itemImageEl) itemImageEl.value = "";
   if (itemSortOrderEl) itemSortOrderEl.value = "";
@@ -1667,7 +1735,10 @@ async function saveMenuItem() {
   try {
     const name = itemNameEl?.value.trim() || "";
     const category = normalizeCategory(itemCategoryEl?.value);
-    const price = Number(itemPriceEl?.value || 0);
+    const hasVariants = itemHasVariantsEl?.checked === true;
+    const halfPrice = Number(itemHalfPriceEl?.value || 0);
+    const fullPrice = Number(itemFullPriceEl?.value || 0);
+    const price = hasVariants ? fullPrice : Number(itemPriceEl?.value || 0);
     const available = itemAvailableEl?.value === "true";
     const imageUrl = itemImageEl?.value.trim() || "";
     const sortOrder = Number(itemInCategorySortEl?.value || itemSortOrderEl?.value || 0);
@@ -1677,12 +1748,18 @@ async function saveMenuItem() {
 
     if (!name) return alert("Enter item name.");
     if (!category) return alert("Enter category.");
+    if (hasVariants && (!halfPrice || !fullPrice || halfPrice <= 0 || fullPrice <= 0)) return alert("Please enter both Half and Full prices.");
     if (!price || price <= 0) return alert("Enter valid price.");
 
     const payload = {
       name,
       category,
       price,
+      hasVariants,
+      variants: hasVariants ? [
+        { name: "Half", price: halfPrice },
+        { name: "Full", price: fullPrice }
+      ] : [],
       available,
       imageUrl,
       image: imageUrl,
@@ -1779,7 +1856,7 @@ function renderMenuManagement() {
         <div class="menu-item-name">${escapeHtml(item.name || "")}</div>
         <div class="menu-item-category">${escapeHtml(normalizeCategory(item.category))}</div>
         <div class="menu-item-footer">
-          <div class="menu-item-price">${money(item.price || 0)}</div>
+          <div class="menu-item-price">${menuPriceLabel(item)}</div>
           <span class="menu-item-badge ${item.available === false ? "unavailable" : "available"}">
             ${item.available === false ? "Off" : "On"}
           </span>
@@ -1800,7 +1877,14 @@ function renderMenuManagement() {
 
       if (itemNameEl) itemNameEl.value = item.name || "";
       if (itemCategoryEl) itemCategoryEl.value = item.category || "";
+      const variants = validMenuVariants(item);
+      const half = variants.find(variant => variant.name.toLowerCase() === "half");
+      const full = variants.find(variant => variant.name.toLowerCase() === "full");
       if (itemPriceEl) itemPriceEl.value = item.price || "";
+      if (itemHasVariantsEl) itemHasVariantsEl.checked = variants.length > 0;
+      if (itemHalfPriceEl) itemHalfPriceEl.value = half?.price || "";
+      if (itemFullPriceEl) itemFullPriceEl.value = full?.price || item.price || "";
+      setVariantFieldsEnabled(variants.length > 0);
       if (itemAvailableEl) itemAvailableEl.value = String(item.available !== false);
       if (itemImageEl) itemImageEl.value = item.imageUrl || item.image || "";
       if (itemSortOrderEl) itemSortOrderEl.value = item.sortOrder || "";
@@ -2165,9 +2249,12 @@ async function deductInventoryForCompletedOrder(orderDocId) {
       if (String(order.restaurantId || "") !== restaurantId || !["completed", "served"].includes(String(order.status || "").toLowerCase()) || order.inventoryDeductedAt) return;
       const usages = [];
       for (const orderedItem of (order.items || [])) {
-        const menuSnap = await transaction.get(doc(db, "restaurants", restaurantId, "menu", orderedItem.id));
+        const menuItemId = orderedItem.menuItemId || orderedItem.itemId || orderedItem.id;
+        if (!menuItemId) continue;
+        const menuSnap = await transaction.get(doc(db, "restaurants", restaurantId, "menu", menuItemId));
         if (!menuSnap.exists()) continue;
-        (menuSnap.data().inventoryUsage || []).forEach(usage => usages.push({ ...usage, orderedQty: Number(orderedItem.qty || 0) }));
+        const variantFactor = String(orderedItem.variantName || "").toLowerCase() === "half" ? 0.5 : 1;
+        (menuSnap.data().inventoryUsage || []).forEach(usage => usages.push({ ...usage, orderedQty: Number(orderedItem.qty || 0) * variantFactor }));
       }
       const combinedUsages = [...usages.reduce((map, usage) => {
         const id = usage.inventoryItemId;
@@ -2381,13 +2468,21 @@ function nowIso() {
 }
 
 function normalizeManualCartItem(item = {}) {
+  const variantName = String(item.variantName || "").trim();
+  const price = Number(item.price || item.variantPrice || item.unitPrice || 0);
   return {
     id: item.id || item.menuItemId || "",
     menuItemId: item.menuItemId || item.id || "",
+    itemId: item.itemId || item.menuItemId || item.id || "",
     itemLineId: item.itemLineId || manualItemLineId(),
     name: item.name || "",
-    price: Number(item.price || 0),
+    itemName: item.itemName || item.name || "",
+    price,
+    unitPrice: Number(item.unitPrice || price),
     qty: Number(item.qty || 1),
+    variantName,
+    variantPrice: variantName ? Number(item.variantPrice || price) : null,
+    hasVariants: item.hasVariants === true || Boolean(variantName),
     addedAt: item.addedAt || nowIso(),
     kotPrinted: item.kotPrinted === true,
     kotPrintedAt: item.kotPrintedAt || null
@@ -2418,24 +2513,17 @@ function updateManualQty(lineId, delta) {
   renderManualCart();
 }
 
-function addManualItem(id) {
+function addManualItem(id, variantName = "") {
   const item = manualMenuItems.find(x => x.id === id);
   if (!item) return;
+  const variant = validMenuVariants(item).find(v => v.name === variantName) || null;
+  if (hasMenuVariants(item) && !variant) return;
 
-  const found = manualCart.find(x => x.id === id && x.kotPrinted !== true);
+  const key = `${id}::${variant?.name || ""}`;
+  const found = manualCart.find(x => cartKeyForItem(x) === key && x.kotPrinted !== true);
   if (found) found.qty += 1;
   else {
-    manualCart.push({
-      id: item.id,
-      menuItemId: item.id,
-      itemLineId: manualItemLineId(),
-      name: item.name || "",
-      price: Number(item.price || 0),
-      qty: 1,
-      addedAt: nowIso(),
-      kotPrinted: false,
-      kotPrintedAt: null
-    });
+    manualCart.push(makeOrderItemFromMenu(item, variant));
   }
   renderManualCart();
 }
@@ -2458,7 +2546,7 @@ function renderManualCart() {
   manualCartListEl.innerHTML = manualCart.map(item => `
     <div class="cart-item">
       <div class="cart-item-info">
-        <div class="cart-item-name">${escapeHtml(item.name)}</div>
+        <div class="cart-item-name">${escapeHtml(itemDisplayName(item))}</div>
         <div class="cart-item-price">${money(item.price)} each</div>
       </div>
 
@@ -2550,15 +2638,17 @@ function renderManualMenuPicker() {
         <div class="menu-item-name">${escapeHtml(item.name)}</div>
         <div class="menu-item-category">${escapeHtml(normalizeCategory(item.category))}</div>
         <div class="menu-item-footer">
-          <div class="menu-item-price">${money(item.price || 0)}</div>
-          <button class="btn btn-sm btn-primary manual-add-btn" data-id="${item.id}">Add</button>
+          <div class="menu-item-price">${menuPriceLabel(item)}</div>
+          ${hasMenuVariants(item)
+            ? `<div class="btn-group">${validMenuVariants(item).map(variant => `<button class="btn btn-sm btn-primary manual-add-btn" data-id="${item.id}" data-variant="${escapeHtml(variant.name)}">${escapeHtml(variant.name)}</button>`).join("")}</div>`
+            : `<button class="btn btn-sm btn-primary manual-add-btn" data-id="${item.id}">Add</button>`}
         </div>
       </div>
     </div>
   `).join("");
 
   manualMenuPickerEl.querySelectorAll(".manual-add-btn").forEach(btn => {
-    btn.addEventListener("click", () => addManualItem(btn.dataset.id || ""));
+    btn.addEventListener("click", () => addManualItem(btn.dataset.id || "", btn.dataset.variant || ""));
   });
 }
 
@@ -2660,7 +2750,7 @@ function fillKotPreviewFromCart(orderId = "") {
     kotItemsEl.innerHTML = manualCart.length
       ? manualCart.map(item => `
           <div class="kot-item">
-            <span><strong>${item.qty}x</strong> ${escapeHtml(item.name)}</span>
+            <span><strong>${item.qty}x</strong> ${escapeHtml(itemDisplayName(item))}</span>
           </div>
         `).join("")
       : "<div>No items</div>";
@@ -2783,7 +2873,7 @@ function thermalBillItemRows(items = []) {
   return (items || []).map(item => {
     const qty = Number(item.qty || 0);
     const amount = Number(item.price || 0) * qty;
-    return `<div class="item-row"><div class="item-name">${escapeHtml(item.name || "Item")}</div><div class="item-qty">${qty}</div><div class="item-amt">${money(amount)}</div></div>`;
+    return `<div class="item-row"><div class="item-name">${escapeHtml(itemDisplayName(item))}</div><div class="item-qty">${qty}</div><div class="item-amt">${money(amount)}</div></div>`;
   }).join("");
 }
 
@@ -2926,7 +3016,7 @@ async function createManualBill() {
         customerPhone,
         tableNo,
         items: cartItems,
-        itemsText: cartItems.map(i => `${i.name} x${i.qty}`).join(", "),
+        itemsText: cartItems.map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
         note: "Bill updated by admin",
         paymentStatus,
         paymentMethod,
@@ -2941,7 +3031,7 @@ async function createManualBill() {
         etaStartedAt: oldData.etaStartedAt || null,
         hasNewItems: newKotItems.length > 0,
         newlyAddedItems: newKotItems,
-        newlyAddedItemsText: newKotItems.map(i => `${i.name} x${i.qty}`).join(", "),
+        newlyAddedItemsText: newKotItems.map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
         newlyAddedNote: "Updated from admin billing",
         kitchenAlertAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -2964,7 +3054,7 @@ async function createManualBill() {
         customerPhone,
         tableNo,
         items: cartItems,
-        itemsText: cartItems.map(i => `${i.name} x${i.qty}`).join(", "),
+        itemsText: cartItems.map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
         note: "Manual order from admin",
         status: "pending",
         paymentStatus,
@@ -3204,7 +3294,7 @@ function printItemExtras(item = {}) {
 function thermalKotRows(items = []) {
   return items.map(item => {
     const extras = printItemExtras(item);
-    return `<div class="kot-item-row"><div class="kot-item-name">${escapeHtml(String(item.name || "Item"))}${extras.map(extra => `<div class="kot-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` x${extra.qty}` : ""}</div>`).join("")}</div><div class="kot-item-qty">${Number(item.qty || 0)}</div></div>`;
+    return `<div class="kot-item-row"><div class="kot-item-name">${escapeHtml(itemDisplayName(item))}${extras.map(extra => `<div class="kot-modifier">* ${escapeHtml(String(extra.name))}${extra.qty > 1 ? ` x${extra.qty}` : ""}</div>`).join("")}</div><div class="kot-item-qty">${Number(item.qty || 0)}</div></div>`;
   }).join("");
 }
 
@@ -3304,7 +3394,7 @@ function buildKotPrintHtml(order = {}, items = [], label = "") {
 function thermalBillRows(items = []) {
   return items.map(item => {
     const qty = Number(item.qty || 0), price = Number(item.price || 0), extras = printItemExtras(item);
-    const parent = `<div class="thermal-item-row"><div class="thermal-item-name">${escapeHtml(String(item.name || "Item"))}</div><div class="thermal-item-qty">${qty}</div><div class="thermal-item-amount">${money(price * qty)}</div></div>`;
+    const parent = `<div class="thermal-item-row"><div class="thermal-item-name">${escapeHtml(itemDisplayName(item))}</div><div class="thermal-item-qty">${qty}</div><div class="thermal-item-amount">${money(price * qty)}</div></div>`;
     const modifierRows = extras.map(extra => `<div class="thermal-item-row thermal-modifier-row"><div class="thermal-item-name">↳ ${escapeHtml(String(extra.name))}</div><div class="thermal-item-qty">${extra.qty}</div><div class="thermal-item-amount">${extra.price ? money(extra.price * extra.qty) : ""}</div></div>`).join("");
     return parent + modifierRows;
   }).join("");
@@ -3354,7 +3444,7 @@ async function markManualKotItemsPrinted(itemsToMark = []) {
     items: manualCartPayload(),
     hasNewItems: manualCart.some(item => item.kotPrinted !== true),
     newlyAddedItems: manualCart.filter(item => item.kotPrinted !== true),
-    newlyAddedItemsText: manualCart.filter(item => item.kotPrinted !== true).map(i => `${i.name} x${i.qty}`).join(", "),
+    newlyAddedItemsText: manualCart.filter(item => item.kotPrinted !== true).map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
     updatedAt: serverTimestamp()
   });
 }
@@ -3458,7 +3548,7 @@ function renderOrdersList(targetEl, orders) {
         <div class="order-items">
           ${(o.items || []).map(item => `
             <div class="order-item">
-              <span><span class="qty">${Number(item.qty || 0)}</span>${escapeHtml(item.name || "")}</span>
+              <span><span class="qty">${Number(item.qty || 0)}</span>${escapeHtml(itemDisplayName(item))}</span>
               <span>${money(Number(item.price || 0) * Number(item.qty || 0))}</span>
             </div>
           `).join("")}
@@ -3562,7 +3652,7 @@ function renderBestSelling(orders) {
   const counter = new Map();
   orders.forEach(order => {
     (order.items || []).forEach(item => {
-      const key = item.name || "Item";
+      const key = itemDisplayName(item);
       counter.set(key, (counter.get(key) || 0) + Number(item.qty || 0));
     });
   });
@@ -3641,7 +3731,7 @@ function renderPaymentBreakdown(filteredOrders) {
 function renderBestSellingReport(filteredOrders) {
   const items = new Map();
   filteredOrders.forEach(order => (order.items || []).forEach(item => {
-    const name = item.name || "Item";
+    const name = itemDisplayName(item);
     const current = items.get(name) || { quantity: 0, revenue: 0 };
     current.quantity += Number(item.qty || 0);
     current.revenue += Number(item.price || 0) * Number(item.qty || 0);
@@ -3667,7 +3757,7 @@ function renderReportRows(filteredOrders = getFilteredReportOrders()) {
   renderPaymentBreakdown(filteredOrders);
   renderBestSellingReport(filteredOrders);
   renderTableWiseReport(filteredOrders);
-  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${item.name} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
   reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
 }
 
@@ -3679,7 +3769,7 @@ function reportLabel() {
 }
 
 function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
-  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(order => [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${item.name} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)])];
+  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(order => [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)])];
   const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -3735,7 +3825,7 @@ function renderKotSections() {
         <div class="order-items">
           ${(order.items || []).map(item => `
             <div class="order-item">
-              <span><span class="qty">${Number(item.qty || 0)}</span>${escapeHtml(item.name || "")}</span>
+              <span><span class="qty">${Number(item.qty || 0)}</span>${escapeHtml(itemDisplayName(item))}</span>
               <span>${money(Number(item.price || 0) * Number(item.qty || 0))}</span>
             </div>
           `).join("")}
@@ -3886,6 +3976,7 @@ refreshBtn?.addEventListener("click", async () => {
 saveMenuBtn?.addEventListener("click", saveMenuItem);
 deleteMenuBtn?.addEventListener("click", deleteMenuItem);
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
+itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
 menuSearchEl?.addEventListener("input", renderMenuManagement);
 clearMenuSearchBtn?.addEventListener("click", () => {
   if (menuSearchEl) menuSearchEl.value = "";
