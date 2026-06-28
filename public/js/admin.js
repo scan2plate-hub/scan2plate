@@ -91,6 +91,7 @@ function hideLoadingNotice() {
 
 function startInitialLoadTimeout(pageName = "Admin Dashboard") {
   clearTimeout(adminLoadTimeout);
+  safeSetLoading(true);
   adminLoadTimeout = setTimeout(() => {
     if (!adminInitialLoadDone) showLoadingNotice("Taking longer than expected. Please check internet and retry.", `${pageName} load exceeded 8 seconds. restaurantId=${restaurantId || "missing"}`);
   }, 8000);
@@ -99,7 +100,23 @@ function startInitialLoadTimeout(pageName = "Admin Dashboard") {
 function markInitialLoadDone() {
   adminInitialLoadDone = true;
   clearTimeout(adminLoadTimeout);
+  safeSetLoading(false);
   hideLoadingNotice();
+}
+
+function safeSetLoading(isLoading, target = document.body) {
+  if (!target?.classList) return;
+  target.classList.toggle("is-loading", Boolean(isLoading));
+}
+
+function cleanupFirestoreListeners(...listeners) {
+  listeners.forEach(unsubscribe => {
+    try {
+      if (typeof unsubscribe === "function") unsubscribe();
+    } catch (error) {
+      console.warn("Firestore listener cleanup failed", error);
+    }
+  });
 }
 
 /* =========================================================
@@ -218,6 +235,9 @@ const todayOrdersEl = document.getElementById("todayOrders");
 const pendingOrdersEl = document.getElementById("pendingOrders");
 const todayRevenueEl = document.getElementById("todayRevenue");
 const completedOrdersEl = document.getElementById("completedOrders");
+const todayCashCollectionEl = document.getElementById("todayCashCollection");
+const todayUpiCollectionEl = document.getElementById("todayUpiCollection");
+const todayRazorpayCollectionEl = document.getElementById("todayRazorpayCollection");
 const pendingOrdersBadgeEl = document.getElementById("pendingOrdersBadge");
 
 const orderListEl = document.getElementById("orderList");
@@ -691,6 +711,28 @@ function orderCreatedDate(order = {}) {
     timestampToDate(order.updatedAt);
 }
 
+function normalizeOrderDate(value = {}) {
+  if (value instanceof Date) return timestampToDate(value);
+  if (value && typeof value === "object" && !value.toDate && typeof value.seconds !== "number") {
+    return orderCreatedDate(value);
+  }
+  return timestampToDate(value);
+}
+
+function filterOrdersByDateRange(orders = [], startDate = null, endDate = null) {
+  const start = normalizeOrderDate(startDate);
+  const end = normalizeOrderDate(endDate);
+  if (start) start.setHours(0, 0, 0, 0);
+  if (end) end.setHours(23, 59, 59, 999);
+  return orders.filter(order => {
+    const date = normalizeOrderDate(order);
+    if (!date) return false;
+    if (start && date < start) return false;
+    if (end && date > end) return false;
+    return true;
+  });
+}
+
 function isOrderToday(order = {}) {
   const date = orderCreatedDate(order);
   if (!date) return false;
@@ -706,6 +748,8 @@ function isOrderActive(order = {}) {
     order.billClosed !== true;
 }
 
+const isActiveOrder = isOrderActive;
+
 function isOrderCompleted(order = {}) {
   const status = String(order.status || "").toLowerCase();
   const payment = String(order.paymentStatus || "").toLowerCase();
@@ -714,6 +758,10 @@ function isOrderCompleted(order = {}) {
 
 function orderAmount(order = {}) {
   return Number(order.grandTotal ?? order.totalAmount ?? order.total ?? order.amount ?? 0);
+}
+
+function normalizedPaymentMethod(order = {}) {
+  return String(order.paymentMethod || order.payMode || order.paymentType || "cash").toLowerCase();
 }
 
 function formatBillDate(ts) {
@@ -2373,7 +2421,9 @@ async function deductInventoryForCompletedOrder(orderDocId) {
 }
 
 function startInventoryListeners() {
-  inventoryUnsubscribe?.(); inventoryLogsUnsubscribe?.();
+  cleanupFirestoreListeners(inventoryUnsubscribe, inventoryLogsUnsubscribe);
+  inventoryUnsubscribe = null;
+  inventoryLogsUnsubscribe = null;
   inventoryUnsubscribe = onSnapshot(collection(db, "restaurants", restaurantId, "inventory"), snap => {
     allInventoryItems = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => String(a.itemName).localeCompare(String(b.itemName)));
     renderInventory();
@@ -3945,18 +3995,36 @@ function processOrdersSnapshot(snap) {
   const activeOrders = allOrders.filter(isOrderActive);
   const todayActiveOrders = todayOrders.filter(isOrderActive);
   const completedOrders = todayOrders.filter(isOrderCompleted);
+  const paidTodayOrders = todayOrders.filter(isOrderCompleted);
 
-  const todayRevenue = todayOrders
-    .filter(isOrderCompleted)
-    .reduce((sum, o) => sum + orderAmount(o), 0);
+  const amountForMethod = matcher => paidTodayOrders
+    .filter(order => matcher(normalizedPaymentMethod(order)))
+    .reduce((sum, order) => sum + orderAmount(order), 0);
+  const todayRevenue = paidTodayOrders.reduce((sum, o) => sum + orderAmount(o), 0);
+  const todayCashCollection = amountForMethod(method => method === "cash" || method.includes("cash"));
+  const todayUpiCollection = amountForMethod(method => method === "upi" || method.includes("upi"));
+  const todayRazorpayCollection = amountForMethod(method => method.includes("razorpay") || method.includes("online") || method.includes("card"));
+  const dashboardOrders = todayOrders.length ? todayOrders.slice(0, 5) : activeOrders.slice(0, 5);
 
   if (todayOrdersEl) todayOrdersEl.textContent = String(todayOrders.length);
   if (pendingOrdersEl) pendingOrdersEl.textContent = String(todayActiveOrders.length);
   if (todayRevenueEl) todayRevenueEl.textContent = money(todayRevenue);
   if (completedOrdersEl) completedOrdersEl.textContent = String(completedOrders.length);
+  if (todayCashCollectionEl) todayCashCollectionEl.textContent = money(todayCashCollection);
+  if (todayUpiCollectionEl) todayUpiCollectionEl.textContent = money(todayUpiCollection);
+  if (todayRazorpayCollectionEl) todayRazorpayCollectionEl.textContent = money(todayRazorpayCollection);
   if (pendingOrdersBadgeEl) pendingOrdersBadgeEl.textContent = String(activeOrders.length);
 
-  renderOrdersList(orderListEl, activeOrders.slice(0, 8));
+  renderOrdersList(orderListEl, dashboardOrders);
+  if (!dashboardOrders.length && orderListEl) {
+    orderListEl.innerHTML = `
+      <div class="empty-state">
+        <i class="fas fa-inbox"></i>
+        <h4>No orders today yet</h4>
+        <p>New orders appear here automatically</p>
+      </div>
+    `;
+  }
   renderOrdersList(allOrdersListEl, getFilteredActiveOrders());
   renderBestSelling(todayOrders);
   renderReportRows();
@@ -3976,10 +4044,8 @@ function processOrdersSnapshot(snap) {
 ========================================================= */
 async function loadOrders() {
   try {
-    if (ordersUnsubscribe) {
-      ordersUnsubscribe();
-      ordersUnsubscribe = null;
-    }
+    cleanupFirestoreListeners(ordersUnsubscribe);
+    ordersUnsubscribe = null;
 
     devLog("orders query started", { restaurantId });
     ordersUnsubscribe = onSnapshot(
