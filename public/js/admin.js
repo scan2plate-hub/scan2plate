@@ -284,6 +284,7 @@ const itemVariantPriceFieldsEl = document.getElementById("itemVariantPriceFields
 const itemHalfPriceEl = document.getElementById("itemHalfPrice");
 const itemFullPriceEl = document.getElementById("itemFullPrice");
 const itemAvailableEl = document.getElementById("itemAvailable");
+const itemFoodTypeEl = document.getElementById("itemFoodType");
 const itemImageEl = document.getElementById("itemImage");
 const itemSortOrderEl = document.getElementById("itemSortOrder");
 const itemCategorySortEl = document.getElementById("itemCategorySort");
@@ -295,6 +296,15 @@ const deleteMenuBtn = document.getElementById("deleteMenuBtn");
 const clearMenuFormBtn = document.getElementById("clearMenuForm");
 const menuSearchEl = document.getElementById("menuSearch");
 const clearMenuSearchBtn = document.getElementById("clearMenuSearchBtn");
+const downloadMenuExcelFormatBtn = document.getElementById("downloadMenuExcelFormatBtn");
+const uploadMenuExcelBtn = document.getElementById("uploadMenuExcelBtn");
+const menuExcelInput = document.getElementById("menuExcelInput");
+const menuImportPreviewBtn = document.getElementById("menuImportPreviewBtn");
+const menuFoodTypeFilterEl = document.getElementById("menuFoodTypeFilter");
+const menuPriceFilterEl = document.getElementById("menuPriceFilter");
+const menuMinPriceFilterEl = document.getElementById("menuMinPriceFilter");
+const menuMaxPriceFilterEl = document.getElementById("menuMaxPriceFilter");
+const menuSortFilterEl = document.getElementById("menuSortFilter");
 const uploadMenuPdfBtn = document.getElementById("uploadMenuPdfBtn");
 const menuPdfInput = document.getElementById("menuPdfInput");
 const downloadMenuPdfSampleBtn = document.getElementById("downloadMenuPdfSampleBtn");
@@ -302,6 +312,7 @@ const menuImportCard = document.getElementById("menuImportCard");
 const menuImportRowsEl = document.getElementById("menuImportRows");
 const menuImportStatusEl = document.getElementById("menuImportStatus");
 const menuImportUpdateDuplicatesEl = document.getElementById("menuImportUpdateDuplicates");
+const menuImportModeEl = document.getElementById("menuImportMode");
 const importMenuBtn = document.getElementById("importMenuBtn");
 const cancelMenuImportBtn = document.getElementById("cancelMenuImportBtn");
 let menuImportItems = [];
@@ -498,6 +509,45 @@ function getUniqueCategories(items = []) {
 const MENU_PDF_CATEGORIES = ["Kadak Chai", "Hot Coffee", "Cold Coffee", "Milk Shake", "Coolers", "Hot Milk", "Firangi French Fries", "Garlic Bread", "Old Monk Special", "Magical Momos", "Magestic Maggie", "Burger Buffet", "Shahi Sandwich", "Pristine Pizza", "Aakhri Pasta", "Noodles", "Rolls", "Chinese Snacks", "Fried Rice", "Pav", "Soup", "Desi Paneer", "Marvellous Mushroom", "Roti & Rice", "South Indian", "Dessert Dhamaka", "Burger", "Pasta", "Drinks", "Chinese", "Tea", "Coffee", "Snacks", "Pizza", "Sandwich", "Momos", "Rice", "Dessert", "Starters", "Main Course", "Beverages"];
 const normalizedMenuName = value => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 const MENU_PDF_NOISE = /^(menu|open\s*10\s*am|basudeopur|@?old\s*monk\s*cafe|thanks|about\s*us|our\s*story|follow\s*us|rate\s*us|scan2plate)$/i;
+const menuExcelColumns = ["Category", "Item Name", "Food Type", "Base Price", "Description", "Available", "Image URL", "Has Variants", "Variant 1 Name", "Variant 1 Price", "Variant 2 Name", "Variant 2 Price", "Variant 3 Name", "Variant 3 Price", "Variant 4 Name", "Variant 4 Price", "Sort Order", "Tags"];
+const menuExcelInstructions = [
+  "Do not change column names.",
+  "Food Type must be Veg, Non Veg, Egg, or Other.",
+  "For normal item, enter Base Price and set Has Variants to No.",
+  "For Half Full item, set Has Variants to Yes and enter Variant names and prices.",
+  "For Small Medium pizza, set Has Variants to Yes and enter Small and Medium prices.",
+  "For Veg Paneer Chicken options, add variants or create separate item rows.",
+  "Available must be Yes or No.",
+  "Upload Excel and verify preview before confirming."
+];
+
+function normalizedFoodType(value = "") {
+  const text = String(value || "veg").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (["nonveg", "nonvegetarian", "chicken", "mutton", "meat"].includes(text)) return "nonveg";
+  if (["egg", "eggs"].includes(text)) return "egg";
+  if (["other", "na", "none"].includes(text)) return "other";
+  return "veg";
+}
+
+function foodTypeFlags(foodType = "veg") {
+  const normalized = normalizedFoodType(foodType);
+  return { foodType: normalized, isVeg: normalized === "veg", isNonVeg: normalized === "nonveg", isEgg: normalized === "egg" };
+}
+
+function foodTypeLabel(foodType = "veg") {
+  return ({ veg: "Veg", nonveg: "Non Veg", egg: "Egg", other: "Other" })[normalizedFoodType(foodType)] || "Veg";
+}
+
+function yesNo(value, fallback = true) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["yes", "y", "true", "1", "available", "on"].includes(text)) return true;
+  if (["no", "n", "false", "0", "unavailable", "off"].includes(text)) return false;
+  return fallback;
+}
+
+function tagsArray(value = "") {
+  return String(value || "").split(",").map(tag => tag.trim()).filter(Boolean);
+}
 
 function categoryFromMenuLine(line) {
   const clean = String(line || "").replace(/[₹|]/g, "").replace(/[:]/g, "").replace(/\s+/g, " ").trim();
@@ -589,29 +639,148 @@ function menuDuplicateFor(item) {
   return allMenuItems.find(existing => normalizedMenuName(existing.name) === normalizedMenuName(item.name) && normalizedMenuName(existing.category) === normalizedMenuName(item.category));
 }
 
+function normalizeImportedMenuItem(raw = {}) {
+  const variants = (raw.variants || [])
+    .map(variant => ({ name: String(variant.name || "").trim(), price: Number(variant.price || 0) }))
+    .filter(variant => variant.name && Number.isFinite(variant.price) && variant.price > 0);
+  const wantsVariants = yesNo(raw.hasVariants, false);
+  let price = Number(raw.price || raw.basePrice || 0);
+  if (wantsVariants && variants.length) {
+    const prices = variants.map(variant => variant.price);
+    price = Number.isFinite(price) && price > 0 ? Math.min(price, ...prices) : prices[0];
+  }
+  const flags = foodTypeFlags(raw.foodType || "veg");
+  const item = {
+    category: normalizeCategory(raw.category),
+    name: cleanMenuName(raw.name),
+    description: String(raw.description || "").trim(),
+    foodType: flags.foodType,
+    isVeg: flags.isVeg,
+    isNonVeg: flags.isNonVeg,
+    isEgg: flags.isEgg,
+    price,
+    basePrice: price,
+    available: raw.available !== false,
+    imageUrl: String(raw.imageUrl || "").trim(),
+    hasVariants: wantsVariants && variants.length > 0,
+    variants: wantsVariants ? variants : [],
+    tags: Array.isArray(raw.tags) ? raw.tags : tagsArray(raw.tags),
+    sortOrder: Number(raw.sortOrder || 0),
+    errors: []
+  };
+  if (!item.category) item.errors.push("Category required");
+  if (!isValidMenuName(item.name)) item.errors.push("Item Name required");
+  if (!["veg", "nonveg", "egg", "other"].includes(item.foodType)) item.errors.push("Food Type required");
+  if (wantsVariants && !variants.length) item.errors.push("At least one variant price required");
+  if (!wantsVariants && (!Number.isFinite(item.price) || item.price <= 0)) item.errors.push("Base Price required");
+  item.status = item.errors.length ? "invalid" : "valid";
+  return item;
+}
+
+function parseCsvMenu(text = "") {
+  const lines = String(text || "").split(/\r?\n/).filter(line => line.trim());
+  if (!lines.length) return [];
+  const parseLine = line => {
+    const values = [];
+    let current = "", quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"' && line[i + 1] === '"') { current += '"'; i++; continue; }
+      if (char === '"') { quoted = !quoted; continue; }
+      if (char === "," && !quoted) { values.push(current); current = ""; continue; }
+      current += char;
+    }
+    values.push(current);
+    return values;
+  };
+  const headers = parseLine(lines[0]).map(header => header.trim());
+  return lines.slice(1).map(line => {
+    const values = parseLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+  });
+}
+
+function parseMenuExcelRows(rows = []) {
+  return rows.map(row => {
+    const variants = [];
+    for (let index = 1; index <= 4; index++) {
+      if (String(row[`Variant ${index} Name`] || "").trim() || String(row[`Variant ${index} Price`] || "").trim()) {
+        variants.push({ name: row[`Variant ${index} Name`], price: row[`Variant ${index} Price`] });
+      }
+    }
+    return normalizeImportedMenuItem({
+      category: row.Category,
+      name: row["Item Name"],
+      foodType: row["Food Type"],
+      price: row["Base Price"],
+      description: row.Description,
+      available: yesNo(row.Available, true),
+      imageUrl: row["Image URL"],
+      hasVariants: yesNo(row["Has Variants"], false),
+      variants,
+      sortOrder: row["Sort Order"],
+      tags: row.Tags
+    });
+  }).filter(item => item.name || item.category);
+}
+
+async function readMenuExcelFile(file) {
+  if (!file) throw new Error("Choose Excel or CSV file first.");
+  const name = String(file.name || "").toLowerCase();
+  if (name.endsWith(".csv") || file.type === "text/csv") return parseMenuExcelRows(parseCsvMenu(await file.text()));
+  if (!window.XLSX) throw new Error("Excel reader is unavailable. Please check internet and try CSV format.");
+  const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return parseMenuExcelRows(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+}
+
 function renderMenuImportReview() {
   if (!menuImportRowsEl) return;
   menuImportCard.style.display = menuImportItems.length ? "block" : "none";
   if (!menuImportItems.length) return;
   menuImportRowsEl.innerHTML = menuImportItems.map((item, index) => {
     const duplicate = menuDuplicateFor(item);
-    return `<tr data-import-index="${index}"><td><input class="form-input import-category" value="${escapeHtml(item.category)}" /></td><td><input class="form-input import-name" value="${escapeHtml(item.name)}" /></td><td><input class="form-input import-price" type="number" min="1" value="${Number(item.price || 0)}" /></td><td>${duplicate ? `<span class="status-badge warning">Already exists</span>` : `<span class="status-badge success">New</span>`}</td><td><button class="btn btn-outline btn-sm import-edit" type="button">Edit</button></td><td><button class="btn btn-danger btn-sm import-remove" type="button">Remove</button></td></tr>`;
+    const variantsText = validMenuVariants(item).map(variant => `${variant.name} ${variant.price}`).join(", ");
+    const status = item.status === "invalid"
+      ? `<span class="status-badge danger">Invalid: ${escapeHtml(item.errors.join(", "))}</span>`
+      : duplicate ? `<span class="status-badge warning">Already exists</span>` : `<span class="status-badge success">Valid</span>`;
+    return `<tr data-import-index="${index}" style="${item.status === "invalid" ? "background:#fff1f2;" : "background:#f0fdf4;"}"><td><input class="form-input import-category" value="${escapeHtml(item.category)}" /></td><td><input class="form-input import-name" value="${escapeHtml(item.name)}" /></td><td><select class="form-select import-food-type"><option value="veg">Veg</option><option value="nonveg">Non Veg</option><option value="egg">Egg</option><option value="other">Other</option></select></td><td><input class="form-input import-price" type="number" min="1" value="${Number(item.price || 0)}" /></td><td><input class="form-input import-variants" value="${escapeHtml(variantsText)}" placeholder="Half 120, Full 220" /></td><td><select class="form-select import-available"><option value="true">Yes</option><option value="false">No</option></select></td><td>${status}</td><td><button class="btn btn-outline btn-sm import-edit" type="button">Edit</button></td><td><button class="btn btn-danger btn-sm import-remove" type="button">Remove</button></td></tr>`;
   }).join("");
+  menuImportRowsEl.querySelectorAll("tr[data-import-index]").forEach(row => {
+    const item = menuImportItems[Number(row.dataset.importIndex)] || {};
+    row.querySelector(".import-food-type").value = item.foodType || "veg";
+    row.querySelector(".import-available").value = String(item.available !== false);
+  });
   menuImportRowsEl.querySelectorAll(".import-edit").forEach(button => button.onclick = () => button.closest("tr")?.querySelector(".import-name")?.focus());
   menuImportRowsEl.querySelectorAll(".import-remove").forEach(button => button.onclick = () => { menuImportItems.splice(Number(button.closest("tr")?.dataset.importIndex), 1); renderMenuImportReview(); });
-  if (menuImportStatusEl) menuImportStatusEl.textContent = `${menuImportItems.length} item${menuImportItems.length === 1 ? "" : "s"} ready for review${menuImportInvalidCount ? ` · ${menuImportInvalidCount} invalid row${menuImportInvalidCount === 1 ? "" : "s"} skipped` : ""}${menuImportWarning ? ` · ${menuImportWarning}` : ""}`;
+  const invalid = menuImportItems.filter(item => item.status === "invalid").length;
+  if (menuImportStatusEl) menuImportStatusEl.textContent = `${menuImportItems.length} row${menuImportItems.length === 1 ? "" : "s"} in preview · ${invalid} invalid${menuImportInvalidCount ? ` · ${menuImportInvalidCount} skipped` : ""}${menuImportWarning ? ` · ${menuImportWarning}` : ""}`;
 }
 
 async function importReviewedMenuItems() {
   const rows = [...(menuImportRowsEl?.querySelectorAll("tr[data-import-index]") || [])];
-  const allReviewed = rows.map(row => ({ category: normalizeCategory(row.querySelector(".import-category")?.value), name: cleanMenuName(row.querySelector(".import-name")?.value), price: Number(row.querySelector(".import-price")?.value || 0) }));
-  const invalidRows = allReviewed.filter(item => !item.category || !isValidMenuName(item.name) || !Number.isFinite(item.price) || item.price <= 0).length;
-  const reviewed = allReviewed.filter(item => item.category && isValidMenuName(item.name) && Number.isFinite(item.price) && item.price > 0);
+  const allReviewed = rows.map(row => {
+    const original = menuImportItems[Number(row.dataset.importIndex)] || {};
+    const variants = String(row.querySelector(".import-variants")?.value || "").split(",").map(part => {
+      const match = part.trim().match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);
+      return match ? { name: match[1].trim(), price: Number(match[2]) } : null;
+    }).filter(Boolean);
+    return normalizeImportedMenuItem({ ...original, category: row.querySelector(".import-category")?.value, name: row.querySelector(".import-name")?.value, foodType: row.querySelector(".import-food-type")?.value, price: row.querySelector(".import-price")?.value, available: row.querySelector(".import-available")?.value === "true", hasVariants: variants.length > 0, variants });
+  });
+  const invalidRows = allReviewed.filter(item => item.status === "invalid").length;
+  const reviewed = allReviewed.filter(item => item.status !== "invalid");
   if (!reviewed.length) return alert("Add at least one valid item before importing.");
-  const updateDuplicates = Boolean(menuImportUpdateDuplicatesEl?.checked);
-  if (updateDuplicates && !confirm("Update category and price for matching existing menu items? Images and descriptions will stay unchanged.")) return;
+  if (invalidRows && !confirm(`${invalidRows} invalid row(s) will be skipped. Import only valid rows?`)) return;
+  const importMode = menuImportModeEl?.value || "add";
+  const updateDuplicates = importMode === "update" || Boolean(menuImportUpdateDuplicatesEl?.checked);
+  if (importMode === "replace" && !confirm("Replace existing menu? This deletes current menu items before importing valid rows.")) return;
   importMenuBtn.disabled = true; importMenuBtn.textContent = "Importing…";
   try {
+    if (importMode === "replace") {
+      const existing = await getDocs(collection(db, "restaurants", restaurantId, "menu"));
+      for (const row of existing.docs) await deleteDoc(row.ref);
+      allMenuItems = [];
+    }
     const nextSortByCategory = new Map();
     reviewed.forEach(item => { const key = normalizedMenuName(item.category); if (!nextSortByCategory.has(key)) nextSortByCategory.set(key, allMenuItems.filter(existing => normalizedMenuName(existing.category) === key).length + 1); });
     let added = 0, updated = 0, skipped = 0;
@@ -621,14 +790,15 @@ async function importReviewedMenuItems() {
       const categoryKey = normalizedMenuName(item.category);
       const sortOrder = nextSortByCategory.get(categoryKey) || 1;
       nextSortByCategory.set(categoryKey, sortOrder + 1);
-      const payload = { name:item.name, category:item.category, price:item.price, hasVariants:false, variants:[], available:true, sortOrder, updatedAt:serverTimestamp() };
+      const flags = foodTypeFlags(item.foodType);
+      const payload = { restaurantId, name:item.name, category:item.category, description:item.description || "", foodType:flags.foodType, isVeg:flags.isVeg, isNonVeg:flags.isNonVeg, isEgg:flags.isEgg, price:item.price, basePrice:item.basePrice || item.price, hasVariants:item.hasVariants, variants:item.variants || [], tags:item.tags || [], imageUrl:item.imageUrl || "", image:item.imageUrl || "", available:item.available !== false, sortOrder:item.sortOrder || sortOrder, updatedAt:serverTimestamp() };
       if (duplicate) { await setDoc(doc(db, "restaurants", restaurantId, "menu", duplicate.id), payload, { merge:true }); updated++; }
-      else { await addDoc(collection(db, "restaurants", restaurantId, "menu"), { ...payload, imageUrl:"", image:"", description:"", createdAt:serverTimestamp() }); added++; }
+      else { await addDoc(collection(db, "restaurants", restaurantId, "menu"), { ...payload, createdAt:serverTimestamp() }); added++; }
     }
     alert(`Menu import complete: Imported: ${added + updated}, Skipped duplicates: ${skipped}, Invalid rows: ${invalidRows}.`);
-    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuImportUpdateDuplicatesEl) menuImportUpdateDuplicatesEl.checked = false;
+    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuExcelInput) menuExcelInput.value = ""; if (menuImportUpdateDuplicatesEl) menuImportUpdateDuplicatesEl.checked = false;
     await loadMenuData(); renderMenuManagement(); renderManualMenuPicker(); renderMenuImportReview();
-  } catch (error) { console.error("Menu PDF import failed", error); alert("Could not import menu. Please review the items and try again."); }
+  } catch (error) { console.error("Menu import failed", error); alert("Menu import failed. Please check Excel format and try again."); }
   finally { importMenuBtn.disabled = false; importMenuBtn.innerHTML = '<i class="fas fa-file-import"></i> Import Menu'; }
 }
 
@@ -638,6 +808,30 @@ function downloadSampleMenuPdf() {
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
   let pdf = "%PDF-1.4\n", offsets = [0]; objects.forEach((object, index) => { offsets.push(pdf.length); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; }); const xref = pdf.length; pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([pdf], { type:"application/pdf" })); link.download = "scan2plate-menu-import-sample.pdf"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function downloadMenuExcelFormat() {
+  const sampleRows = [
+    ["Pizza", "Margherita", "Veg", 89, "Cheesy classic pizza", "Yes", "", "Yes", "Small", 89, "Medium", 129, "", "", "", "", 1, "pizza,veg"],
+    ["Pizza", "Chicken Tikka Pizza", "Non Veg", 139, "Chicken tikka pizza", "Yes", "", "Yes", "Small", 139, "Medium", 199, "", "", "", "", 2, "pizza,nonveg"],
+    ["Burger", "Aloo Tikki Burger", "Veg", 60, "", "Yes", "", "No", "", "", "", "", "", "", "", "", 1, "burger,veg"],
+    ["Main Course", "Paneer Masala", "Veg", 120, "", "Yes", "", "Yes", "Half", 120, "Full", 220, "", "", "", "", 1, "paneer"],
+    ["Momos", "Crispy Momo", "Veg", 90, "", "Yes", "", "Yes", "Veg", 90, "Paneer", 100, "", "", "", "", 1, "momo"],
+    ["Momos", "Crispy Momo Chicken", "Non Veg", 130, "", "Yes", "", "No", "", "", "", "", "", "", "", "", 2, "momo,nonveg"]
+  ];
+  if (window.XLSX) {
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, window.XLSX.utils.aoa_to_sheet([menuExcelColumns, ...sampleRows]), "Menu Format");
+    window.XLSX.utils.book_append_sheet(workbook, window.XLSX.utils.aoa_to_sheet([["Instructions"], ...menuExcelInstructions.map(text => [text])]), "Instructions");
+    window.XLSX.writeFile(workbook, "scan2plate-menu-format.xlsx");
+    return;
+  }
+  const csv = [menuExcelColumns, ...sampleRows].map(row => row.map(value => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  link.download = "scan2plate-menu-format.csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function getTaxPercent() {
@@ -1778,6 +1972,12 @@ function validMenuVariants(item = {}) {
     : [];
 }
 
+function menuDisplayPrice(item = {}) {
+  const variants = validMenuVariants(item);
+  if (variants.length) return Math.min(...variants.map(variant => variant.price));
+  return Number(item.basePrice || item.price || 0);
+}
+
 function hasMenuVariants(item = {}) {
   return validMenuVariants(item).length > 0;
 }
@@ -1793,7 +1993,21 @@ function itemDisplayName(item = {}) {
 function menuPriceLabel(item = {}) {
   const variants = validMenuVariants(item);
   if (!variants.length) return money(item.price || 0);
-  return variants.map(variant => `${escapeHtml(variant.name)} ${money(variant.price)}`).join(" · ");
+  return `Starting ${money(menuDisplayPrice(item))}<br><small>${variants.map(variant => `${escapeHtml(variant.name)} ${money(variant.price)}`).join(" · ")}</small>`;
+}
+
+function foodTypeBadge(item = {}) {
+  const type = normalizedFoodType(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : item.isVeg === false ? "other" : "veg"));
+  return `<span class="food-type-badge ${type}" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;text-transform:uppercase;color:${type === "nonveg" ? "#dc2626" : type === "egg" ? "#d97706" : type === "veg" ? "#16a34a" : "#64748b"};"><span class="food-type-icon ${type}" style="display:inline-grid;place-items:center;width:13px;height:13px;border:1.5px solid currentColor;border-radius:2px;"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;display:block;"></span></span>${escapeHtml(foodTypeLabel(type))}</span>`;
+}
+
+function priceFilterMatches(price, filterValue) {
+  if (filterValue === "under50") return price < 50;
+  if (filterValue === "50-100") return price >= 50 && price <= 100;
+  if (filterValue === "100-200") return price >= 100 && price <= 200;
+  if (filterValue === "200-500") return price >= 200 && price <= 500;
+  if (filterValue === "above500") return price > 500;
+  return true;
 }
 
 function setVariantFieldsEnabled(enabled) {
@@ -1865,6 +2079,7 @@ function clearMenuForm() {
   if (itemFullPriceEl) itemFullPriceEl.value = "";
   setVariantFieldsEnabled(false);
   if (itemAvailableEl) itemAvailableEl.value = "true";
+  if (itemFoodTypeEl) itemFoodTypeEl.value = "veg";
   if (itemImageEl) itemImageEl.value = "";
   if (itemSortOrderEl) itemSortOrderEl.value = "";
   if (itemDescriptionEl) itemDescriptionEl.value = "";
@@ -1884,6 +2099,7 @@ async function saveMenuItem() {
     const fullPrice = Number(itemFullPriceEl?.value || 0);
     const price = hasVariants ? fullPrice : Number(itemPriceEl?.value || 0);
     const available = itemAvailableEl?.value === "true";
+    const foodType = normalizedFoodType(itemFoodTypeEl?.value || "veg");
     const imageUrl = itemImageEl?.value.trim() || "";
     const sortOrder = Number(itemInCategorySortEl?.value || itemSortOrderEl?.value || 0);
     const description = itemDescriptionEl?.value.trim() || "";
@@ -1895,10 +2111,17 @@ async function saveMenuItem() {
     if (hasVariants && (!halfPrice || !fullPrice || halfPrice <= 0 || fullPrice <= 0)) return alert("Please enter both Half and Full prices.");
     if (!price || price <= 0) return alert("Enter valid price.");
 
+    const flags = foodTypeFlags(foodType);
     const payload = {
+      restaurantId,
       name,
       category,
       price,
+      basePrice: price,
+      foodType: flags.foodType,
+      isVeg: flags.isVeg,
+      isNonVeg: flags.isNonVeg,
+      isEgg: flags.isEgg,
       hasVariants,
       variants: hasVariants ? [
         { name: "Half", price: halfPrice },
@@ -1968,11 +2191,30 @@ function renderMenuManagement() {
   });
 
   const search = String(menuSearchEl?.value || "").trim().toLowerCase();
+  const foodFilter = menuFoodTypeFilterEl?.value || "all";
+  const priceFilter = menuPriceFilterEl?.value || "all";
+  const minRaw = String(menuMinPriceFilterEl?.value || "").trim();
+  const maxRaw = String(menuMaxPriceFilterEl?.value || "").trim();
+  const minPrice = minRaw === "" ? null : Number(minRaw);
+  const maxPrice = maxRaw === "" ? null : Number(maxRaw);
+  const sortMode = menuSortFilterEl?.value || "default";
 
   const filteredItems = allMenuItems.filter(item => {
     const categoryOk = selectedMenuCategory === "all" || normalizeCategory(item.category) === selectedMenuCategory;
-    const text = `${item.name || ""} ${item.category || ""} ${item.description || ""}`.toLowerCase();
-    return categoryOk && (!search || text.includes(search));
+    const itemFoodType = normalizedFoodType(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : item.isVeg === false ? "other" : "veg"));
+    const foodOk = foodFilter === "all" || itemFoodType === foodFilter;
+    const displayPrice = menuDisplayPrice(item);
+    const priceOk = priceFilterMatches(displayPrice, priceFilter) &&
+      (minPrice === null || displayPrice >= minPrice) &&
+      (maxPrice === null || displayPrice <= maxPrice);
+    const text = `${item.name || ""} ${item.category || ""} ${item.description || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
+    return categoryOk && foodOk && priceOk && (!search || text.includes(search));
+  }).sort((a, b) => {
+    if (sortMode === "price-asc") return menuDisplayPrice(a) - menuDisplayPrice(b);
+    if (sortMode === "price-desc") return menuDisplayPrice(b) - menuDisplayPrice(a);
+    if (sortMode === "name-asc") return String(a.name || "").localeCompare(String(b.name || ""));
+    if (sortMode === "category") return normalizeCategory(a.category).localeCompare(normalizeCategory(b.category)) || String(a.name || "").localeCompare(String(b.name || ""));
+    return 0;
   });
 
   if (!menuListEl) return;
@@ -1999,6 +2241,7 @@ function renderMenuManagement() {
       <div class="menu-item-info">
         <div class="menu-item-name">${escapeHtml(item.name || "")}</div>
         <div class="menu-item-category">${escapeHtml(normalizeCategory(item.category))}</div>
+        <div style="margin-bottom:8px;">${foodTypeBadge(item)}</div>
         <div class="menu-item-footer">
           <div class="menu-item-price">${menuPriceLabel(item)}</div>
           <span class="menu-item-badge ${item.available === false ? "unavailable" : "available"}">
@@ -2030,6 +2273,7 @@ function renderMenuManagement() {
       if (itemFullPriceEl) itemFullPriceEl.value = full?.price || item.price || "";
       setVariantFieldsEnabled(variants.length > 0);
       if (itemAvailableEl) itemAvailableEl.value = String(item.available !== false);
+      if (itemFoodTypeEl) itemFoodTypeEl.value = normalizedFoodType(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : "veg"));
       if (itemImageEl) itemImageEl.value = item.imageUrl || item.image || "";
       if (itemSortOrderEl) itemSortOrderEl.value = item.sortOrder || "";
       renderMenuSortSelectors();
@@ -4140,8 +4384,18 @@ deleteMenuBtn?.addEventListener("click", deleteMenuItem);
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
 itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
 menuSearchEl?.addEventListener("input", renderMenuManagement);
+menuFoodTypeFilterEl?.addEventListener("change", renderMenuManagement);
+menuPriceFilterEl?.addEventListener("change", renderMenuManagement);
+menuMinPriceFilterEl?.addEventListener("input", renderMenuManagement);
+menuMaxPriceFilterEl?.addEventListener("input", renderMenuManagement);
+menuSortFilterEl?.addEventListener("change", renderMenuManagement);
 clearMenuSearchBtn?.addEventListener("click", () => {
   if (menuSearchEl) menuSearchEl.value = "";
+  if (menuFoodTypeFilterEl) menuFoodTypeFilterEl.value = "all";
+  if (menuPriceFilterEl) menuPriceFilterEl.value = "all";
+  if (menuMinPriceFilterEl) menuMinPriceFilterEl.value = "";
+  if (menuMaxPriceFilterEl) menuMaxPriceFilterEl.value = "";
+  if (menuSortFilterEl) menuSortFilterEl.value = "default";
   renderMenuManagement();
 });
 tableSearchEl?.addEventListener("input", renderTablesSection);
@@ -4151,6 +4405,28 @@ clearManualMenuSearchBtn?.addEventListener("click", () => {
   renderManualMenuPicker();
 });
 uploadMenuPdfBtn?.addEventListener("click", () => menuPdfInput?.click());
+downloadMenuExcelFormatBtn?.addEventListener("click", downloadMenuExcelFormat);
+uploadMenuExcelBtn?.addEventListener("click", () => menuExcelInput?.click());
+menuImportPreviewBtn?.addEventListener("click", () => {
+  if (menuImportItems.length) renderMenuImportReview();
+  else if (menuExcelInput?.files?.[0]) menuExcelInput.dispatchEvent(new Event("change"));
+  else alert("Upload Excel menu first.");
+});
+menuExcelInput?.addEventListener("change", async () => {
+  const file = menuExcelInput.files?.[0];
+  if (!file) return;
+  try {
+    if (menuImportStatusEl) menuImportStatusEl.textContent = "Reading Excel menu...";
+    menuImportItems = await readMenuExcelFile(file);
+    menuImportInvalidCount = 0;
+    menuImportWarning = "Review valid/invalid rows before confirming import.";
+    renderMenuImportReview();
+  } catch (error) {
+    console.error("Menu Excel import failed", error);
+    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; renderMenuImportReview();
+    alert("Menu import failed. Please check Excel format and try again.");
+  }
+});
 menuPdfInput?.addEventListener("change", async () => {
   const file = menuPdfInput.files?.[0];
   if (!file) return;
@@ -4159,18 +4435,18 @@ menuPdfInput?.addEventListener("change", async () => {
     if (menuImportStatusEl) menuImportStatusEl.textContent = "Reading menu PDF…";
     const extracted = await extractMenuPdf(file);
     if (!extracted.items.length) throw new Error("No menu items detected");
-    menuImportItems = extracted.items;
+    menuImportItems = extracted.items.map(item => normalizeImportedMenuItem({ ...item, foodType: "veg", available: true, hasVariants: false }));
     menuImportInvalidCount = extracted.invalid;
     menuImportWarning = extracted.headings ? "Some items may need review. Please check category, item name and price before import." : "Category headings were not confidently detected. Please review categories before import.";
     renderMenuImportReview();
   } catch (error) {
     console.error("Menu PDF extraction failed", error);
     menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; renderMenuImportReview();
-    alert("Could not read menu clearly. Please upload clear PDF or enter manually.");
+    alert("PDF is image based and could not be read accurately. Please use Excel menu upload format.");
   }
 });
 importMenuBtn?.addEventListener("click", importReviewedMenuItems);
-cancelMenuImportBtn?.addEventListener("click", () => { menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; renderMenuImportReview(); });
+cancelMenuImportBtn?.addEventListener("click", () => { menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuExcelInput) menuExcelInput.value = ""; renderMenuImportReview(); });
 downloadMenuPdfSampleBtn?.addEventListener("click", downloadSampleMenuPdf);
 addInventoryUsageBtn?.addEventListener("click", () => renderInventoryUsageRows([
   ...(inventoryUsageRowsEl ? [...inventoryUsageRowsEl.querySelectorAll(".inventory-usage-row")].map(row => ({

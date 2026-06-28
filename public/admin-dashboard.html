@@ -952,6 +952,15 @@
                   </select>
                 </div>
                 <div class="form-group">
+                  <label class="form-label">Food Type</label>
+                  <select class="form-select" id="itemFoodType">
+                    <option value="veg">Veg</option>
+                    <option value="nonveg">Non Veg</option>
+                    <option value="egg">Egg</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div class="form-group">
                   <label class="form-label">Sort Order</label>
                   <input class="form-input" id="itemSortOrder" type="number" placeholder="1, 2, 3..." />
                 </div>
@@ -994,9 +1003,19 @@
           <div class="card">
             <div class="card-header">
               <h3 class="card-title"><i class="fas fa-utensils"></i> Menu Items</h3>
-              <div class="btn-group"><button class="btn btn-sm btn-outline" id="uploadMenuPdfBtn" type="button"><i class="fas fa-file-pdf"></i> Upload Menu PDF</button><input id="menuPdfInput" type="file" accept="application/pdf,.pdf" hidden /><button class="btn btn-sm btn-outline" id="downloadMenuPdfSampleBtn" type="button"><i class="fas fa-download"></i> Download sample PDF format</button><input type="text" class="form-input" placeholder="Search menu item..." id="menuSearch" style="width:min(260px,100%);" /><button class="btn btn-sm btn-outline" id="clearMenuSearchBtn" type="button">X</button></div>
+              <div class="btn-group"><button class="btn btn-sm btn-outline" id="downloadMenuExcelFormatBtn" type="button"><i class="fas fa-file-excel"></i> Download Excel Format</button><button class="btn btn-sm btn-outline" id="uploadMenuExcelBtn" type="button"><i class="fas fa-file-arrow-up"></i> Upload Excel Menu</button><input id="menuExcelInput" type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden /><button class="btn btn-sm btn-outline" id="menuImportPreviewBtn" type="button">Import Preview</button><button class="btn btn-sm btn-outline" id="uploadMenuPdfBtn" type="button"><i class="fas fa-file-pdf"></i> Upload Menu PDF</button><input id="menuPdfInput" type="file" accept="application/pdf,.pdf" hidden /><button class="btn btn-sm btn-outline" id="downloadMenuPdfSampleBtn" type="button"><i class="fas fa-download"></i> Download sample PDF format</button></div>
             </div>
             <div class="card-body">
+              <p class="muted" style="margin-top:0;">For best accuracy upload menu using Excel format.</p>
+              <div class="form-row" style="align-items:end;">
+                <div class="form-group"><label class="form-label">Search</label><input type="text" class="form-input" placeholder="Search menu item..." id="menuSearch" /></div>
+                <div class="form-group"><label class="form-label">Food Type</label><select class="form-select" id="menuFoodTypeFilter"><option value="all">All</option><option value="veg">Veg</option><option value="nonveg">Non Veg</option><option value="egg">Egg</option><option value="other">Other</option></select></div>
+                <div class="form-group"><label class="form-label">Price</label><select class="form-select" id="menuPriceFilter"><option value="all">All Prices</option><option value="under50">Under ₹50</option><option value="50-100">₹50 to ₹100</option><option value="100-200">₹100 to ₹200</option><option value="200-500">₹200 to ₹500</option><option value="above500">Above ₹500</option></select></div>
+                <div class="form-group"><label class="form-label">Min Price</label><input class="form-input" id="menuMinPriceFilter" type="number" min="0" placeholder="Min" /></div>
+                <div class="form-group"><label class="form-label">Max Price</label><input class="form-input" id="menuMaxPriceFilter" type="number" min="0" placeholder="Max" /></div>
+                <div class="form-group"><label class="form-label">Sort</label><select class="form-select" id="menuSortFilter"><option value="default">Default</option><option value="price-asc">Price Low to High</option><option value="price-desc">Price High to Low</option><option value="name-asc">Name A to Z</option><option value="category">Category</option></select></div>
+                <button class="btn btn-sm btn-outline" id="clearMenuSearchBtn" type="button">Clear</button>
+              </div>
               <div class="tab-pills" id="menuCategoryTabs"><button class="tab-pill active" data-category="all">All</button></div>
               <div class="menu-grid" id="menuList" style="margin-top:13px;"></div>
             </div>
@@ -1006,9 +1025,12 @@
           <div class="card-header"><h3 class="card-title"><i class="fas fa-file-import"></i> Review Imported Menu</h3><span id="menuImportStatus" class="muted" style="font-size:12px;"></span></div>
           <div class="card-body">
             <p class="muted" style="margin-top:0;">Review every extracted item before importing. Existing menu items are never changed unless you explicitly enable update duplicates.</p>
-            <div style="overflow:auto;"><table class="data-table" style="min-width:650px;"><thead><tr><th>Category</th><th>Item Name</th><th>Price</th><th>Status</th><th>Edit</th><th>Remove</th></tr></thead><tbody id="menuImportRows"></tbody></table></div>
-            <label class="check-row" style="margin-top:14px;"><input id="menuImportUpdateDuplicates" type="checkbox" /> Update price/category for duplicates (confirmed overwrite)</label>
-            <div class="btn-group" style="margin-top:14px;"><button class="btn btn-primary" id="importMenuBtn" type="button"><i class="fas fa-file-import"></i> Import Menu</button><button class="btn btn-outline" id="cancelMenuImportBtn" type="button">Cancel</button></div>
+            <div style="overflow:auto;"><table class="data-table" style="min-width:980px;"><thead><tr><th>Category</th><th>Item Name</th><th>Food Type</th><th>Base Price</th><th>Variants</th><th>Available</th><th>Status</th><th>Edit</th><th>Remove</th></tr></thead><tbody id="menuImportRows"></tbody></table></div>
+            <div class="form-row" style="margin-top:14px;">
+              <div class="form-group"><label class="form-label">Import Mode</label><select class="form-select" id="menuImportMode"><option value="add">Add to existing menu</option><option value="replace">Replace existing menu</option><option value="update">Update matching items by name and category</option></select></div>
+            </div>
+            <label class="check-row" style="margin-top:4px;"><input id="menuImportUpdateDuplicates" type="checkbox" /> Update price/category for duplicates (legacy PDF option)</label>
+            <div class="btn-group" style="margin-top:14px;"><button class="btn btn-primary" id="importMenuBtn" type="button"><i class="fas fa-file-import"></i> Confirm Import</button><button class="btn btn-outline" id="cancelMenuImportBtn" type="button">Cancel</button></div>
           </div>
         </div>
       </section>
@@ -1352,6 +1374,7 @@
   </style>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script type="module" src="./js/admin.js"></script>
   <script type="module" src="./js/admin-modules.js"></script>
 

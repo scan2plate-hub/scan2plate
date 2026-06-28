@@ -782,6 +782,13 @@
           </div>
 
           <div id="categoryChips" class="chips"></div>
+          <div class="menu-filter-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+            <select id="foodTypeFilter" class="field" style="max-width:150px;margin:0;"><option value="all">All</option><option value="veg">Veg</option><option value="nonveg">Non Veg</option><option value="egg">Egg</option></select>
+            <select id="priceFilter" class="field" style="max-width:170px;margin:0;"><option value="all">All Prices</option><option value="under50">Under ₹50</option><option value="50-100">₹50 to ₹100</option><option value="100-200">₹100 to ₹200</option><option value="200-500">₹200 to ₹500</option><option value="above500">Above ₹500</option></select>
+            <input id="minPriceFilter" class="field" type="number" min="0" placeholder="Min Price" style="max-width:120px;margin:0;" />
+            <input id="maxPriceFilter" class="field" type="number" min="0" placeholder="Max Price" style="max-width:120px;margin:0;" />
+            <select id="menuSortFilter" class="field" style="max-width:170px;margin:0;"><option value="default">Default</option><option value="price-asc">Price Low to High</option><option value="price-desc">Price High to Low</option><option value="name-asc">Name A to Z</option><option value="category">Category</option></select>
+          </div>
           <div id="menuGrid" class="menu-grid" aria-live="polite">
             <p class="muted">Loading menu...</p>
           </div>
@@ -917,6 +924,11 @@ import {
     const taxTotalEl = document.getElementById("taxTotal");
     const grandTotalEl = document.getElementById("grandTotal");
     const searchBox = document.getElementById("searchBox");
+    const foodTypeFilter = document.getElementById("foodTypeFilter");
+    const priceFilter = document.getElementById("priceFilter");
+    const minPriceFilter = document.getElementById("minPriceFilter");
+    const maxPriceFilter = document.getElementById("maxPriceFilter");
+    const menuSortFilter = document.getElementById("menuSortFilter");
     const placeOrderBtn = document.getElementById("placeOrderBtn");
     const clearCartBtn = document.getElementById("clearCartBtn");
     const orderSuccess = document.getElementById("orderSuccess");
@@ -1079,11 +1091,27 @@ import {
 
     function filteredMenu() {
       const q = (searchBox.value || "").trim().toLowerCase();
+      const foodFilter = foodTypeFilter?.value || "all";
+      const priceValue = priceFilter?.value || "all";
+      const minRaw = String(minPriceFilter?.value || "").trim();
+      const maxRaw = String(maxPriceFilter?.value || "").trim();
+      const min = minRaw === "" ? null : Number(minRaw);
+      const max = maxRaw === "" ? null : Number(maxRaw);
+      const sort = menuSortFilter?.value || "default";
 
       return menu.filter(item => {
         const catOk = activeCategory === "All" || (item.category || "Other") === activeCategory;
-        const text = `${item.name || ""} ${item.category || ""}`.toLowerCase();
-        return catOk && (!q || text.includes(q));
+        const foodOk = foodFilter === "all" || normalizedFoodType(item) === foodFilter;
+        const price = menuDisplayPrice(item);
+        const priceOk = priceFilterMatches(price, priceValue) && (min === null || price >= min) && (max === null || price <= max);
+        const text = `${item.name || ""} ${item.category || ""} ${item.description || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
+        return catOk && foodOk && priceOk && (!q || text.includes(q));
+      }).sort((a, b) => {
+        if (sort === "price-asc") return menuDisplayPrice(a) - menuDisplayPrice(b);
+        if (sort === "price-desc") return menuDisplayPrice(b) - menuDisplayPrice(a);
+        if (sort === "name-asc") return String(a.name || "").localeCompare(String(b.name || ""));
+        if (sort === "category") return String(a.category || "Other").localeCompare(String(b.category || "Other")) || String(a.name || "").localeCompare(String(b.name || ""));
+        return 0;
       });
     }
 
@@ -1097,6 +1125,35 @@ import {
 
     function hasMenuVariants(item = {}) {
       return validMenuVariants(item).length > 0;
+    }
+
+    function normalizedFoodType(item = {}) {
+      const raw = String(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : item.isVeg === false ? "other" : "veg")).toLowerCase().replace(/[\s_-]+/g, "");
+      if (raw === "nonveg" || raw === "nonvegetarian") return "nonveg";
+      if (raw === "egg") return "egg";
+      if (raw === "other") return "other";
+      return "veg";
+    }
+
+    function foodTypeBadge(item = {}) {
+      const type = normalizedFoodType(item);
+      const label = ({ veg: "VEG", nonveg: "NON VEG", egg: "EGG", other: "OTHER" })[type] || "VEG";
+      const color = type === "nonveg" ? "#dc2626" : type === "egg" ? "#d97706" : type === "veg" ? "#16a34a" : "#64748b";
+      return `<span class="food-type-badge ${type}" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;color:${color};"><span class="food-type-icon ${type}" style="display:inline-grid;place-items:center;width:13px;height:13px;border:1.5px solid currentColor;border-radius:2px;"><span style="display:block;width:6px;height:6px;border-radius:50%;background:currentColor;"></span></span>${label}</span>`;
+    }
+
+    function menuDisplayPrice(item = {}) {
+      const variants = validMenuVariants(item);
+      return variants.length ? Math.min(...variants.map(variant => variant.price)) : Number(item.basePrice || item.price || 0);
+    }
+
+    function priceFilterMatches(price, filter) {
+      if (filter === "under50") return price < 50;
+      if (filter === "50-100") return price >= 50 && price <= 100;
+      if (filter === "100-200") return price >= 100 && price <= 200;
+      if (filter === "200-500") return price >= 200 && price <= 500;
+      if (filter === "above500") return price > 500;
+      return true;
     }
 
     function itemDisplayName(item = {}) {
@@ -1114,7 +1171,7 @@ import {
     function menuPriceLabel(item = {}) {
       const variants = validMenuVariants(item);
       return variants.length
-        ? variants.map(variant => `${variant.name} ${money(variant.price)}`).join(" · ")
+        ? `Starting ${money(menuDisplayPrice(item))}<br><small>${variants.map(variant => `${variant.name} ${money(variant.price)}`).join(" · ")}</small>`
         : money(item.price);
     }
 
@@ -1156,6 +1213,7 @@ import {
           >
           <div class="menu-item-body">
             <h3>${item.name || ""}</h3>
+            <div style="margin-bottom:5px;">${foodTypeBadge(item)}</div>
             <div class="muted small">${item.category || "Other"}</div>
             <div class="price-row">
               <strong>${menuPriceLabel(item)}</strong>
@@ -1424,6 +1482,8 @@ import {
     };
 
     searchBox.addEventListener("input", renderMenu);
+    [foodTypeFilter, priceFilter, menuSortFilter].forEach(el => el?.addEventListener("change", renderMenu));
+    [minPriceFilter, maxPriceFilter].forEach(el => el?.addEventListener("input", renderMenu));
     renderCart();
     try {
       await loadMenu();

@@ -31,6 +31,11 @@ const menuGrid = qs('#menuGrid');
 const categoryChips = qs('#categoryChips');
 const cartList = qs('#cartList');
 const searchBox = qs('#searchBox');
+let foodTypeFilter = qs('#foodTypeFilter');
+let priceFilter = qs('#priceFilter');
+let minPriceFilter = qs('#minPriceFilter');
+let maxPriceFilter = qs('#maxPriceFilter');
+let menuSortFilter = qs('#menuSortFilter');
 const customerName = qs('#customerName');
 const customerPhone = qs('#customerPhone');
 const customerNote = qs('#customerNote');
@@ -74,6 +79,21 @@ let activeCategory = 'All';
 let cart = readLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, []);
 let customerLoadDone = false;
 let customerLoadTimer = null;
+
+function ensureMenuFilters() {
+  if (!categoryChips || foodTypeFilter) return;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;';
+  wrap.innerHTML = `<select id="foodTypeFilter" class="select"><option value="all">All</option><option value="veg">Veg</option><option value="nonveg">Non Veg</option><option value="egg">Egg</option></select><select id="priceFilter" class="select"><option value="all">All Prices</option><option value="under50">Under ₹50</option><option value="50-100">₹50 to ₹100</option><option value="100-200">₹100 to ₹200</option><option value="200-500">₹200 to ₹500</option><option value="above500">Above ₹500</option></select><input id="minPriceFilter" class="input" type="number" min="0" placeholder="Min Price" /><input id="maxPriceFilter" class="input" type="number" min="0" placeholder="Max Price" /><select id="menuSortFilter" class="select"><option value="default">Default</option><option value="price-asc">Price Low to High</option><option value="price-desc">Price High to Low</option><option value="name-asc">Name A to Z</option><option value="category">Category</option></select>`;
+  categoryChips.insertAdjacentElement('afterend', wrap);
+  foodTypeFilter = qs('#foodTypeFilter');
+  priceFilter = qs('#priceFilter');
+  minPriceFilter = qs('#minPriceFilter');
+  maxPriceFilter = qs('#maxPriceFilter');
+  menuSortFilter = qs('#menuSortFilter');
+  [foodTypeFilter, priceFilter, menuSortFilter].forEach(el => el?.addEventListener('change', renderMenu));
+  [minPriceFilter, maxPriceFilter].forEach(el => el?.addEventListener('input', renderMenu));
+}
 
 function showCustomerLoadNotice(message = 'Taking longer than expected. Please check internet and retry.', error = null) {
   const target = menuGrid || customerApp || document.body;
@@ -119,6 +139,7 @@ customerPhone?.addEventListener('input', () => {
 customerNote?.addEventListener('input', () => saveLocal('scan2plate_customer_note', customerNote.value));
 whatsappConsent?.addEventListener('change', () => saveLocal('scan2plate_whatsapp_consent', whatsappConsent.checked));
 searchBox?.addEventListener('input', renderMenu);
+ensureMenuFilters();
 clearCartBtn?.addEventListener('click', () => {
   cart = [];
   syncCart();
@@ -281,16 +302,33 @@ function renderCategories() {
 
 function filteredMenu() {
   const q = searchBox ? searchBox.value.trim().toLowerCase() : '';
+  const foodFilter = foodTypeFilter?.value || 'all';
+  const priceValue = priceFilter?.value || 'all';
+  const minRaw = String(minPriceFilter?.value || '').trim();
+  const maxRaw = String(maxPriceFilter?.value || '').trim();
+  const min = minRaw === '' ? null : Number(minRaw);
+  const max = maxRaw === '' ? null : Number(maxRaw);
+  const sort = menuSortFilter?.value || 'default';
 
   return menu.filter(item => {
     const catOk = activeCategory === 'All' || (item.category || 'Other') === activeCategory;
+    const foodOk = foodFilter === 'all' || normalizedFoodType(item) === foodFilter;
+    const displayPrice = menuDisplayPrice(item);
+    const priceOk = priceFilterMatches(displayPrice, priceValue) && (min === null || displayPrice >= min) && (max === null || displayPrice <= max);
     const qOk =
       !q ||
       String(item.name || '').toLowerCase().includes(q) ||
       String(item.category || '').toLowerCase().includes(q) ||
-      String(item.description || '').toLowerCase().includes(q);
+      String(item.description || '').toLowerCase().includes(q) ||
+      (item.tags || []).join(' ').toLowerCase().includes(q);
 
-    return catOk && qOk;
+    return catOk && foodOk && priceOk && qOk;
+  }).sort((a, b) => {
+    if (sort === 'price-asc') return menuDisplayPrice(a) - menuDisplayPrice(b);
+    if (sort === 'price-desc') return menuDisplayPrice(b) - menuDisplayPrice(a);
+    if (sort === 'name-asc') return String(a.name || '').localeCompare(String(b.name || ''));
+    if (sort === 'category') return String(a.category || 'Other').localeCompare(String(b.category || 'Other')) || String(a.name || '').localeCompare(String(b.name || ''));
+    return 0;
   });
 }
 
@@ -313,6 +351,35 @@ function hasMenuVariants(item = {}) {
   return validMenuVariants(item).length > 0;
 }
 
+function normalizedFoodType(item = {}) {
+  const raw = String(item.foodType || (item.isNonVeg ? 'nonveg' : item.isEgg ? 'egg' : item.isVeg === false ? 'other' : 'veg')).toLowerCase().replace(/[\s_-]+/g, '');
+  if (raw === 'nonveg' || raw === 'nonvegetarian') return 'nonveg';
+  if (raw === 'egg') return 'egg';
+  if (raw === 'other') return 'other';
+  return 'veg';
+}
+
+function foodTypeBadge(item = {}) {
+  const type = normalizedFoodType(item);
+  const label = ({ veg: 'VEG', nonveg: 'NON VEG', egg: 'EGG', other: 'OTHER' })[type] || 'VEG';
+  const color = type === 'nonveg' ? '#dc2626' : type === 'egg' ? '#d97706' : type === 'veg' ? '#16a34a' : '#64748b';
+  return `<span class="food-type-badge ${type}" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;color:${color};"><span class="food-type-icon ${type}" style="display:inline-grid;place-items:center;width:13px;height:13px;border:1.5px solid currentColor;border-radius:2px;"><span style="display:block;width:6px;height:6px;border-radius:50%;background:currentColor;"></span></span>${label}</span>`;
+}
+
+function menuDisplayPrice(item = {}) {
+  const variants = validMenuVariants(item);
+  return variants.length ? Math.min(...variants.map(variant => variant.price)) : Number(item.basePrice || item.price || 0);
+}
+
+function priceFilterMatches(price, filter) {
+  if (filter === 'under50') return price < 50;
+  if (filter === '50-100') return price >= 50 && price <= 100;
+  if (filter === '100-200') return price >= 100 && price <= 200;
+  if (filter === '200-500') return price >= 200 && price <= 500;
+  if (filter === 'above500') return price > 500;
+  return true;
+}
+
 function itemDisplayName(item = {}) {
   const baseName = String(item.name || 'Item').trim() || 'Item';
   const variantName = String(item.variantName || '').trim();
@@ -328,7 +395,7 @@ function cartKeyForItem(item = {}) {
 function menuPriceLabel(item = {}) {
   const variants = validMenuVariants(item);
   return variants.length
-    ? variants.map(variant => `${escapeHtml(variant.name)} ${fmtCurrency(variant.price)}`).join(' · ')
+    ? `Starting ${fmtCurrency(menuDisplayPrice(item))}<br><small>${variants.map(variant => `${escapeHtml(variant.name)} ${fmtCurrency(variant.price)}`).join(' · ')}</small>`
     : fmtCurrency(Number(item.price || 0));
 }
 
@@ -365,6 +432,7 @@ function renderMenu() {
         ${itemMedia(item)}
         <div>
           <h3>${escapeHtml(item.name || '')}</h3>
+          <div style="margin-bottom:5px;">${foodTypeBadge(item)}</div>
           <div class="muted small">${escapeHtml(item.category || 'Other')}</div>
           <p class="muted small">${escapeHtml(item.description || 'Freshly prepared item')}</p>
         </div>
