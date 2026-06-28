@@ -34,6 +34,7 @@ const client = twilioEnabled ? twilio(process.env.TWILIO_ACCOUNT_SID, process.en
 const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || "";
 const storageBucketName = rawBucket.replace(/^gs:\/\//, "").trim();
 console.log("Firebase Storage bucket:", storageBucketName);
+const aiHelpDailyUsage = new Map();
 
 let adminReady = false;
 let firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
@@ -102,6 +103,128 @@ function ocrFailure(response, result = {}, extra = {}) {
   return error;
 }
 function debugOcr(event, data) { if (process.env.NODE_ENV !== "production") console.info(`[OCR] ${event}`, data); }
+function safeString(value, max = 1200) { return String(value || "").replace(/\s+/g, " ").trim().slice(0, max); }
+const helpKnowledgeBase = [
+  {
+    keys: ["qr", "not opening", "customer page", "loading stuck", "scan"],
+    answer: "1. Check the QR URL has the correct restaurantId and table number.\n2. Open the same link in an incognito browser.\n3. Confirm the restaurant is active in Super Admin.\n4. Check internet connection on the customer phone.\n5. If the customer page keeps loading, open Admin Settings and confirm the menu has active items.\n6. If still failing, create a support ticket with the QR link."
+  },
+  {
+    keys: ["order", "not showing", "visible", "live order"],
+    answer: "1. Refresh Admin Dashboard and check Live Orders > Active.\n2. Confirm the customer used the correct restaurant QR.\n3. Check the order was not already marked paid/completed.\n4. Confirm Firebase internet access is working.\n5. Check Super Admin plan status is active.\n6. If the order is still missing, create a support ticket."
+  },
+  {
+    keys: ["kot", "print", "kitchen"],
+    answer: "1. Check printer is connected and selected as the default printer.\n2. Open Settings > Print Settings.\n3. Use Browser Print Mode.\n4. Allow popup permission in the browser.\n5. Set paper size to 80mm and scale to 100%.\n6. Try Print KOT again.\n7. If still not working, create a support ticket."
+  },
+  {
+    keys: ["bill", "print", "small", "blur", "thermal"],
+    answer: "1. Use Chrome browser for thermal bill printing.\n2. In print dialog choose the 80mm thermal printer.\n3. Set margins to none/default and scale to 100%.\n4. Disable headers and footers.\n5. If logo or QR is blurry, upload a smaller clear logo and retry.\n6. If still unclear, create a support ticket with a bill photo."
+  },
+  {
+    keys: ["logo", "upload", "storage", "bucket"],
+    answer: "1. Use JPG, PNG, or WEBP logo under 1MB after compression.\n2. Check Backend URL in Settings is correct.\n3. Confirm Firebase Storage bucket is configured on backend.\n4. Save Settings again and wait for success.\n5. Refresh the page and check logo preview.\n6. If upload fails again, create a support ticket with the exact error."
+  },
+  {
+    keys: ["ocr", "scan", "supplier", "bill", "apikey"],
+    answer: "1. Open Settings and click Test OCR Connection.\n2. Confirm Backend URL is correct.\n3. Use a clear JPG/PNG/PDF bill image.\n4. Keep the bill flat, bright, and readable.\n5. If OCR key is missing, backend env OCR_SPACE_API_KEY must be added.\n6. If scan still fails, create a support ticket with the error shown."
+  },
+  {
+    keys: ["dashboard", "zero", "today", "reset"],
+    answer: "1. Dashboard counts only today's business data.\n2. Check Restaurant Settings > Daily Order Number Reset Time.\n3. Orders before reset time may count in the previous business day.\n4. Check Live Orders > All to see older orders.\n5. Refresh once after internet reconnects.\n6. If counts are still wrong, create a support ticket."
+  },
+  {
+    keys: ["whatsapp", "message", "twilio"],
+    answer: "1. Confirm kitchen/customer phone numbers include country code.\n2. Check backend Twilio environment variables are configured.\n3. Confirm Backend URL in Settings is correct.\n4. Try a new test order.\n5. WhatsApp sandbox numbers may require joining the sandbox first.\n6. If messages still do not arrive, create a support ticket."
+  },
+  {
+    keys: ["payment", "upi", "razorpay", "paid"],
+    answer: "1. Confirm UPI ID or payment settings are saved.\n2. Refresh Settings and verify the value remains.\n3. For bill QR, check Show QR on Paid Bills if needed.\n4. Mark payment status carefully from the order card.\n5. Check Reports payment breakdown after marking paid.\n6. If payment is not showing, create a support ticket."
+  },
+  {
+    keys: ["menu", "price", "half", "full", "variant", "item"],
+    answer: "1. Open Menu Items and edit the item.\n2. For normal items, keep Half/Full pricing disabled and enter one price.\n3. For portion items, enable Half and Full pricing and enter both prices.\n4. Save the item and refresh the customer menu.\n5. Old items without variants continue using normal price.\n6. If price is wrong in cart or bill, create a support ticket."
+  },
+  {
+    keys: ["table", "occupied", "yesterday", "status"],
+    answer: "1. Table status is based on active unpaid orders.\n2. Mark old completed orders as Paid or Completed.\n3. Check Live Orders > All for old active orders on that table.\n4. Use Reset Data only if you intentionally want to clear scoped business data.\n5. If table remains occupied incorrectly, create a support ticket."
+  },
+  {
+    keys: ["backend", "disconnected", "render", "health"],
+    answer: "1. Open the Backend URL and check it says Scan2Plate backend is running.\n2. Open /api/health on the backend URL.\n3. If Render was sleeping, wait 30-60 seconds and retry.\n4. Confirm Backend URL in Settings has no extra slash/path.\n5. If health fails, create a support ticket with the backend URL."
+  },
+  {
+    keys: ["firebase", "permission", "denied", "rules"],
+    answer: "1. Confirm you are logged in with the correct restaurant account.\n2. Refresh the page and login again if needed.\n3. Check that restaurantId matches the account.\n4. Firebase permission errors usually need rules or backend access updates.\n5. Create a support ticket with the exact permission-denied message."
+  }
+];
+function fallbackHelpAnswer(message = "") {
+  const text = safeString(message, 2000).toLowerCase();
+  const scored = helpKnowledgeBase
+    .map(item => ({ item, score: item.keys.reduce((sum, key) => sum + (text.includes(key) ? 1 : 0), 0) }))
+    .sort((a, b) => b.score - a.score)[0];
+  if (scored?.score > 0) return scored.item.answer;
+  return "1. Refresh the page and check your internet connection.\n2. Confirm the correct restaurant account is logged in.\n3. Open Settings and verify Backend URL if the issue uses OCR, WhatsApp, logo upload, or diagnostics.\n4. Try the action once more and note the exact error message.\n5. If the problem continues, create a support ticket so the Scan2Plate team can check it.";
+}
+function aiHelpSystemPrompt() {
+  return "You are Scan2Plate AI Help Assistant for restaurant owners. Give concise, practical troubleshooting steps for Scan2Plate admin dashboard, QR ordering, KOT, billing, menu, inventory OCR, logo upload, WhatsApp, payment, table status, reports, and backend health. Never ask for API keys or private customer data. End with creating a support ticket if unresolved.";
+}
+function aiLimitForPlan(planType = "") {
+  const plan = String(planType || "").toLowerCase();
+  if (plan.includes("basic") || plan.includes("free")) return Number(process.env.DAILY_AI_LIMIT_BASIC || 20);
+  return Number(process.env.DAILY_AI_LIMIT_ADVANCED || process.env.DAILY_AI_LIMIT_ADVANCE || 100);
+}
+function aiUsageKey(restaurantId = "") {
+  return `${safeString(restaurantId || "unknown", 80)}_${new Date().toISOString().slice(0, 10)}`;
+}
+function incrementAiUsage(restaurantId, planType) {
+  const key = aiUsageKey(restaurantId);
+  const used = Number(aiHelpDailyUsage.get(key) || 0);
+  const limit = aiLimitForPlan(planType);
+  if (used >= limit) return { allowed: false, used, limit };
+  aiHelpDailyUsage.set(key, used + 1);
+  return { allowed: true, used: used + 1, limit };
+}
+async function callAiProvider({ userMessage, appContext, diagnostics }) {
+  const provider = String(process.env.AI_PROVIDER || "openai").toLowerCase();
+  const apiKey = String(process.env.AI_API_KEY || "").trim();
+  const model = String(process.env.AI_MODEL || (provider.includes("gemini") ? "gemini-1.5-flash" : "gpt-4o-mini")).trim();
+  if (!apiKey) return null;
+  const safePayload = {
+    restaurantId: safeString(appContext?.restaurantId, 80),
+    restaurantName: safeString(appContext?.restaurantName, 120),
+    pageName: safeString(appContext?.pageName, 80),
+    planType: safeString(appContext?.planType, 60),
+    recentError: safeString(appContext?.recentError, 500),
+    diagnostics
+  };
+  if (provider.includes("gemini")) {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: `${aiHelpSystemPrompt()}\nContext: ${JSON.stringify(safePayload)}\nProblem: ${safeString(userMessage, 1200)}` }] }] })
+    });
+    if (!response.ok) throw new Error(`AI provider HTTP ${response.status}`);
+    const result = await response.json();
+    return result.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n").trim() || null;
+  }
+  const response = await fetch(process.env.AI_BASE_URL || "https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: aiHelpSystemPrompt() },
+        { role: "user", content: `Context: ${JSON.stringify(safePayload)}\nProblem: ${safeString(userMessage, 1200)}` }
+      ],
+      temperature: 0.2,
+      max_tokens: 500
+    })
+  });
+  if (!response.ok) throw new Error(`AI provider HTTP ${response.status}`);
+  const result = await response.json();
+  return result.choices?.[0]?.message?.content?.trim() || null;
+}
 async function requestOcrSpace(form, endpoint = "https://api.ocr.space/parse/image", extra = {}) {
   let response;
   try { response = await fetch(endpoint, { method: "POST", body: form }); }
@@ -211,8 +334,47 @@ app.get("/api/health", (_, res) => res.json({
   firebaseAdminReady: adminReady,
   ocrKeyConfigured: Boolean(ocrKey()),
   ocrKeyLength: ocrKey().length,
+  aiHelpEnabled: process.env.AI_HELP_ENABLED !== "false",
+  aiProvider: process.env.AI_PROVIDER || "fallback",
+  aiModel: process.env.AI_MODEL || "",
+  aiLimitBasic: Number(process.env.DAILY_AI_LIMIT_BASIC || 20),
+  aiLimitAdvanced: Number(process.env.DAILY_AI_LIMIT_ADVANCED || process.env.DAILY_AI_LIMIT_ADVANCE || 100),
   time: new Date().toISOString()
 }));
+app.post("/api/ai/help", async (req, res) => {
+  const { restaurantId = "", pageName = "", userMessage = "", recentError = "", appContext = {}, diagnostics = {} } = req.body || {};
+  const cleanMessage = safeString(userMessage, 1500);
+  if (!cleanMessage) return res.status(400).json({ success: false, answer: fallbackHelpAnswer(""), error: "userMessage is required" });
+  const backendDiagnostics = {
+    backendHealth: true,
+    firebaseAdminReady: adminReady,
+    storageBucketConfigured: Boolean(storageBucketName),
+    ocrKeyConfigured: Boolean(ocrKey()),
+    serverTime: new Date().toISOString()
+  };
+  const context = {
+    restaurantId: safeString(restaurantId || appContext.restaurantId, 80),
+    restaurantName: safeString(appContext.restaurantName, 120),
+    pageName: safeString(pageName || appContext.pageName, 80),
+    planType: safeString(appContext.planType, 60),
+    recentError: safeString(recentError || appContext.recentError, 500)
+  };
+  if (process.env.AI_HELP_ENABLED === "false") return res.status(403).json({ success: false, error: "AI Help Assistant is disabled" });
+  const usage = incrementAiUsage(context.restaurantId || restaurantId || "unknown", context.planType);
+  if (!usage.allowed) return res.status(429).json({ success: false, error: "Daily AI help limit reached. Please create support ticket.", limit: usage.limit, used: usage.used });
+  let answer = "";
+  let source = "fallback";
+  let providerFailed = false;
+  try {
+    answer = await callAiProvider({ userMessage: cleanMessage, appContext: context, diagnostics: { frontend: diagnostics, backend: backendDiagnostics } });
+    if (answer) source = "ai";
+  } catch (error) {
+    providerFailed = true;
+    console.warn("AI help provider failed:", error.message);
+  }
+  if (!answer) answer = `${providerFailed ? "AI service is temporarily unavailable. Here is a standard troubleshooting guide.\n\n" : ""}${fallbackHelpAnswer(cleanMessage)}`;
+  res.json({ success: true, answer, source, diagnostics: backendDiagnostics });
+});
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;

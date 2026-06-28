@@ -4323,9 +4323,237 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
 window.fillBillPreview = fillBillPreview;
 
 /* =========================================================
+   AI HELP ASSISTANT
+========================================================= */
+const aiHelpQuickIssues = [
+  "QR not opening",
+  "Order not showing",
+  "KOT print issue",
+  "Bill print issue",
+  "Logo upload issue",
+  "OCR bill scan issue",
+  "Dashboard showing zero",
+  "WhatsApp message issue",
+  "Payment issue",
+  "Menu item issue",
+  "Table status issue"
+];
+let aiHelpMessages = [];
+let aiHelpDiagnostics = {};
+let aiHelpLastAnswer = "";
+let aiHelpChatDocId = "";
+
+function injectAiHelpStyles() {
+  if (document.getElementById("aiHelpAssistantStyles")) return;
+  const style = document.createElement("style");
+  style.id = "aiHelpAssistantStyles";
+  style.textContent = `
+    .ai-help-button{position:fixed;right:22px;bottom:22px;z-index:8000;display:inline-flex;align-items:center;gap:8px;min-height:46px;padding:0 16px;border:0;border-radius:999px;background:#e07c1a;color:#fff;font-weight:900;box-shadow:0 16px 40px rgba(224,124,26,.34);cursor:pointer}
+    .ai-help-panel{position:fixed;right:22px;bottom:82px;z-index:8001;display:none;width:380px;height:560px;max-height:calc(100vh - 104px);border:1px solid #eadccf;border-radius:18px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.24);overflow:hidden}
+    .ai-help-panel.open{display:flex;flex-direction:column}.ai-help-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 15px;background:#fff7ed;border-bottom:1px solid #f2dfca}.ai-help-title{font-weight:900;color:#25170d}.ai-help-close{border:0;background:transparent;font-size:20px;cursor:pointer;color:#7c5b42}.ai-help-diagnostics{padding:9px 14px;border-bottom:1px solid #f2eee8;background:#fffbf7;color:#6b5848;font-size:11px;line-height:1.45}
+    .ai-help-messages{flex:1;overflow:auto;padding:14px;background:#f8fafc}.ai-help-bubble{max-width:86%;margin:0 0 10px;padding:10px 12px;border-radius:14px;font-size:13px;line-height:1.45;white-space:pre-wrap}.ai-help-bubble.owner{margin-left:auto;background:#e07c1a;color:#fff;border-bottom-right-radius:4px}.ai-help-bubble.ai{margin-right:auto;background:#fff;color:#1f2937;border:1px solid #e5e7eb;border-bottom-left-radius:4px}.ai-help-quick{display:flex;gap:7px;overflow:auto;padding:9px 12px;border-top:1px solid #eee;background:#fff}.ai-help-quick button{white-space:nowrap;border:1px solid #eadccf;border-radius:999px;background:#fff;padding:7px 10px;color:#604733;font-size:11px;font-weight:800;cursor:pointer}.ai-help-form{display:flex;gap:8px;padding:12px;border-top:1px solid #eee;background:#fff}.ai-help-form input{flex:1;min-width:0;border:1px solid #e3d6ca;border-radius:11px;padding:0 11px;font:inherit}.ai-help-form button,.ai-help-ticket{border:0;border-radius:11px;background:#111827;color:#fff;padding:0 13px;font-weight:900;cursor:pointer}.ai-help-ticket{min-height:38px;margin:0 12px 12px;background:#16a34a}.ai-help-ticket:disabled,.ai-help-form button:disabled{opacity:.6;cursor:not-allowed}
+    @media(max-width:640px){.ai-help-button{right:14px;bottom:14px}.ai-help-panel{inset:0;width:auto;height:auto;max-height:none;border-radius:0}.ai-help-panel.open{display:flex}}
+  `;
+  document.head.appendChild(style);
+}
+
+function currentAiPageName() {
+  return document.getElementById("pageTitle")?.textContent?.trim() || "Admin Dashboard";
+}
+
+function aiDiagnosticText(diag = aiHelpDiagnostics) {
+  const backend = diag.backendHealth?.ok ? "Yes" : diag.backendHealth?.ok === false ? "No" : "Not checked";
+  const ocr = diag.backendHealth?.ocrKeyConfigured ? "Yes" : diag.backendHealth?.ocrKeyConfigured === false ? "No" : "Not checked";
+  return `Backend connected: ${backend}\nRestaurant ID found: ${diag.currentRestaurantIdFound ? "Yes" : "No"}\nInternet: ${diag.browserOnline ? "Online" : "Offline"}\nOCR key configured: ${ocr}`;
+}
+
+function localAiHelpFallback(message = "") {
+  const text = String(message || "").toLowerCase();
+  if (text.includes("kot") || text.includes("print")) return "1. Check printer is connected and selected as default.\n2. Allow browser popups.\n3. Use Browser Print Mode in Settings.\n4. Set 80mm paper and scale 100%.\n5. Try again, then create a support ticket if it still fails.";
+  if (text.includes("ocr") || text.includes("scan")) return "1. Test OCR Connection in Settings.\n2. Check Backend URL.\n3. Use a clear bill image/PDF.\n4. If OCR key is missing, add OCR_SPACE_API_KEY on backend.\n5. Create a support ticket with the exact OCR error.";
+  if (text.includes("dashboard") || text.includes("zero")) return "1. Dashboard shows today's business data.\n2. Check Daily Order Number Reset Time.\n3. Open Live Orders > All for older orders.\n4. Refresh once.\n5. Create a support ticket if counts remain wrong.";
+  if (text.includes("qr")) return "1. Confirm QR has correct restaurantId and table number.\n2. Open link in incognito.\n3. Check restaurant plan/status is active.\n4. Confirm menu items are active.\n5. Create a support ticket with the QR link.";
+  return "1. Refresh the page and check internet.\n2. Confirm you are logged in to the correct restaurant.\n3. Check Backend URL in Settings if this uses OCR, WhatsApp, or logo upload.\n4. Try the action again and note the exact error.\n5. Create a support ticket if it continues.";
+}
+
+async function collectAiDiagnostics() {
+  const diagnostics = {
+    backendUrlConfigured: Boolean((backendUrlFieldEl?.value || restaurantSettings.backendUrl || "").trim()),
+    currentRestaurantIdFound: Boolean(restaurantId),
+    firebaseConnected: Boolean(db),
+    browserOnline: navigator.onLine,
+    currentPage: currentAiPageName(),
+    popupAllowedMaybe: "Unknown",
+    localStorageRestaurantId: localStorage.getItem("scan2plate_last_restaurant_id") || "",
+    planStatus: restaurantSettings.subscriptionStatus || restaurantSettings.status || currentRestaurantPlan || "",
+    timestamp: new Date().toISOString()
+  };
+  try {
+    const backendUrl = purchaseBackendUrl();
+    diagnostics.backendHealth = await withTimeout(
+      fetch(`${backendUrl}/api/health`, { cache: "no-store" }).then(response => response.json()),
+      6000,
+      "Backend health check timed out"
+    );
+  } catch (error) {
+    diagnostics.backendHealth = { ok: false, error: error.message || String(error) };
+  }
+  aiHelpDiagnostics = diagnostics;
+  return diagnostics;
+}
+
+function renderAiHelpMessages() {
+  const list = document.getElementById("aiHelpMessages");
+  const diagnosticBox = document.getElementById("aiHelpDiagnostics");
+  if (diagnosticBox) diagnosticBox.textContent = aiDiagnosticText();
+  if (!list) return;
+  list.innerHTML = aiHelpMessages.map(message => `<div class="ai-help-bubble ${message.role === "owner" ? "owner" : "ai"}">${escapeHtml(message.text)}</div>`).join("");
+  list.scrollTop = list.scrollHeight;
+}
+
+async function saveAiHelpChatHistory() {
+  const payload = {
+    restaurantId,
+    messages: aiHelpMessages.slice(-20),
+    updatedAt: serverTimestamp()
+  };
+  try {
+    if (aiHelpChatDocId) await updateDoc(doc(db, "aiHelpChats", aiHelpChatDocId), payload);
+    else {
+      const created = await addDoc(collection(db, "aiHelpChats"), { ...payload, createdAt: serverTimestamp() });
+      aiHelpChatDocId = created.id;
+    }
+  } catch (error) {
+    console.warn("AI help chat history save failed", error);
+  }
+}
+
+async function askAiHelp(messageText) {
+  const text = String(messageText || "").trim();
+  if (!text) return;
+  const sendBtn = document.getElementById("aiHelpSendBtn");
+  const input = document.getElementById("aiHelpInput");
+  aiHelpMessages.push({ role: "owner", text, at: new Date().toISOString() });
+  aiHelpMessages.push({ role: "ai", text: "AI is checking...", at: new Date().toISOString(), loading: true });
+  renderAiHelpMessages();
+  if (input) input.value = "";
+  if (sendBtn) sendBtn.disabled = true;
+  const diagnostics = await collectAiDiagnostics();
+  try {
+    const backendUrl = purchaseBackendUrl();
+    const response = await withTimeout(fetch(`${backendUrl}/api/ai/help`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        restaurantId,
+        pageName: currentAiPageName(),
+        userMessage: text,
+        recentError: diagnostics.backendHealth?.error || "",
+        appContext: {
+          restaurantId,
+          restaurantName: restaurantSettings.restaurantName || restaurantFieldEl?.value || "",
+          pageName: currentAiPageName(),
+          planType: currentRestaurantPlan,
+          backendHealthStatus: diagnostics.backendHealth?.ok === true,
+          storageBucketStatus: diagnostics.backendHealth?.storageBucket || "",
+          ocrConnected: diagnostics.backendHealth?.ocrKeyConfigured === true,
+          lastActionName: "AI Help Assistant"
+        },
+        diagnostics
+      })
+    }), 15000, "AI Help request timed out");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      const error = new Error(result.error || `HTTP ${response.status}`);
+      error.dailyLimit = response.status === 429;
+      throw error;
+    }
+    aiHelpMessages = aiHelpMessages.filter(message => !message.loading);
+    aiHelpLastAnswer = result.answer || "I could not generate an answer. Please create a support ticket.";
+    aiHelpMessages.push({ role: "ai", text: `${aiDiagnosticText(diagnostics)}\n\n${aiHelpLastAnswer}`, at: new Date().toISOString() });
+  } catch (error) {
+    aiHelpMessages = aiHelpMessages.filter(message => !message.loading);
+    aiHelpLastAnswer = error.dailyLimit
+      ? "Daily AI help limit reached. Please create support ticket."
+      : `AI service is temporarily unavailable. Here is a standard troubleshooting guide.\n\n${localAiHelpFallback(text)}`;
+    aiHelpMessages.push({ role: "ai", text: `${aiDiagnosticText(diagnostics)}\n\n${aiHelpLastAnswer}`, at: new Date().toISOString() });
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+    renderAiHelpMessages();
+    saveAiHelpChatHistory();
+  }
+}
+
+async function createAiSupportTicket() {
+  const button = document.getElementById("aiHelpTicketBtn");
+  const problemText = [...aiHelpMessages].reverse().find(message => message.role === "owner")?.text || document.getElementById("aiHelpInput")?.value || "";
+  if (!String(problemText).trim()) return alert("Please type the problem first.");
+  try {
+    if (button) { button.disabled = true; button.textContent = "Creating ticket..."; }
+    const diagnostics = Object.keys(aiHelpDiagnostics).length ? aiHelpDiagnostics : await collectAiDiagnostics();
+    await addDoc(collection(db, "supportTickets"), {
+      restaurantId,
+      restaurantName: restaurantSettings.restaurantName || restaurantFieldEl?.value || restaurantId,
+      ownerEmail: currentUser.email || currentUser.adminEmail || restaurantSettings.adminEmail || "",
+      ownerPhone: restaurantSettings.phone || phoneFieldEl?.value || currentUser.phone || "",
+      pageName: currentAiPageName(),
+      problemText: String(problemText).trim(),
+      aiAnswer: aiHelpLastAnswer || "",
+      diagnostics,
+      status: "open",
+      priority: "normal",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    aiHelpMessages.push({ role: "ai", text: "Support ticket created. Our team will contact you soon.", at: new Date().toISOString() });
+    renderAiHelpMessages();
+    saveAiHelpChatHistory();
+  } catch (error) {
+    alert("Could not create support ticket: " + (error.message || error));
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Create Support Ticket"; }
+  }
+}
+
+function mountAiHelpAssistant() {
+  if (document.getElementById("aiHelpButton")) return;
+  injectAiHelpStyles();
+  const root = document.createElement("div");
+  root.innerHTML = `
+    <button class="ai-help-button" id="aiHelpButton" type="button"><i class="fas fa-comments"></i> AI Help</button>
+    <section class="ai-help-panel" id="aiHelpPanel" aria-label="Scan2Plate AI Help Assistant">
+      <div class="ai-help-head"><div class="ai-help-title">Scan2Plate AI Help Assistant</div><button class="ai-help-close" id="aiHelpCloseBtn" type="button">×</button></div>
+      <div class="ai-help-diagnostics" id="aiHelpDiagnostics">Diagnostics will appear after first question.</div>
+      <div class="ai-help-messages" id="aiHelpMessages"></div>
+      <div class="ai-help-quick">${aiHelpQuickIssues.map(issue => `<button type="button" data-ai-issue="${escapeHtml(issue)}">${escapeHtml(issue)}</button>`).join("")}</div>
+      <form class="ai-help-form" id="aiHelpForm"><input id="aiHelpInput" placeholder="Type your problem..." autocomplete="off" /><button id="aiHelpSendBtn" type="submit">Send</button></form>
+      <button class="ai-help-ticket" id="aiHelpTicketBtn" type="button">Create Support Ticket</button>
+    </section>
+  `;
+  document.body.appendChild(root);
+  aiHelpMessages = [{ role: "ai", text: "Namaste! Tell me what is not working in Scan2Plate, or choose a quick issue below.", at: new Date().toISOString() }];
+  renderAiHelpMessages();
+  document.getElementById("aiHelpButton")?.addEventListener("click", async () => {
+    document.getElementById("aiHelpPanel")?.classList.toggle("open");
+    if (!Object.keys(aiHelpDiagnostics).length) {
+      await collectAiDiagnostics();
+      renderAiHelpMessages();
+    }
+  });
+  document.getElementById("aiHelpCloseBtn")?.addEventListener("click", () => document.getElementById("aiHelpPanel")?.classList.remove("open"));
+  document.getElementById("aiHelpForm")?.addEventListener("submit", event => {
+    event.preventDefault();
+    askAiHelp(document.getElementById("aiHelpInput")?.value || "");
+  });
+  document.querySelectorAll("[data-ai-issue]").forEach(button => button.addEventListener("click", () => askAiHelp(button.dataset.aiIssue || "")));
+  document.getElementById("aiHelpTicketBtn")?.addEventListener("click", createAiSupportTicket);
+}
+
+/* =========================================================
    INIT
 ========================================================= */
 updateUserCard();
+mountAiHelpAssistant();
 renderTableNumberOptions("01");
 bindOrderFilterButtons();
 if (reportDateEl && !reportDateEl.value) reportDateEl.value = todayDateStr();
