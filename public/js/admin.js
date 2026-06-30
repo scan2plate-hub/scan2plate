@@ -46,6 +46,7 @@ try {
 
 const restaurantId =
   currentUser.restaurantId ||
+  localStorage.getItem("restaurantId") ||
   localStorage.getItem("scan2plate_last_restaurant_id");
 
 if (!restaurantId) {
@@ -53,6 +54,8 @@ if (!restaurantId) {
   window.location.href = "./admin-login.html";
   throw new Error("Restaurant ID missing");
 }
+localStorage.setItem("restaurantId", restaurantId);
+localStorage.setItem("scan2plate_last_restaurant_id", restaurantId);
 
 const isDevHost = ["localhost", "127.0.0.1"].includes(location.hostname);
 const devLog = (...args) => { if (isDevHost) console.log("[Scan2Plate Admin]", ...args); };
@@ -2472,6 +2475,7 @@ function getInventoryUsageFromForm() {
 }
 
 async function saveInventoryItem() {
+  if (!restaurantId) return alert("Restaurant ID missing. Please login again.");
   const itemName = inventoryItemNameEl?.value.trim() || "";
   const currentStock = Number(inventoryCurrentStockEl?.value);
   const minStockAlert = Number(inventoryMinStockEl?.value);
@@ -2480,22 +2484,29 @@ async function saveInventoryItem() {
     return;
   }
   const payload = {
+    restaurantId,
     itemName,
+    normalizedName: normalizedMenuName(itemName),
     unit: inventoryUnitEl?.value || "piece",
     currentStock,
     minStockAlert,
+    minimumStockAlert: minStockAlert,
     purchasePrice: Number(inventoryPurchasePriceEl?.value || 0),
     supplierName: inventorySupplierNameEl?.value.trim() || "",
+    updatedAt: serverTimestamp(),
     lastUpdated: serverTimestamp()
   };
   try {
     const id = inventoryDocIdEl?.value.trim();
-    if (id) await setDoc(doc(db, "restaurants", restaurantId, "inventory", id), payload, { merge: true });
-    else await addDoc(collection(db, "restaurants", restaurantId, "inventory"), payload);
+    const existing = !id ? allInventoryItems.find(item => normalizedMenuName(item.itemName) === payload.normalizedName && String(item.unit || "piece") === payload.unit) : null;
+    const targetId = id || existing?.id || "";
+    if (targetId) await setDoc(doc(db, "restaurants", restaurantId, "inventory", targetId), payload, { merge: true });
+    else await addDoc(collection(db, "restaurants", restaurantId, "inventory"), { ...payload, createdAt: serverTimestamp() });
     clearInventoryForm();
+    alert("Inventory item saved.");
   } catch (error) {
     console.error("saveInventoryItem error", error);
-    alert("Could not save inventory item: " + error.message);
+    alert("Inventory save failed: " + (error.message || "Unknown error"));
   }
 }
 
@@ -2539,7 +2550,7 @@ function renderInventoryReports(lowStock) {
 
 function renderInventoryHistory() {
   if (!inventoryHistoryRowsEl) return;
-  inventoryHistoryRowsEl.innerHTML = inventoryLogs.length ? inventoryLogs.slice(0, 50).map(log => `<tr><td>${escapeHtml(formatDateTime(log.createdAt))}</td><td>${escapeHtml(log.itemName)}</td><td><span class="status-badge ${log.type === "stock_in" ? "success" : "warning"}">${log.type === "stock_in" ? "Stock In" : "Stock Out"}</span></td><td>${Number(log.quantity || 0)} ${escapeHtml(log.unit || "")}</td><td>${escapeHtml(log.reason || "-")}</td><td>${escapeHtml(log.createdBy || "-")}</td></tr>`).join("") : `<tr><td colspan="6" class="muted">No stock adjustments yet.</td></tr>`;
+  inventoryHistoryRowsEl.innerHTML = inventoryLogs.length ? inventoryLogs.slice(0, 50).map(log => { const stockIn = log.type === "stock_in" || log.type === "purchase" || log.direction === "stock_in"; const label = log.type === "purchase" ? "Purchase" : (stockIn ? "Stock In" : "Stock Out"); return `<tr><td>${escapeHtml(formatDateTime(log.createdAt))}</td><td>${escapeHtml(log.itemName)}</td><td><span class="status-badge ${stockIn ? "success" : "warning"}">${label}</span></td><td>${Number(log.quantity || 0)} ${escapeHtml(log.unit || "")}</td><td>${escapeHtml(log.reason || "-")}</td><td>${escapeHtml(log.createdBy || "-")}</td></tr>`; }).join("") : `<tr><td colspan="6" class="muted">No stock adjustments yet.</td></tr>`;
 }
 
 function purchaseBackendUrl() {
@@ -2570,14 +2581,17 @@ function ensureBackendUrlControl() {
     backendUrlFieldEl.closest(".form-group")?.appendChild(status);
   }
   const fixedOld = localStorage.getItem("scan2plateBackendUrlFixed") === "true";
-  status.innerHTML = `${fixedOld ? `<span style="color:#b96f09;font-weight:700">Old backend URL detected and fixed automatically.</span><br>` : ""}Correct backend: <strong>${backendUrl}</strong> <button class="btn btn-sm btn-outline" id="resetBackendUrlBtn" type="button" style="margin-left:8px">Reset Backend URL</button>`;
+  status.innerHTML = `${fixedOld ? `<span style="color:#b96f09;font-weight:700">Old backend URL detected and fixed automatically.</span><br>` : ""}Correct backend: <strong>${backendUrl}</strong> <button class="btn btn-sm btn-outline" id="resetBackendUrlBtn" type="button" style="margin-left:8px">Fix Connection</button>`;
   document.getElementById("resetBackendUrlBtn")?.addEventListener("click", () => {
     localStorage.setItem("scan2plateBackendUrl", "https://scan2plate.onrender.com");
     localStorage.setItem("backendUrl", "https://scan2plate.onrender.com");
     localStorage.setItem("scan2plate_backend_url", "https://scan2plate.onrender.com");
+    localStorage.setItem("restaurantId", restaurantId);
+    localStorage.setItem("scan2plate_last_restaurant_id", restaurantId);
     localStorage.removeItem("scan2plateBackendUrlFixed");
     backendUrlFieldEl.value = getBackendBaseUrl();
     ensureBackendUrlControl();
+    location.reload();
   });
 }
 
@@ -2592,22 +2606,40 @@ function ensureOcrStatusControl() {
 async function testOcrConnection() {
   const statusEl = document.getElementById("ocrServiceStatus"); const button = document.getElementById("testOcrConnectionBtn");
   if (statusEl) statusEl.textContent = "Checking…"; if (button) button.disabled = true;
+  let health = {};
+  let backendConnected = false;
   try {
     const backendUrl = purchaseBackendUrl();
     const healthResponse = await fetch(`${backendUrl}/api/health`, { cache: "no-store" });
-    const health = await healthResponse.json().catch(() => ({}));
+    health = await healthResponse.json().catch(() => ({}));
+    backendConnected = healthResponse.ok && health.ok === true;
     if (!healthResponse.ok || health.ok !== true) throw new Error(health.error || "Backend health check failed.");
     const response = await fetch(`${backendUrl}/api/ocr/test`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.connected !== true) {
-      const detail = Array.isArray(data.errorMessage) ? data.errorMessage.join(" ") : (data.errorMessage || data.error || JSON.stringify(data) || "The OCR endpoint did not return a ready status.");
+      const detail = backendOcrErrorDetail(data, "The OCR endpoint did not return a ready status.");
       throw new Error(detail);
     }
-    if (statusEl) { statusEl.textContent = "Connected - OCR Space connected"; statusEl.title = data.message || "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
+    if (statusEl) { statusEl.innerHTML = `Connected<br>Backend connected: Yes<br>OCR key configured: ${health.ocrKeyConfigured ? "Yes" : "No"}<br>OCR test route: ${health.ocrTestRoute ? "Yes" : "No"}<br>Last error: None`; statusEl.title = data.message || "OCR endpoint is reachable and ready."; statusEl.style.color = "#18794e"; }
   } catch (error) {
-    const reason = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : error.message;
-    if (statusEl) { statusEl.textContent = `Disconnected - ${reason}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
+    const reason = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "Backend unavailable" : error.message;
+    const state = /OCR_SPACE_API_KEY missing|key missing/i.test(reason) ? "OCR key missing" : (/permission|not permitted|access/i.test(reason) ? "Permission error" : (backendConnected ? "OCR provider failed" : "Backend unavailable"));
+    if (statusEl) { statusEl.innerHTML = `${state}<br>Backend connected: ${backendConnected ? "Yes" : "No"}<br>OCR key configured: ${health.ocrKeyConfigured ? "Yes" : "No"}<br>OCR test route: ${health.ocrTestRoute ? "Yes" : "No"}<br>Last error: ${escapeHtml(reason)}`; statusEl.title = reason; statusEl.style.color = "#b43731"; }
   } finally { if (button) button.disabled = false; }
+}
+
+function backendOcrErrorDetail(data = {}, fallback = "OCR scan failed.") {
+  const parts = [];
+  if (data.error) parts.push(data.error);
+  if (data.ocrExitCode || data.OCRExitCode) parts.push(`OCRExitCode: ${data.ocrExitCode || data.OCRExitCode}`);
+  const errorMessage = data.errorMessage || data.ErrorMessage;
+  if (Array.isArray(errorMessage)) parts.push(`ErrorMessage: ${errorMessage.join(" ")}`);
+  else if (errorMessage) parts.push(`ErrorMessage: ${errorMessage}`);
+  if (data.filetype) parts.push(`filetype: ${data.filetype}`);
+  if (data.filename) parts.push(`filename: ${data.filename}`);
+  if (data.mimetype) parts.push(`mimetype: ${data.mimetype}`);
+  if (data.debug?.reason) parts.push(`reason: ${data.debug.reason}`);
+  return parts.join(" | ") || JSON.stringify(data) || fallback;
 }
 
 async function purchaseAuthHeaders() {
@@ -2720,11 +2752,11 @@ async function scanPurchaseBill() {
     const uploadFile = await preparePurchaseBillForUpload(scanFile);
     const form = new FormData(); form.append("file", uploadFile, uploadFile.name || file.name || "supplier_bill.jpg"); form.append("restaurantId", restaurantId);
     const response = await fetch(`${backendUrl}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
-    const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || JSON.stringify(data) || "Could not read bill clearly. Please upload a clearer image or enter manually.");
+    const data = await response.json().catch(() => ({})); if (!response.ok || data.success === false) throw new Error(backendOcrErrorDetail(data, "Could not read bill clearly. Please upload a clearer image or enter manually."));
     reviewedPurchaseFileUrl = data.file?.fileUrl || "";
     applyPurchaseOcrResult(data); rescanPurchaseBillBtn?.classList.remove("hidden");
     if (!data.items?.length) showPurchaseOcrMessage("OCR text was received but no item rows matched. Review the raw text, try parsing again, or enter the bill manually.");
-  } catch (error) { const message = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "OCR needs backend deployment. Add backend URL in Settings." : (error.message || "OCR scan failed."); showPurchaseOcrMessage(message); ensureRawOcrReview(); document.getElementById("purchaseRawOcrReview")?.classList.remove("hidden"); }
+  } catch (error) { const rawMessage = error.message === "Failed to fetch" || /Unexpected token|not valid JSON/i.test(error.message) ? "Backend unavailable" : (error.message || "OCR scan failed."); const message = /permission|not permitted|access/i.test(rawMessage) ? "Permission error: You are logged in as this restaurant but access check failed. Please refresh or login again." : rawMessage; showPurchaseOcrMessage(message); rescanPurchaseBillBtn?.classList.remove("hidden"); ensureRawOcrReview(); document.getElementById("purchaseRawOcrReview")?.classList.remove("hidden"); }
   finally { scanPurchaseBillBtn.disabled = false; scanPurchaseBillBtn.textContent = "Scan Bill for Review"; }
 }
 
@@ -2734,7 +2766,7 @@ async function saveReviewedPurchase() {
   savePurchaseBillBtn.disabled = true; savePurchaseBillBtn.textContent = "Saving…";
   try {
     const response = await fetch(`${backendUrl}/api/inventory/purchase-review/save`, { method: "POST", headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId, supplierName: purchaseSupplierNameEl?.value.trim() || "", billNumber: purchaseBillNumberEl?.value.trim() || "", billDate: purchaseBillDateEl?.value || "", gstTax: Number(purchaseTaxAmountEl?.value || 0), total: Number(purchaseGrandTotalEl?.value || 0), fileUrl: reviewedPurchaseFileUrl, items }) });
-    const data = await response.json().catch(() => ({})); if (!response.ok || data.ok === false) throw new Error(data.error || JSON.stringify(data) || "Could not save the reviewed purchase.");
+    const data = await response.json().catch(() => ({})); if (!response.ok || data.ok === false) throw new Error(backendOcrErrorDetail(data, data.error || "Could not save the reviewed purchase."));
     alert("Purchase saved and stock updated."); purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl.value = ""; reviewedPurchaseFileUrl = ""; previewPurchaseFile();
   } catch (error) { showPurchaseOcrMessage(error.message || "Could not save the reviewed purchase."); }
   finally { savePurchaseBillBtn.disabled = false; savePurchaseBillBtn.textContent = "Save to Inventory"; }

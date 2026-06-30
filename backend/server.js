@@ -253,7 +253,7 @@ async function testOcrSpaceConnection() {
   params.append("isOverlayRequired", "false");
   params.append("filetype", "JPG");
 
-  return fetch("https://api.ocr.space/parse/image", {
+  return fetch("https://api.ocr.space/parse/imageurl", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString()
@@ -303,13 +303,64 @@ async function verifyAdmin(req, res, next) {
     next();
   } catch { res.status(401).json({ error: "Admin authentication required." }); }
 }
-async function assertRestaurantAccess(uid, restaurantId) {
+
+function accessDeniedError(debug = {}) {
+  const error = new Error("Not permitted for this restaurant");
+  error.status = 403;
+  error.debug = debug;
+  return error;
+}
+
+function lowerEmail(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function emailListIncludes(list, email) {
+  const cleanEmail = lowerEmail(email);
+  if (!cleanEmail) return false;
+  if (Array.isArray(list)) return list.map(lowerEmail).includes(cleanEmail);
+  if (list && typeof list === "object") return Object.keys(list).map(lowerEmail).includes(cleanEmail) || Object.values(list).map(lowerEmail).includes(cleanEmail);
+  return lowerEmail(list) === cleanEmail;
+}
+
+async function assertRestaurantAccess(uid, restaurantId, user = {}) {
   const db = getFirestore();
-  const restaurant = await db.doc(`restaurants/${restaurantId}`).get();
-  if (!restaurant.exists || restaurant.data().adminUid !== uid) {
-    const memberships = await db.collection(`restaurants/${restaurantId}/users`).where("uid", "==", uid).limit(1).get();
-    if (memberships.empty || !["admin", "owner"].includes(String(memberships.docs[0].data().role || "").toLowerCase())) throw new Error("Not permitted for this restaurant.");
+  const requestedRestaurantId = String(restaurantId || "").trim();
+  const loggedInEmail = lowerEmail(user.email);
+  const restaurant = await findRestaurantDocByBusinessId(requestedRestaurantId);
+  const debug = { requestedRestaurantId, loggedInEmail, foundRestaurantId: restaurant?.id || "", reason: "" };
+  if (!restaurant) {
+    debug.reason = "restaurant_not_found";
+    throw accessDeniedError(debug);
   }
+
+  const data = restaurant.data() || {};
+  const ownerUid = data.ownerUid || data.adminUid || data.uid || "";
+  const uidFields = [ownerUid, data.createdByUid, data.adminUserId, data.userId].map(value => String(value || ""));
+  if (uid && uidFields.includes(String(uid))) return restaurant;
+
+  const directEmails = [data.ownerEmail, data.adminEmail, data.email, data.createdByEmail].map(lowerEmail).filter(Boolean);
+  if (loggedInEmail && directEmails.includes(loggedInEmail)) return restaurant;
+  if (emailListIncludes(data.adminEmails, loggedInEmail)) return restaurant;
+  if (emailListIncludes(data.staffEmails, loggedInEmail)) return restaurant;
+
+  const docIdsToCheck = [...new Set([requestedRestaurantId, restaurant.id].filter(Boolean))];
+  for (const docId of docIdsToCheck) {
+    const memberships = await db.collection(`restaurants/${docId}/users`).where("uid", "==", uid).limit(1).get();
+    const member = memberships.docs[0]?.data();
+    const role = String(member?.role || "").toLowerCase();
+    if (member && ["admin", "owner", "manager"].includes(role)) return restaurant;
+
+    if (loggedInEmail) {
+      const emailDocId = loggedInEmail.replaceAll("@", "_").replaceAll(".", "_");
+      const emailDoc = await db.doc(`restaurants/${docId}/users/${emailDocId}`).get();
+      const emailRole = String(emailDoc.data()?.role || "").toLowerCase();
+      if (emailDoc.exists && ["admin", "owner", "manager"].includes(emailRole)) return restaurant;
+    }
+  }
+
+  debug.reason = "no_owner_admin_or_membership_match";
+  throw accessDeniedError(debug);
 }
 async function findRestaurantDocByBusinessId(restaurantId) {
   const db = getFirestore();
@@ -336,6 +387,8 @@ app.get("/api/health", (_, res) => res.json({
   logoUploadRoute: true,
   ocrKeyConfigured: Boolean(ocrKey()),
   ocrKeyLength: ocrKey().length,
+  ocrTestRoute: true,
+  ocrScanRoute: true,
   aiHelpEnabled: process.env.AI_HELP_ENABLED !== "false",
   aiProvider: process.env.AI_PROVIDER || "fallback",
   aiModel: process.env.AI_MODEL || "",
@@ -390,7 +443,7 @@ app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) =
     if (!cleanEmail) return res.status(400).json({ ok: false, error: "Email is required." });
     if (!allowedRoles.has(cleanRole)) return res.status(400).json({ ok: false, error: "Invalid staff role." });
     if (!String(password).trim() || String(password).length < 6) return res.status(400).json({ ok: false, error: "Password must be at least 6 characters." });
-    await assertRestaurantAccess(req.user.uid, restaurantId);
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
 
     const auth = getAuth();
     let userRecord;
@@ -493,7 +546,7 @@ app.post("/api/ocr/parse", verifyAdmin, express.json({ limit: "1mb" }), async (r
   const { restaurantId, rawText = "" } = req.body || {};
   try {
     if (!restaurantId) return res.status(400).json({ error: "restaurantId is required." });
-    await assertRestaurantAccess(req.user.uid, restaurantId);
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
     if (!String(rawText).trim()) return res.status(422).json({ error: "Raw OCR text is empty." });
     const parsed = parseBillText(rawText);
     debugOcr("parse", { rawTextLength: rawText.length, parsedItemCount: parsed.items.length, parseWarnings: parsed.parseWarnings.length });
@@ -580,16 +633,19 @@ app.all("/api/restaurants/:restaurantId/logo", (_, res) => {
 });
 
 async function scanSupplierBill(req, res) {
+  let uploadedFile = null;
+  let filetype = "";
   try {
     const { restaurantId, ocrText = "" } = req.body || {};
-    const uploadedFile = req.file || req.files?.file?.[0] || req.files?.bill?.[0];
-    if (!restaurantId || !uploadedFile) return res.status(400).json({ error: "restaurantId and a bill image or PDF are required." });
-    if (!allowedMimeTypes.has(uploadedFile.mimetype)) return res.status(415).json({ error: "Use a JPG, PNG, WEBP, or PDF bill." });
-    await assertRestaurantAccess(req.user.uid, restaurantId);
+    uploadedFile = req.file || req.files?.file?.[0] || req.files?.bill?.[0] || req.files?.image?.[0] || req.files?.pdf?.[0];
+    if (!restaurantId || !uploadedFile) return res.status(400).json({ success: false, error: "restaurantId and a bill image or PDF are required." });
+    if (!allowedMimeTypes.has(uploadedFile.mimetype)) return res.status(415).json({ success: false, error: "Use a JPG, PNG, WEBP, or PDF bill.", filename: uploadedFile.originalname || "", mimetype: uploadedFile.mimetype || "" });
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
     let text = ocrText;
-    if (!text && !ocrKey()) return res.status(503).json({ error: missingOcrKeyMessage() });
+    let rawOcr = null;
+    if (!text && !ocrKey()) return res.status(503).json({ success: false, error: missingOcrKeyMessage() });
     if (!text) {
-      const filetype = getOcrFileType(uploadedFile);
+      filetype = getOcrFileType(uploadedFile);
       debugOcr("scan", { endpoint: "https://api.ocr.space/parse/image", fileName: uploadedFile.originalname, fileSize: uploadedFile.size, mimeType: uploadedFile.mimetype, filetype });
       const form = new FormData();
       form.append("apikey", ocrKey());
@@ -601,10 +657,10 @@ async function scanSupplierBill(req, res) {
       form.append("isTable", "true");
       form.append("filetype", filetype);
       form.append("file", new Blob([uploadedFile.buffer], { type: uploadedFile.mimetype || "image/jpeg" }), uploadedFile.originalname || "supplier_bill.jpg");
-      const result = await requestOcrSpace(form, "https://api.ocr.space/parse/image", { filetype, filename: uploadedFile.originalname, mimetype: uploadedFile.mimetype });
-      text = (result.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
+      rawOcr = await requestOcrSpace(form, "https://api.ocr.space/parse/image", { filetype, filename: uploadedFile.originalname, mimetype: uploadedFile.mimetype });
+      text = (rawOcr.ParsedResults || []).map(row => row.ParsedText || "").join("\n");
     }
-    if (!String(text).trim()) return res.status(422).json({ error: "OCR returned empty text. The bill may be too small, blurred, rotated, or unreadable." });
+    if (!String(text).trim()) return res.status(422).json({ success: false, error: "OCR returned empty text. The bill may be too small, blurred, rotated, or unreadable.", filetype, filename: uploadedFile.originalname || "", mimetype: uploadedFile.mimetype || "" });
     let fileUrl = "";
     if (process.env.FIREBASE_STORAGE_BUCKET) {
       const objectName = `purchase-bills/${restaurantId}/${Date.now()}-${uploadedFile.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
@@ -615,10 +671,23 @@ async function scanSupplierBill(req, res) {
     }
     const parsed = parseBillText(text);
     debugOcr("parsed", { rawTextLength: text.length, parsedItemCount: parsed.items.length, parseWarnings: parsed.parseWarnings.length });
-    res.json({ file: { name: uploadedFile.originalname, mimeType: uploadedFile.mimetype, size: uploadedFile.size, fileUrl }, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
-  } catch (error) { res.status(error.status || 422).json({ ...(error.ocr || {}), error: error.message || error.ocr?.error || "OCR parse failed." }); }
+    res.json({ success: true, file: { name: uploadedFile.originalname, mimeType: uploadedFile.mimetype, size: uploadedFile.size, fileUrl }, parsedText: text, parsedBill: parsed, rawOcr, ...parsed, billNo: parsed.billNumber, date: parsed.billDate, total: parsed.grandTotal, ocrConfigured: true });
+  } catch (error) {
+    const payload = {
+      success: false,
+      ...(error.ocr || {}),
+      error: error.ocr?.error || error.message || "OCR scan failed",
+      ocrExitCode: error.ocr?.OCRExitCode || error.ocr?.ocrExitCode || null,
+      errorMessage: error.ocr?.ErrorMessage || error.ocr?.errorMessage || error.message || "OCR scan failed",
+      filetype,
+      filename: uploadedFile?.originalname || "",
+      mimetype: uploadedFile?.mimetype || "",
+      debug: error.debug || undefined
+    };
+    res.status(error.status || 422).json(payload);
+  }
 }
-const uploadPurchaseBill = upload.fields([{ name: "file", maxCount: 1 }, { name: "bill", maxCount: 1 }]);
+const uploadPurchaseBill = upload.fields([{ name: "file", maxCount: 1 }, { name: "bill", maxCount: 1 }, { name: "image", maxCount: 1 }, { name: "pdf", maxCount: 1 }]);
 app.post("/api/ocr/scan", verifyAdmin, uploadPurchaseBill, scanSupplierBill);
 // Keep this endpoint for already-deployed panels while all current panels use /api/ocr/scan.
 app.post("/api/inventory/upload-bill", verifyAdmin, uploadPurchaseBill, scanSupplierBill);
@@ -628,7 +697,7 @@ async function saveReviewedPurchase(req, res) {
     const { restaurantId, supplierName = "", billNumber = "", billDate = "", taxAmount, gstTax, grandTotal, total, fileUrl = "", inventoryCollection = "inventory", items = [] } = req.body || {};
     if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: "items must have at least 1 valid item." });
-    await assertRestaurantAccess(req.user.uid, restaurantId);
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
     const safeInventoryCollection = inventoryCollection === "inventory_items" ? "inventory_items" : "inventory";
     const db = getFirestore();
     const preparedMap = new Map();
@@ -692,12 +761,15 @@ async function saveReviewedPurchase(req, res) {
           restaurantId,
           inventoryItemId: inventoryRef.id,
           itemName: item.itemName,
-          type: "stock_in",
+          type: "purchase",
+          direction: "stock_in",
           quantity: Number(item.quantity),
           unit: item.unit,
           rate: Number(item.rate || 0),
           amount: Number(item.amount || 0),
           source: "purchase_bill_ocr",
+          supplierName: item.supplierName || supplierName || "",
+          billNumber,
           purchaseBillId: billRef.id,
           reason: "Purchase bill",
           createdAt: FieldValue.serverTimestamp(),
@@ -713,7 +785,9 @@ async function saveReviewedPurchase(req, res) {
       transaction.set(publicBillRef, billPayload);
     });
     res.json({ ok: true, success: true, message: "Purchase saved and inventory updated", purchaseBillId: billRef.id, billId: billRef.id, itemsSaved: prepared.length });
-  } catch (error) { res.status(400).json({ ok: false, error: error.message || "Could not save purchase." }); }
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, success: false, error: error.message || "Could not save purchase.", debug: error.debug || undefined });
+  }
 }
 
 app.post("/api/inventory/save-purchase", verifyAdmin, saveReviewedPurchase);
