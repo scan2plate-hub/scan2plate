@@ -102,12 +102,32 @@ export function calcEtaText(order) {
   return `${remain} min left`;
 }
 
-export function getBackendBase() {
-  return (
+export const DEFAULT_BACKEND_URL = "https://scan2plate.onrender.com";
+
+export function getBackendBaseUrl() {
+  const saved =
+    localStorage.getItem("scan2plateBackendUrl") ||
+    localStorage.getItem("backendUrl") ||
     localStorage.getItem("scan2plate_backend_url") ||
     localStorage.getItem("scan2serve_backend_url") ||
-    ""
-  );
+    "";
+  const clean = String(saved || "").trim().replace(/\/+$/, "");
+  const oldBackend = /scan2serve-backend\.onrender\.com/i.test(clean);
+  const validBackend = /^https:\/\/scan2plate\.onrender\.com$/i.test(clean);
+  const backendUrl = validBackend && !oldBackend ? clean : DEFAULT_BACKEND_URL;
+  localStorage.setItem("scan2plateBackendUrl", backendUrl);
+  localStorage.setItem("backendUrl", backendUrl);
+  localStorage.setItem("scan2plate_backend_url", backendUrl);
+  if (oldBackend) localStorage.setItem("scan2plateBackendUrlFixed", "true");
+  return backendUrl;
+}
+
+export function getBackendBase() {
+  return getBackendBaseUrl();
+}
+
+export function getSafeLogoUrl(restaurant = {}) {
+  return String(restaurant.restaurantLogoUrl || restaurant.logoUrl || restaurant.logo || "./logo.PNG").trim() || "./logo.PNG";
 }
 
 export function getRestaurantContext() {
@@ -186,11 +206,7 @@ export async function notifyBackend(payload) {
       }
     }
 
-    if (!backendUrl) {
-      backendUrl = "https://scan2serve-backend.onrender.com";
-    }
-
-    backendUrl = backendUrl.replace(/\/+$/, "");
+    backendUrl = getBackendBaseUrl();
 
     const res = await fetch(`${backendUrl}/notify-order`, {
       method: "POST",

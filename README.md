@@ -36,7 +36,7 @@ Your Twilio Auth Token was exposed in chat screenshots. Rotate/regenerate it in 
   "taxPercent": 5,
   "logoUrl": "https://...",
   "kitchenWhatsApp": "+91...",
-  "backendUrl": "http://localhost:5000"
+  "backendUrl": "https://scan2plate.onrender.com"
 }
 ```
 

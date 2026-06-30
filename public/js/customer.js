@@ -22,6 +22,7 @@ import {
   toast,
   escapeHtml,
   notifyBackend,
+  getBackendBaseUrl,
   getRestaurantIdFromUrlOrStorage,
   normalizeCustomerPhone,
   isActiveUnpaidOrder
@@ -278,7 +279,7 @@ async function loadSettings() {
   }
 
   localStorage.setItem('scan2plate_settings', JSON.stringify(settings));
-  localStorage.setItem('scan2plate_backend_url', settings.backendUrl || '');
+  localStorage.setItem('scan2plate_backend_url', getBackendBaseUrl());
 
   if (restaurantNameEl) {
     restaurantNameEl.textContent = settings.restaurantName || settings.name || 'Order from your table in seconds';

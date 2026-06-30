@@ -330,6 +330,7 @@ app.get("/health", (_, res) => res.json({ ok: true, twilioEnabled, missing, inve
 app.get("/api/health", (_, res) => res.json({
   ok: true,
   service: "scan2plate-backend",
+  backendName: "scan2plate",
   storageBucket: storageBucketName,
   firebaseAdminReady: adminReady,
   logoUploadRoute: true,
@@ -535,7 +536,8 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
     if (!restaurantSnap) return res.status(404).json({ success: false, ok: false, error: "Restaurant not found", restaurantId: restaurantIdParam });
     console.info("[Logo Upload] restaurant found", { restaurantId: restaurantIdParam, documentId: restaurantSnap.id });
 
-    const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "image/jpg": "jpg" })[String(uploadedLogo.mimetype || "").toLowerCase()] || "jpg";
+    const extensionFromName = String(uploadedLogo.originalname || "").toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "";
+    const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/svg+xml": "svg" })[String(uploadedLogo.mimetype || "").toLowerCase()] || extensionFromName || "jpg";
     const storagePath = `restaurants/${restaurantIdParam}/logo/logo-${Date.now()}.${extension}`;
     const bucket = getStorage().bucket(storageBucketName);
     const file = bucket.file(storagePath);
@@ -566,7 +568,7 @@ app.post("/api/restaurants/:restaurantId/logo", verifyAdmin, (req, res, next) =>
       restaurantLogoUrl: logoUrl,
       restaurantLogoStoragePath: storagePath,
       logoUrl,
-      updatedAt: new Date()
+      updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
     res.json({ success: true, ok: true, restaurantId: restaurantIdParam, logoUrl, storagePath });
   } catch (error) {

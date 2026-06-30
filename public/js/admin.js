@@ -18,7 +18,7 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl } from "./common.js";
 
 /* =========================================================
    LOGIN / USER
@@ -1203,18 +1203,18 @@ async function billQrAsPngDataUrl() {
 }
 
 function getRestaurantLogoUrl() {
-  return String(restaurantSettings.restaurantLogoUrl || restaurantSettings.logoUrl || "").trim();
+  return getSafeLogoUrl(restaurantSettings);
 }
 
 function setLogoPreview(url = "") {
   if (!restaurantLogoPreviewEl) return;
-  if (url) {
-    restaurantLogoPreviewEl.src = url;
+  restaurantLogoPreviewEl.onerror = () => {
+    restaurantLogoPreviewEl.onerror = null;
+    restaurantLogoPreviewEl.src = "./logo.PNG";
     restaurantLogoPreviewEl.style.display = "block";
-  } else {
-    restaurantLogoPreviewEl.removeAttribute("src");
-    restaurantLogoPreviewEl.style.display = "none";
-  }
+  };
+  restaurantLogoPreviewEl.src = url || "./logo.PNG";
+  restaurantLogoPreviewEl.style.display = "block";
 }
 
 function markRestaurantLogoRemoved() {
@@ -1273,10 +1273,10 @@ function setSaveSettingsProgress(text = "Save Settings", saving = false) {
 }
 
 function validateLogoFile(file) {
-  if (!file) return;
-  const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-  const nameOk = /\.(jpe?g|png|webp)$/i.test(file.name || "");
-  if (!acceptedTypes.has(file.type) && !nameOk) throw new Error("Use JPG, JPEG, PNG, or WEBP logo image.");
+  if (!file) throw new Error("Select a logo image first.");
+  const nameOk = /\.(jpe?g|png|webp|gif|svg)$/i.test(file.name || "");
+  if (!String(file.type || "").startsWith("image/") && !nameOk) throw new Error("Use an image logo file.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("Logo image must be 5MB or smaller.");
 }
 
 function loadLogoImage(file) {
@@ -1333,14 +1333,7 @@ async function compressLogoFile(file) {
 }
 
 function logoBackendUrl() {
-  const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
-  const savedUrl = String(configuredOverride || restaurantSettings.backendUrl || "").trim();
-  if (savedUrl) {
-    const normalized = savedUrl.replace(/\/+$/, "");
-    if (!/^https:\/\/scan2plate\.com$/i.test(normalized) && normalized !== window.location.origin) return normalized;
-  }
-  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) return "https://scan2plate.onrender.com";
-  throw new Error("Backend URL missing. Please set Backend URL in Payment Settings.");
+  return getBackendBaseUrl();
 }
 
 async function uploadRestaurantLogoWithFirebase(file) {
@@ -1357,7 +1350,8 @@ async function uploadRestaurantLogoWithFirebase(file) {
 
 async function uploadRestaurantLogoWithBackend(file) {
   if (!file) return null;
-  if (!restaurantId) throw new Error("restaurantId missing");
+  if (!restaurantId) throw new Error("Restaurant ID missing. Please login again.");
+  validateLogoFile(file);
   const backendUrl = logoBackendUrl();
   const form = new FormData();
   form.append("logo", file, file.name || `logo-${Date.now()}.jpg`);
@@ -1371,7 +1365,7 @@ async function uploadRestaurantLogoWithBackend(file) {
   try { data = text ? JSON.parse(text) : {}; } catch {}
   if (!response.ok || data.ok === false) {
     const detail = data.error || text || response.statusText;
-    throw new Error(`Logo upload failed. Backend URL: ${backendUrl}; restaurantId: ${restaurantId}; HTTP ${response.status}; ${detail}`);
+    throw new Error(`Logo upload failed. Backend URL used: ${backendUrl}; Restaurant ID: ${restaurantId}; HTTP ${response.status}; ${detail}`);
   }
   if (!data.logoUrl) throw new Error("Backend upload did not return logoUrl.");
   return { url: data.logoUrl, path: data.storagePath || "" };
@@ -1812,7 +1806,7 @@ async function loadSettings() {
     if (showQrOnPaidBillsFieldEl) showQrOnPaidBillsFieldEl.checked = restaurantSettings.showQrOnPaidBills !== false;
     setLogoPreview(getRestaurantLogoUrl());
     if (kitchenWhatsAppFieldEl) kitchenWhatsAppFieldEl.value = restaurantSettings.kitchenWhatsApp || "";
-    if (backendUrlFieldEl) backendUrlFieldEl.value = restaurantSettings.backendUrl || "";
+    if (backendUrlFieldEl) backendUrlFieldEl.value = getBackendBaseUrl();
     if (gstFieldEl) gstFieldEl.value = restaurantSettings.gstNumber || "";
     if (restaurantLatFieldEl) restaurantLatFieldEl.value = restaurantSettings.restaurantLat ?? "";
     if (restaurantLngFieldEl) restaurantLngFieldEl.value = restaurantSettings.restaurantLng ?? "";
@@ -1828,6 +1822,7 @@ async function loadSettings() {
   } catch (err) {
     console.error("loadSettings error", err);
   }
+  ensureBackendUrlControl();
   ensureOcrStatusControl();
   testOcrConnection();
 }
@@ -1906,7 +1901,7 @@ async function saveSettings() {
       dailyOrderResetTime: normalizedResetTime(dailyOrderResetTimeFieldEl?.value || "04:00"),
       showQrOnPaidBills: showQrOnPaidBillsFieldEl?.checked !== false,
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
-      backendUrl: backendUrlFieldEl?.value.trim() || "",
+      backendUrl: getBackendBaseUrl(),
       gstNumber: gstFieldEl?.value.trim() || "",
       restaurantLat,
       restaurantLng,
@@ -1946,12 +1941,11 @@ async function saveSettings() {
     restaurantLogoMarkedForRemoval = false;
     if (logoFieldEl) logoFieldEl.value = payload.logoUrl || "";
     await loadSettings();
-    if (payload.logoUrl) {
-      document.querySelectorAll(".app-logo").forEach(img => {
-        img.src = payload.logoUrl;
-        img.style.display = "";
-      });
-    }
+    document.querySelectorAll(".app-logo").forEach(img => {
+      img.onerror = () => { img.onerror = null; img.src = "./logo.PNG"; };
+      img.src = payload.logoUrl || "./logo.PNG";
+      img.style.display = "";
+    });
     alert("Settings saved successfully.");
   } catch (err) {
     console.error("saveSettings error", err);
@@ -2549,12 +2543,7 @@ function renderInventoryHistory() {
 }
 
 function purchaseBackendUrl() {
-  // A saved override is useful for separate backends. Hosted static pages use the Render backend by default.
-  const configuredOverride = backendUrlFieldEl ? backendUrlFieldEl.value.trim() : (restaurantSettings.backendUrl || "");
-  const fallback = ["localhost", "127.0.0.1"].includes(window.location.hostname)
-    ? window.location.origin
-    : "https://scan2serve-backend.onrender.com";
-  return String(configuredOverride || restaurantSettings.backendUrl || fallback).replace(/\/+$/, "");
+  return getBackendBaseUrl();
 }
 
 function showPurchaseOcrMessage(message = "", tone = "error") {
@@ -2566,6 +2555,30 @@ function showPurchaseOcrMessage(message = "", tone = "error") {
   if (!messageEl) return;
   messageEl.textContent = message; messageEl.style.display = message ? "block" : "none";
   messageEl.style.cssText += tone === "success" ? ";margin-top:12px;padding:10px 12px;border-radius:9px;font-size:13px;background:#ecfdf3;color:#18794e;" : ";margin-top:12px;padding:10px 12px;border-radius:9px;font-size:13px;background:#fff1f0;color:#b43731;";
+}
+
+function ensureBackendUrlControl() {
+  if (!backendUrlFieldEl) return;
+  const backendUrl = getBackendBaseUrl();
+  backendUrlFieldEl.value = backendUrl;
+  let status = document.getElementById("backendUrlStatus");
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "backendUrlStatus";
+    status.className = "small muted";
+    status.style.marginTop = "6px";
+    backendUrlFieldEl.closest(".form-group")?.appendChild(status);
+  }
+  const fixedOld = localStorage.getItem("scan2plateBackendUrlFixed") === "true";
+  status.innerHTML = `${fixedOld ? `<span style="color:#b96f09;font-weight:700">Old backend URL detected and fixed automatically.</span><br>` : ""}Correct backend: <strong>${backendUrl}</strong> <button class="btn btn-sm btn-outline" id="resetBackendUrlBtn" type="button" style="margin-left:8px">Reset Backend URL</button>`;
+  document.getElementById("resetBackendUrlBtn")?.addEventListener("click", () => {
+    localStorage.setItem("scan2plateBackendUrl", "https://scan2plate.onrender.com");
+    localStorage.setItem("backendUrl", "https://scan2plate.onrender.com");
+    localStorage.setItem("scan2plate_backend_url", "https://scan2plate.onrender.com");
+    localStorage.removeItem("scan2plateBackendUrlFixed");
+    backendUrlFieldEl.value = getBackendBaseUrl();
+    ensureBackendUrlControl();
+  });
 }
 
 function ensureOcrStatusControl() {
@@ -3399,8 +3412,9 @@ function fillBillPreview(order) {
       billLogoEl.src = logoUrl;
       billLogoEl.style.display = "block";
       billLogoEl.onerror = () => {
-        billLogoEl.style.display = "none";
-        billLogoEl.removeAttribute("src");
+        billLogoEl.onerror = null;
+        billLogoEl.src = "./logo.PNG";
+        billLogoEl.style.display = "block";
       };
     } else {
       billLogoEl.style.display = "none";
