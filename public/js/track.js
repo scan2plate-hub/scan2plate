@@ -122,6 +122,20 @@ function paymentHtml(order) {
   `;
 }
 
+function orderIsActiveForAddon(order = {}) {
+  const status = String(order.status || "pending").toLowerCase();
+  const payment = String(order.paymentStatus || "unpaid").toLowerCase();
+  return payment !== "paid" && !["completed", "closed", "cancelled", "rejected", "delivered"].includes(status);
+}
+
+function orderMenuUrl(order = {}) {
+  const params = new URLSearchParams();
+  params.set("restaurantId", order.restaurantId || restaurantDetails.id || "");
+  if (order.tableNo) params.set("table", order.tableNo);
+  params.set("addToOrder", order.orderId || "");
+  return `./index.html?${params.toString()}`;
+}
+
 function render(order) {
   currentOrder = order;
   const items = Array.isArray(order.items) ? order.items : [];
@@ -181,6 +195,11 @@ function render(order) {
       <section class="track-section help-section">
         <h2>Help / Restaurant Contact</h2>
         <p>${contact}</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+          ${orderIsActiveForAddon(order) ? `<a class="btn btn-primary" href="${escapeHtml(orderMenuUrl(order))}">Add More Items</a>` : ""}
+          <a class="btn btn-outline" href="./bill.html?orderId=${encodeURIComponent(order.orderId || "")}">View Bill</a>
+          ${restaurantDetails.phone ? `<a class="btn btn-outline" href="tel:${encodeURIComponent(restaurantDetails.phone)}">Call Staff</a>` : ""}
+        </div>
       </section>
     </article>
   `;

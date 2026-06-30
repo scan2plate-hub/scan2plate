@@ -376,6 +376,60 @@ app.post("/api/ai/help", async (req, res) => {
   if (!answer) answer = `${providerFailed ? "AI service is temporarily unavailable. Here is a standard troubleshooting guide.\n\n" : ""}${fallbackHelpAnswer(cleanMessage)}`;
   res.json({ success: true, answer, source, diagnostics: backendDiagnostics });
 });
+
+app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || req.body?.restaurantId || "").trim();
+    const { name = "", email = "", password = "", phone = "", role = "waiter" } = req.body || {};
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanRole = String(role || "waiter").trim().toLowerCase();
+    const allowedRoles = new Set(["owner", "manager", "cashier", "kitchen", "waiter"]);
+    if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
+    if (!String(name).trim()) return res.status(400).json({ ok: false, error: "Staff name is required." });
+    if (!cleanEmail) return res.status(400).json({ ok: false, error: "Email is required." });
+    if (!allowedRoles.has(cleanRole)) return res.status(400).json({ ok: false, error: "Invalid staff role." });
+    if (!String(password).trim() || String(password).length < 6) return res.status(400).json({ ok: false, error: "Password must be at least 6 characters." });
+    await assertRestaurantAccess(req.user.uid, restaurantId);
+
+    const auth = getAuth();
+    let userRecord;
+    try {
+      userRecord = await auth.getUserByEmail(cleanEmail);
+      await auth.updateUser(userRecord.uid, { password: String(password), displayName: String(name).trim(), disabled: false });
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") throw error;
+      userRecord = await auth.createUser({ email: cleanEmail, password: String(password), displayName: String(name).trim(), disabled: false });
+    }
+
+    const db = getFirestore();
+    const docId = cleanEmail.replaceAll("@", "_").replaceAll(".", "_");
+    const staffPayload = {
+      uid: userRecord.uid,
+      restaurantId,
+      email: cleanEmail,
+      name: String(name).trim(),
+      phone: String(phone || "").trim(),
+      role: cleanRole,
+      status: "active",
+      createdAt: FieldValue.serverTimestamp(),
+      createdBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    await db.doc(`restaurants/${restaurantId}/users/${docId}`).set(staffPayload, { merge: true });
+    await db.doc(`restaurantStaff/${userRecord.uid}`).set(staffPayload, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_created",
+      performedBy: req.user.email || req.user.uid,
+      role: "owner",
+      details: { staffUid: userRecord.uid, email: cleanEmail, role: cleanRole },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true, uid: userRecord.uid, staff: { ...staffPayload, createdAt: null, updatedAt: null } });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not create staff." });
+  }
+});
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;

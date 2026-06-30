@@ -328,10 +328,19 @@ function getAlertKey(x) {
   return JSON.stringify({
     status:        String(x.status || "pending").toLowerCase(),
     hasNewItems:   x.hasNewItems === true,
+    pendingAddon:  pendingAddonItems(x).length,
     updatedSec:    x.updatedAt?.seconds || x.createdAt?.seconds || 0,
     etaMinutes:    Number(x.etaMinutes || 10),
     etaStartedSec: x.etaStartedAt?.seconds || 0
   });
+}
+
+function pendingAddonItems(order = {}) {
+  return (order.items || []).filter(item => item.isNewAddon === true && item.seenByKitchen !== true);
+}
+
+function newKotItems(order = {}) {
+  return (order.items || []).filter(item => item.isNewAddon === true && item.kotPrinted !== true);
 }
 
 /* ─────────────────────────────────────────
@@ -339,7 +348,8 @@ function getAlertKey(x) {
 ───────────────────────────────────────── */
 function cardHtml(d) {
   const x         = d.data();
-  const items     = (x.items || []).map(i => `${escapeHtml(itemDisplayName(i))} x ${i.qty}`).join(", ");
+  const pendingAddons = pendingAddonItems(x);
+  const items     = (x.items || []).map(i => `${escapeHtml(itemDisplayName(i))} x ${i.qty}${i.isNewAddon === true && i.seenByKitchen !== true ? " NEW" : ""}`).join(", ");
   const eta       = Number(x.etaMinutes || 10);
   const hasNew    = x.hasNewItems === true;
   const newText   = escapeHtml(x.newlyAddedItemsText || "");
@@ -367,8 +377,8 @@ function cardHtml(d) {
 
       ${hasNew ? `
         <div style="margin-top:10px;padding:10px 12px;border-radius:14px;background:#fff7e6;border:1px solid #f4d9a6">
-          <div style="font-weight:800;color:#b96f09;font-size:13px;margin-bottom:6px;">🆕 New items added</div>
-          ${newText ? `<div style="font-size:14px;color:#333;margin-bottom:${newNote ? "6px" : "0"}">${newText}</div>` : ""}
+          <div style="font-weight:800;color:#b96f09;font-size:13px;margin-bottom:6px;">NEW ADD ON · Add on order received</div>
+          <div style="font-size:14px;color:#333;margin-bottom:${newNote ? "6px" : "0"}">${pendingAddons.length ? pendingAddons.map(item => `${escapeHtml(itemDisplayName(item))} x ${Number(item.qty || item.quantity || 0)} NEW`).join("<br>") : newText}</div>
           ${newNote ? `<div style="font-size:13px;color:#666"><strong>Note:</strong> ${newNote}</div>` : ""}
         </div>` : ""}
 
@@ -379,9 +389,10 @@ function cardHtml(d) {
         <button class="btn btn-danger"  data-status="${d.id}" data-val="rejected">Reject</button>
         <button class="btn btn-dark"    data-addtime="${d.id}">+10 min</button>
         ${hasNew
-          ? `<button class="btn btn-green" data-clearnew="${d.id}" data-orderid="${escapeHtml(d.id)}">Seen Update</button>`
+          ? `<button class="btn btn-green" data-seenaddons="${d.id}">Seen</button>
+             <button class="btn btn-outline" data-printnew="${d.id}">Print New KOT</button>`
           : ""}
-        <button class="btn btn-outline" data-printall="${d.id}" title="Print full KOT">🖨️ Print KOT</button>
+        <button class="btn btn-outline" data-printall="${d.id}" title="Print full KOT">Print KOT All Items</button>
       </div>
     </div>`;
 }
@@ -429,10 +440,6 @@ function bindActions(orderDocs, root = document) {
 
       const payload = {
         status:              nextStatus,
-        hasNewItems:         false,
-        newlyAddedItems:     [],
-        newlyAddedItemsText: "",
-        newlyAddedNote:      "",
         updatedAt:           serverTimestamp()
       };
 
@@ -468,10 +475,6 @@ function bindActions(orderDocs, root = document) {
 
       await updateDoc(doc(db, "orders", docId), {
         etaMinutes:          nextEtaMinutes,
-        hasNewItems:         false,
-        newlyAddedItems:     [],
-        newlyAddedItemsText: "",
-        newlyAddedNote:      "",
         updatedAt:           serverTimestamp()
       });
 
@@ -479,63 +482,40 @@ function bindActions(orderDocs, root = document) {
     };
   });
 
-  /* ── Seen Update → print KOT for NEW/CHANGED ITEMS ONLY ── */
-  root.querySelectorAll("[data-clearnew]").forEach(btn => {
+  root.querySelectorAll("[data-seenaddons]").forEach(btn => {
     btn.onclick = async () => {
       stopAlert();
-
-      const docId = btn.dataset.clearnew;
+      const docId = btn.dataset.seenaddons;
       const found = orderDocs.find(d => d.id === docId);
       if (!found) return;
 
       const current     = found.data();
       const currItems   = current.items || [];
-
-      // ── STRATEGY 1: Use local acceptedSnapshots (most accurate) ──
-      // This tracks exactly what was in the order when Accept was clicked
-      const prevSnapshot = acceptedSnapshots.get(docId); // Map<name, qty> or undefined
-
-      let deltaItems = [];
-
-      if (prevSnapshot) {
-        // Compare current items against the snapshot taken at Accept time
-        currItems.forEach(item => {
-          const prevQty = prevSnapshot.get(itemDisplayName(item)) ?? 0;
-          const currQty = Number(item.qty || 0);
-          if (currQty > prevQty) {
-            // New item or increased qty — only print the DIFFERENCE
-            deltaItems.push({ ...item, qty: currQty - prevQty });
-          } else if (prevQty === 0 && currQty > 0) {
-            // Completely new item not in snapshot
-            deltaItems.push({ ...item });
-          }
-        });
-      }
-
-      // ── STRATEGY 2: Fallback to Firestore newlyAddedItems field ──
-      if (deltaItems.length === 0 && (current.newlyAddedItems || []).length > 0) {
-        deltaItems = current.newlyAddedItems;
-      }
-
-      // ── STRATEGY 3: Last resort — print all items with UPDATED label ──
-      const itemsToPrint = deltaItems.length > 0 ? deltaItems : currItems;
-      const kotLabel     = deltaItems.length > 0 ? "NEW ITEMS ADDED" : "UPDATED ORDER";
-
-      // Print KOT with only the new/changed items
-      printKOT(current, itemsToPrint, kotLabel);
-
-      // Update snapshot to current state so next Seen Update diffs correctly
-      const newSnapshot = new Map();
-      currItems.forEach(i => newSnapshot.set(itemDisplayName(i), Number(i.qty || 0)));
-      acceptedSnapshots.set(docId, newSnapshot);
-
-      // Clear hasNewItems flag in Firestore
+      const nextItems = currItems.map(item => item.isNewAddon === true ? { ...item, seenByKitchen: true } : item);
       await updateDoc(doc(db, "orders", docId), {
+        items: nextItems,
         hasNewItems:         false,
         newlyAddedItems:     [],
         newlyAddedItemsText: "",
         newlyAddedNote:      "",
         updatedAt:           serverTimestamp()
+      });
+    };
+  });
+
+  root.querySelectorAll("[data-printnew]").forEach(btn => {
+    btn.onclick = async () => {
+      const docId = btn.dataset.printnew;
+      const found = orderDocs.find(d => d.id === docId);
+      if (!found) return;
+      const current = found.data();
+      const itemsToPrint = newKotItems(current);
+      if (!itemsToPrint.length) return alert("No new add-on items to print.");
+      printKOT(current, itemsToPrint, "NEW ITEMS ONLY");
+      const printedAt = new Date().toISOString();
+      await updateDoc(doc(db, "orders", docId), {
+        items: (current.items || []).map(item => item.isNewAddon === true && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
+        updatedAt: serverTimestamp()
       });
     };
   });

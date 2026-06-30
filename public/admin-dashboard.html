@@ -1404,12 +1404,17 @@
         inventory: { title:"Inventory",      subtitle:"Manage stock & ingredient usage" },
         settings:  { title:"Settings",       subtitle:"Restaurant configuration" },
         reports:   { title:"Reports",        subtitle:"Sales & analytics" },
+        staff:     { title:"Staff",          subtitle:"Staff accounts and access" },
         tables:    { title:"Tables",          subtitle:"Live table status" }
       };
 
       function switchSection(name) {
+        if (typeof window.scan2plateCanOpenSection === "function" && !window.scan2plateCanOpenSection(name)) {
+          alert("Owner access required. Please login with owner account.");
+          return;
+        }
         navItems.forEach(n => n.classList.remove("active"));
-        sections.forEach(s => s.classList.remove("active"));
+        document.querySelectorAll(".content-section").forEach(s => s.classList.remove("active"));
         const navEl = document.querySelector(`.nav-item[data-section="${name}"]`);
         const secEl = document.getElementById("section-" + name);
         if (navEl) navEl.classList.add("active");
@@ -1429,6 +1434,13 @@
           const sec = this.getAttribute("data-section");
           if (sec) switchSection(sec);
         });
+      });
+      document.addEventListener("click", function(e) {
+        const item = e.target.closest(".nav-item[data-section]");
+        if (!item || Array.from(navItems).includes(item)) return;
+        e.preventDefault();
+        const sec = item.getAttribute("data-section");
+        if (sec) switchSection(sec);
       });
 
       document.querySelectorAll(".quick-action").forEach(action => {

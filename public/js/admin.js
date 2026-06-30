@@ -18,6 +18,7 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
+import { canAccessModule } from "./common.js";
 
 /* =========================================================
    LOGIN / USER
@@ -469,12 +470,139 @@ let selectedManualCategory = "all";
 let selectedMenuCategory = "all";
 let selectedOrderFilter = "active";
 let selectedReportType = "daily";
+let manualDiscount = { discountType: "", discountValue: 0, discountReason: "" };
 
 let ordersUnsubscribe = null;
 let inventoryUnsubscribe = null;
 let inventoryLogsUnsubscribe = null;
 const adminAcceptedSnapshots = new Map();
 const seenSnapshotMap = new Map();
+
+function currentRole() {
+  return String(currentUser.role || "owner").toLowerCase();
+}
+
+function isOwnerLike() {
+  return ["owner", "admin", "restaurant admin", ""].includes(currentRole());
+}
+
+async function auditLog(action, details = {}) {
+  try {
+    await addDoc(collection(db, "auditLogs"), {
+      restaurantId,
+      action,
+      performedBy: currentUser.email || currentUser.name || currentUser.uid || "unknown",
+      role: currentRole() || "owner",
+      details,
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.warn("audit log failed", action, error);
+  }
+}
+
+function applyStaffPermissions() {
+  const role = currentRole() || "owner";
+  const moduleMap = { dashboard: "dashboard", orders: "orders", billing: "billing", kot: "kot", tables: "tables", menu: "menu", inventory: "inventory", settings: "settings", reports: "reports", staff: "staff" };
+  Object.entries(moduleMap).forEach(([section, moduleName]) => {
+    const allowed = canAccessModule(role, moduleName) || isOwnerLike();
+    document.querySelector(`.nav-item[data-section="${section}"]`)?.classList.toggle("hidden", !allowed);
+    const sectionEl = document.getElementById(`section-${section}`);
+    if (sectionEl && !allowed) sectionEl.innerHTML = `<div class="card"><div class="card-body" style="padding:28px;text-align:center;"><h3>Owner Only</h3><p class="muted">Owner access required. Please login with owner account.</p></div></div>`;
+  });
+  if (!canAccessModule(role, "dashboard") && !isOwnerLike()) {
+    document.querySelector('.nav-item[data-section="orders"]')?.click();
+  }
+}
+window.scan2plateCanOpenSection = section => {
+  const role = currentRole() || "owner";
+  const allowed = isOwnerLike() || canAccessModule(role, section);
+  if (!allowed) auditLog("owner_only_access_blocked", { section });
+  return allowed;
+};
+
+function ensureStaffManagementUi() {
+  if (!isOwnerLike()) return;
+  if (!document.querySelector('.nav-item[data-section="staff"]')) {
+    document.querySelector('.nav-item[data-section="reports"]')?.insertAdjacentHTML("beforebegin", `<a class="nav-item" data-section="staff"><span class="nav-icon"><i class="fas fa-users-gear"></i></span><span>Staff</span></a>`);
+  }
+  if (!document.getElementById("section-staff")) {
+    document.querySelector("main.main-content")?.insertAdjacentHTML("beforeend", `
+      <section class="content-section" id="section-staff">
+        <div class="grid-40-60">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-user-plus"></i> Add Staff</h3></div>
+            <div class="card-body">
+              <div class="form-group"><label class="form-label">Staff Name</label><input class="form-input" id="staffNameField" /></div>
+              <div class="form-group"><label class="form-label">Email ID</label><input class="form-input" id="staffEmailField" type="email" /></div>
+              <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="staffPasswordField" type="password" autocomplete="new-password" /></div>
+              <div class="form-group"><label class="form-label">Phone optional</label><input class="form-input" id="staffPhoneField" /></div>
+              <div class="form-group"><label class="form-label">Role</label><select class="form-select" id="staffRoleField"><option value="manager">Manager</option><option value="cashier">Cashier</option><option value="kitchen">Kitchen</option><option value="waiter">Waiter</option></select></div>
+              <button class="btn btn-primary" id="createStaffBtn" type="button"><i class="fas fa-user-plus"></i> Create Staff</button>
+              <div id="staffMessage" class="notice-box info hidden" style="margin-top:12px;"><i class="fas fa-info-circle"></i><span></span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-users"></i> Staff Accounts</h3></div>
+            <div class="card-body"><div id="staffList"><div class="empty-state"><i class="fas fa-users"></i><h4>No staff loaded</h4></div></div></div>
+          </div>
+        </div>
+      </section>
+    `);
+  }
+  document.getElementById("createStaffBtn")?.addEventListener("click", createStaffUser);
+  loadStaffUsers();
+}
+
+function setStaffMessage(message = "", type = "info") {
+  const el = document.getElementById("staffMessage");
+  if (!el) return;
+  el.className = `notice-box ${type}${message ? "" : " hidden"}`;
+  el.querySelector("span").textContent = message;
+}
+
+async function createStaffUser() {
+  if (!isOwnerLike()) return alert("Owner access required. Please login with owner account.");
+  const button = document.getElementById("createStaffBtn");
+  const payload = {
+    name: document.getElementById("staffNameField")?.value.trim() || "",
+    email: document.getElementById("staffEmailField")?.value.trim().toLowerCase() || "",
+    password: document.getElementById("staffPasswordField")?.value || "",
+    phone: document.getElementById("staffPhoneField")?.value.trim() || "",
+    role: document.getElementById("staffRoleField")?.value || "waiter"
+  };
+  if (!payload.name || !payload.email || !payload.password) return setStaffMessage("Name, email, and password are required.", "warning");
+  try {
+    if (button) button.disabled = true;
+    const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff`, {
+      method: "POST",
+      headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false) throw new Error(result.error || "Staff creation failed.");
+    setStaffMessage("Staff user created successfully.", "success");
+    ["staffNameField", "staffEmailField", "staffPasswordField", "staffPhoneField"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+    auditLog("staff_created", { email: payload.email, role: payload.role });
+    await loadStaffUsers();
+  } catch (error) {
+    setStaffMessage(error.message || "Could not create staff.", "danger");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function loadStaffUsers() {
+  const list = document.getElementById("staffList");
+  if (!list || !isOwnerLike()) return;
+  try {
+    const snap = await getDocs(collection(db, "restaurants", restaurantId, "users"));
+    const staff = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(user => !["owner", "admin"].includes(String(user.role || "").toLowerCase()));
+    list.innerHTML = staff.length ? staff.map(user => `<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);"><span><strong>${escapeHtml(user.name || user.email)}</strong><br><small class="muted">${escapeHtml(user.email || "")}</small></span><span class="status-badge info">${escapeHtml(user.role || "staff")}</span></div>`).join("") : `<div class="empty-state"><i class="fas fa-users"></i><h4>No staff accounts yet</h4></div>`;
+  } catch (error) {
+    list.innerHTML = `<div class="notice-box danger">Unable to load staff: ${escapeHtml(error.message || error)}</div>`;
+  }
+}
 
 /* =========================================================
    UTILS
@@ -2713,7 +2841,7 @@ function isTableOccupyingOrder(order = {}, range = tableBusinessDayRange()) {
   const payment = String(order.paymentStatus || "unpaid").toLowerCase();
   const closedStatuses = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed"]);
   if (order.billClosed === true || closedStatuses.has(payment) || closedStatuses.has(status)) return false;
-  const occupyingStatuses = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting"]);
+  const occupyingStatuses = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting", "bill_open"]);
   const activeUnpaid = occupyingStatuses.has(status) || payment === "unpaid";
   return activeUnpaid && (orderInRange(order, range) || payment !== "paid");
 }
@@ -2850,14 +2978,77 @@ if (manualTableNoEl) {
 ========================================================= */
 function renderManualTotals() {
   const itemsTotal = manualCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
-  const tax = itemsTotal * (getTaxPercent() / 100);
-  const grandTotal = itemsTotal + tax;
+  const discountAmount = calculateDiscountAmount(itemsTotal, manualDiscount);
+  const taxableAmount = Math.max(0, itemsTotal - discountAmount);
+  const tax = taxableAmount * (getTaxPercent() / 100);
+  const grandTotal = taxableAmount + tax;
 
   if (manualItemsTotalEl) manualItemsTotalEl.textContent = money(itemsTotal);
   if (manualTaxTotalEl) manualTaxTotalEl.textContent = money(tax);
   if (manualGrandTotalTextEl) manualGrandTotalTextEl.textContent = money(grandTotal);
+  const discountEl = document.getElementById("manualDiscountTotal");
+  if (discountEl) discountEl.textContent = discountAmount ? `-${money(discountAmount)}` : money(0);
 
-  return { itemsTotal, tax, grandTotal };
+  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal };
+}
+
+function calculateDiscountAmount(subtotal, discount = {}) {
+  const type = String(discount.discountType || "").toLowerCase();
+  const value = Number(discount.discountValue || 0);
+  if (value < 0) return 0;
+  if (type === "flat") return Math.min(Number(subtotal || 0), value);
+  if (type === "percent") return Number(subtotal || 0) * Math.min(100, value) / 100;
+  return Number(discount.discountAmount || 0);
+}
+
+function ensureManualDiscountUi() {
+  if (document.getElementById("manualDiscountPanel") || !manualGrandTotalTextEl) return;
+  manualGrandTotalTextEl.closest(".bill-summary")?.querySelector(".bill-row.total")?.insertAdjacentHTML("beforebegin", `<div class="bill-row"><span>Discount</span><span id="manualDiscountTotal">₹0</span></div>`);
+  manualGrandTotalTextEl.closest(".bill-summary")?.insertAdjacentHTML("afterend", `
+    <div id="manualDiscountPanel" style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Discount Type</label><select class="form-select" id="manualDiscountType"><option value="">No discount</option><option value="flat">Flat amount</option><option value="percent">Percentage</option></select></div>
+        <div class="form-group"><label class="form-label">Discount Value</label><input class="form-input" id="manualDiscountValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+      </div>
+      <div class="form-group"><label class="form-label">Discount Reason</label><input class="form-input" id="manualDiscountReason" placeholder="Owner approved" /></div>
+      <div class="btn-group"><button class="btn btn-sm btn-primary" id="applyManualDiscountBtn" type="button">Apply Discount</button><button class="btn btn-sm btn-outline" id="removeManualDiscountBtn" type="button">Remove Discount</button></div>
+    </div>
+  `);
+  document.getElementById("applyManualDiscountBtn")?.addEventListener("click", applyManualDiscount);
+  document.getElementById("removeManualDiscountBtn")?.addEventListener("click", removeManualDiscount);
+}
+
+function applyManualDiscount() {
+  if (!isOwnerLike() && !["manager", "cashier"].includes(currentRole())) return alert("Owner access required. Please login with owner account.");
+  const type = document.getElementById("manualDiscountType")?.value || "";
+  const value = Number(document.getElementById("manualDiscountValue")?.value || 0);
+  const subtotal = manualCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
+  if (!type) return removeManualDiscount();
+  if (value < 0) return alert("Discount value cannot be negative.");
+  if (type === "flat" && value > subtotal) return alert("Flat discount cannot be greater than subtotal.");
+  if (type === "percent" && value > 100) return alert("Percentage discount cannot be greater than 100.");
+  if (!confirm(`Apply ${type === "flat" ? money(value) : `${value}%`} discount?`)) return;
+  manualDiscount = {
+    discountType: type,
+    discountValue: value,
+    discountReason: document.getElementById("manualDiscountReason")?.value.trim() || "",
+    discountBy: currentUser.email || currentUser.name || "admin",
+    discountAt: new Date().toISOString()
+  };
+  renderManualTotals();
+  auditLog("discount_applied", manualDiscount);
+}
+
+function removeManualDiscount() {
+  if (manualDiscount.discountType) auditLog("discount_removed", manualDiscount);
+  manualDiscount = { discountType: "", discountValue: 0, discountReason: "" };
+  const typeEl = document.getElementById("manualDiscountType");
+  const valueEl = document.getElementById("manualDiscountValue");
+  const reasonEl = document.getElementById("manualDiscountReason");
+  if (typeEl) typeEl.value = "";
+  if (valueEl) valueEl.value = "";
+  if (reasonEl) reasonEl.value = "";
+  renderManualTotals();
 }
 
 function manualItemLineId() {
@@ -3063,6 +3254,11 @@ function resetManualBillForm() {
   manualCart = [];
   editingOrderDocId = null;
   editingOrderPublicId = null;
+  manualDiscount = { discountType: "", discountValue: 0, discountReason: "" };
+  ["manualDiscountType", "manualDiscountValue", "manualDiscountReason"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
 
   if (createManualBillBtn) createManualBillBtn.innerHTML = `<i class="fas fa-check"></i> Create Order`;
   manualUpiQrWrap?.classList.add("hidden");
@@ -3090,6 +3286,20 @@ async function loadOrderIntoManualBill(orderDocId) {
     manualCart = Array.isArray(order.items)
       ? order.items.map(normalizeManualCartItem)
       : [];
+    manualDiscount = {
+      discountType: order.discountType || "",
+      discountValue: Number(order.discountValue || 0),
+      discountAmount: Number(order.discountAmount || 0),
+      discountReason: order.discountReason || "",
+      discountBy: order.discountBy || "",
+      discountAt: order.discountAt || null
+    };
+    const typeEl = document.getElementById("manualDiscountType");
+    const valueEl = document.getElementById("manualDiscountValue");
+    const reasonEl = document.getElementById("manualDiscountReason");
+    if (typeEl) typeEl.value = manualDiscount.discountType || "";
+    if (valueEl) valueEl.value = manualDiscount.discountValue || "";
+    if (reasonEl) reasonEl.value = manualDiscount.discountReason || "";
 
     if (createManualBillBtn) createManualBillBtn.innerHTML = `<i class="fas fa-check"></i> Update Order`;
 
@@ -3201,6 +3411,18 @@ if (billAddressEl) {
   }
 
   if (billSubtotalEl) billSubtotalEl.textContent = money(order.itemsTotal || 0);
+  let billDiscountEl = document.getElementById("billDiscountAmount");
+  let billDiscountReasonEl = document.getElementById("billDiscountReason");
+  if (!billDiscountEl && billTaxEl) {
+    billTaxEl.closest(".bill-row")?.insertAdjacentHTML("beforebegin", `<div class="bill-row" id="billDiscountRow"><span>Discount</span><span id="billDiscountAmount">₹0</span></div><div class="bill-row" id="billDiscountReasonRow" style="display:none"><span>Discount Reason</span><span id="billDiscountReason"></span></div>`);
+    billDiscountEl = document.getElementById("billDiscountAmount");
+    billDiscountReasonEl = document.getElementById("billDiscountReason");
+  }
+  if (billDiscountEl) billDiscountEl.textContent = Number(order.discountAmount || 0) ? `-${money(order.discountAmount || 0)}` : money(0);
+  if (billDiscountReasonEl) {
+    billDiscountReasonEl.textContent = order.discountReason || "";
+    document.getElementById("billDiscountReasonRow").style.display = order.discountReason ? "" : "none";
+  }
   if (billTaxEl) billTaxEl.textContent = money(order.tax || 0);
   if (billTotalEl) billTotalEl.textContent = money(order.grandTotal || 0);
 
@@ -3359,6 +3581,8 @@ function buildThermalBillHtml(order, qrDataUrl = "") {
 
     <section>
       <div class="sum-row"><span>Subtotal:</span><span>${money(order.itemsTotal || 0)}</span></div>
+      <div class="sum-row"><span>Discount:</span><span>-${money(order.discountAmount || 0)}</span></div>
+      ${order.discountReason ? `<div class="sum-row"><span>Reason:</span><span>${escapeHtml(order.discountReason)}</span></div>` : ""}
       <div class="sum-row"><span>Tax:</span><span>${money(order.tax || 0)}</span></div>
       <div class="sum-row total-row"><span>TOTAL:</span><span>${money(order.grandTotal || 0)}</span></div>
       <div class="muted">Total Qty: ${Number(totalQty || 0)}</div>
@@ -3398,8 +3622,22 @@ async function createManualBill() {
 
     if (!manualCart.length) return alert("Select at least one menu item.");
 
-    const { itemsTotal, tax, grandTotal } = renderManualTotals();
-    const cartItems = manualCartPayload();
+    const { itemsTotal, subtotal, discountAmount, taxableAmount, tax, grandTotal } = renderManualTotals();
+    let cartItems = manualCartPayload();
+    if (editingOrderDocId) {
+      const batchId = `ADDON${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+      const addedAt = nowIso();
+      cartItems = cartItems.map(item => item.kotPrinted !== true ? {
+        ...item,
+        quantity: Number(item.quantity || item.qty || 0),
+        total: Number(item.price || 0) * Number(item.qty || item.quantity || 0),
+        isNewAddon: true,
+        seenByKitchen: false,
+        addonBatchId: item.addonBatchId || batchId,
+        addedAt: item.addedAt || addedAt,
+        addedFrom: "admin_open_bill"
+      } : item);
+    }
     manualCart = cartItems;
     const newKotItems = cartItems.filter(item => item.kotPrinted !== true);
     const wasEditingOrder = Boolean(editingOrderDocId);
@@ -3424,6 +3662,14 @@ async function createManualBill() {
         grandTotal,
         tax,
         itemsTotal,
+        subtotal,
+        taxableAmount,
+        discountType: manualDiscount.discountType || "",
+        discountValue: Number(manualDiscount.discountValue || 0),
+        discountAmount,
+        discountReason: manualDiscount.discountReason || "",
+        discountBy: manualDiscount.discountBy || "",
+        discountAt: manualDiscount.discountAt || null,
         paidAmount: paymentStatus === "paid" ? grandTotal : 0,
         remainingAmount: paymentStatus === "paid" ? 0 : grandTotal,
         billClosed: paymentStatus === "paid" && ["ready", "served", "completed"].includes(oldStatus),
@@ -3440,6 +3686,7 @@ async function createManualBill() {
         isManualOrder: oldData.isManualOrder === true,
         source: oldData.source || "manual_admin"
       });
+      if (newKotItems.length) await auditLog("add_more_items", { orderId: editingOrderPublicId, tableNo, addonCount: newKotItems.length, addedFrom: "admin_open_bill" });
 
       fillKotPreviewFromCart(editingOrderPublicId || "");
       setNotice(`Order updated: ${editingOrderPublicId}`, "success");
@@ -3463,6 +3710,14 @@ async function createManualBill() {
         grandTotal,
         tax,
         itemsTotal,
+        subtotal,
+        taxableAmount,
+        discountType: manualDiscount.discountType || "",
+        discountValue: Number(manualDiscount.discountValue || 0),
+        discountAmount,
+        discountReason: manualDiscount.discountReason || "",
+        discountBy: manualDiscount.discountBy || "",
+        discountAt: manualDiscount.discountAt || null,
         paidAmount: paymentStatus === "paid" ? grandTotal : 0,
         remainingAmount: paymentStatus === "paid" ? 0 : grandTotal,
         billClosed: false,
@@ -3514,10 +3769,6 @@ async function handleAdminOrderAction(orderDocId, action) {
     if (action === "accept") {
       const payload = {
         status: "accepted",
-        hasNewItems: false,
-        newlyAddedItems: [],
-        newlyAddedItemsText: "",
-        newlyAddedNote: "",
         updatedAt: serverTimestamp()
       };
 
@@ -3568,6 +3819,20 @@ async function handleAdminOrderAction(orderDocId, action) {
       return;
     }
 
+    if (action === "printnewkot") {
+      const itemsToPrint = currentItems.filter(item => item.isNewAddon === true && item.kotPrinted !== true);
+      if (!itemsToPrint.length) return alert("No new add-on items to print.");
+      const printed = printKOTFromOrder(order, itemsToPrint, "NEW ITEMS ONLY");
+      if (printed) {
+        const printedAt = nowIso();
+        await updateDoc(orderRef, {
+          items: currentItems.map(item => item.isNewAddon === true && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
+          updatedAt: serverTimestamp()
+        });
+      }
+      return;
+    }
+
     if (action === "seenupdate") {
       const oldSnapMap = seenSnapshotMap.get(orderDocId) || buildOrderItemSnapshot(currentItems);
       let deltaItems = [];
@@ -3598,6 +3863,7 @@ async function handleAdminOrderAction(orderDocId, action) {
       seenSnapshotMap.set(orderDocId, buildOrderItemSnapshot(currentItems));
 
       await updateDoc(orderRef, {
+        items: currentItems.map(item => item.isNewAddon === true ? { ...item, seenByKitchen: true } : item),
         hasNewItems: false,
         newlyAddedItems: [],
         newlyAddedItemsText: "",
@@ -3983,7 +4249,7 @@ function renderOrdersList(targetEl, orders) {
           <button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="printkot">Print KOT</button>
           ${
             hasNewItems
-              ? `<button class="btn btn-success admin-order-action" data-id="${o.id}" data-action="seenupdate">Seen Update</button>`
+              ? `<button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="printnewkot">Print New KOT</button><button class="btn btn-success admin-order-action" data-id="${o.id}" data-action="seenupdate">Seen Update</button>`
               : ""
           }
         </div>
@@ -4100,6 +4366,8 @@ function getFilteredReportOrders() {
 }
 
 function renderReportSummary(filteredOrders) {
+  const grossSales = filteredOrders.reduce((sum, order) => sum + Number(order.itemsTotal || order.subtotal || order.grandTotal || 0), 0);
+  const totalDiscounts = filteredOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
   const totalSales = filteredOrders.reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
   const paidOrders = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid");
   const paidSales = paidOrders.reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
@@ -4107,7 +4375,8 @@ function renderReportSummary(filteredOrders) {
   const completed = filteredOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase())).length;
   const cancelled = filteredOrders.filter(order => ["cancelled", "rejected"].includes(String(order.status || "").toLowerCase())).length;
   const cards = [
-    ["blue", "fa-receipt", "Total Orders", filteredOrders.length], ["green", "fa-indian-rupee-sign", "Total Sales", money(totalSales)],
+    ["blue", "fa-receipt", "Total Orders", filteredOrders.length], ["green", "fa-indian-rupee-sign", "Gross Sales", money(grossSales)],
+    ["orange", "fa-tags", "Total Discounts Given", money(totalDiscounts)], ["green", "fa-wallet", "Net Sales", money(totalSales)],
     ["orange", "fa-wallet", "Paid Sales", money(paidSales)], ["purple", "fa-clock", "Unpaid Orders", unpaidOrders.length],
     ["green", "fa-check-circle", "Completed Orders", completed], ["red", "fa-ban", "Cancelled Orders", cancelled],
     ["blue", "fa-calculator", "Average Order Value", money(filteredOrders.length ? totalSales / filteredOrders.length : 0)]
@@ -4119,7 +4388,8 @@ function renderPaymentBreakdown(filteredOrders) {
   const paid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid");
   const amountFor = test => paid.filter(order => test(String(order.paymentMethod || "cash").toLowerCase())).reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
   const unpaid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() !== "paid").reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
-  reportPaymentBreakdownEl.innerHTML = [["Cash Sales", amountFor(method => method === "cash")], ["UPI Sales", amountFor(method => method === "upi" || method.includes("upi"))], ["Card Sales", amountFor(method => method.includes("card"))], ["Unpaid Amount", unpaid]].map(([label, value]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);"><span>${label}</span><strong>${money(value)}</strong></div>`).join("");
+  const discountTotal = filteredOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
+  reportPaymentBreakdownEl.innerHTML = [["Cash Sales", amountFor(method => method === "cash")], ["UPI Sales", amountFor(method => method === "upi" || method.includes("upi"))], ["Card Sales", amountFor(method => method.includes("card"))], ["Total Discounts", discountTotal], ["Unpaid Amount", unpaid]].map(([label, value]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);"><span>${label}</span><strong>${money(value)}</strong></div>`).join("");
 }
 
 function renderBestSellingReport(filteredOrders) {
@@ -4151,7 +4421,7 @@ function renderReportRows(filteredOrders = getFilteredReportOrders()) {
   renderPaymentBreakdown(filteredOrders);
   renderBestSellingReport(filteredOrders);
   renderTableWiseReport(filteredOrders);
-  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
   reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
 }
 
@@ -4863,6 +5133,9 @@ function mountAiHelpAssistant() {
    INIT
 ========================================================= */
 updateUserCard();
+ensureManualDiscountUi();
+ensureStaffManagementUi();
+applyStaffPermissions();
 mountAiHelpAssistant();
 renderTableNumberOptions("01");
 bindOrderFilterButtons();

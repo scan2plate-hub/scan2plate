@@ -38,6 +38,37 @@ export function toast(message) {
   alert(message);
 }
 
+export function normalizeCustomerPhone(value = "") {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+  while (digits.length > 10 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits.slice(-10);
+}
+
+export function isActiveUnpaidOrder(order = {}) {
+  const status = String(order.status || "pending").toLowerCase();
+  const payment = String(order.paymentStatus || "unpaid").toLowerCase();
+  const closed = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed", "delivered"]);
+  const active = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting", "bill_open"]);
+  if (order.billClosed === true || closed.has(status) || payment === "paid") return false;
+  return active.has(status) || payment === "unpaid";
+}
+
+const modulePermissions = {
+  owner: "all",
+  admin: "all",
+  manager: ["liveOrders", "quickBilling", "tables", "printBills", "kotManagement", "kitchenDisplay", "orders", "billing", "kot"],
+  cashier: ["quickBilling", "tables", "printBills", "liveOrders", "orders", "billing"],
+  kitchen: ["liveOrders", "kotManagement", "kitchenDisplay", "orders", "kot"],
+  waiter: ["liveOrders", "tables", "quickBilling", "orders", "billing"]
+};
+
+export function canAccessModule(userRole = "", moduleName = "") {
+  const role = String(userRole || "owner").toLowerCase();
+  const allowed = modulePermissions[role] || modulePermissions.owner;
+  return allowed === "all" || allowed.includes(moduleName);
+}
+
 export function renderStatus(status = "pending") {
   const s = String(status).toLowerCase();
   return `<span class="status status-${s}">${s}</span>`;

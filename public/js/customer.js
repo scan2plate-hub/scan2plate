@@ -22,7 +22,9 @@ import {
   toast,
   escapeHtml,
   notifyBackend,
-  getRestaurantIdFromUrlOrStorage
+  getRestaurantIdFromUrlOrStorage,
+  normalizeCustomerPhone,
+  isActiveUnpaidOrder
 } from './common.js';
 
 const landingHero = qs('#landingHero');
@@ -53,6 +55,7 @@ const brandNameTop = qs('#brandNameTop');
 const restaurantId = getRestaurantIdFromUrlOrStorage();
 const tableParam = getParam('table');
 const tableNo = tableParam || '01';
+const addonOrderIdParam = getParam('addToOrder');
 
 let settings = {
   restaurantName: 'Restaurant',
@@ -130,6 +133,7 @@ if (customerPhone) customerPhone.value = readLocal('scan2plate_customer_phone', 
 if (customerNote) customerNote.value = readLocal('scan2plate_customer_note', '');
 if (whatsappConsent) whatsappConsent.checked = readLocal('scan2plate_whatsapp_consent', true);
 if (tableBadge) tableBadge.textContent = `Table: ${tableNo}`;
+if (addonOrderIdParam && placeOrderBtn) placeOrderBtn.textContent = 'Add to Existing Bill';
 
 customerName?.addEventListener('input', () => saveLocal('scan2plate_customer_name', customerName.value));
 customerPhone?.addEventListener('input', () => {
@@ -177,6 +181,47 @@ async function validateTableAvailability() {
     console.warn("Table availability check skipped:", error);
   }
   return true;
+}
+
+function activeTableOrdersSnapshot() {
+  return getDocs(query(collection(db, 'orders'), where('restaurantId', '==', restaurantId)));
+}
+
+async function auditLog(action, details = {}) {
+  try {
+    await addDoc(collection(db, 'auditLogs'), {
+      restaurantId,
+      action,
+      performedBy: normalizeCustomerPhone(customerPhone?.value || '') || 'customer',
+      role: 'customer',
+      details,
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.warn('audit log failed:', action, error);
+  }
+}
+
+async function findActiveTableOrderForPhone(phone = '') {
+  if (isVendorMode()) return { orderDoc: null, blocked: false };
+  const submittedPhone = normalizeCustomerPhone(phone);
+  const snap = await activeTableOrdersSnapshot();
+  const tableOrders = snap.docs
+    .filter(d => String(d.data().tableNo || d.data().tableNumber || '').padStart(2, '0') === String(tableNo).padStart(2, '0'))
+    .filter(d => isActiveUnpaidOrder(d.data()))
+    .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0));
+
+  const active = tableOrders[0] || null;
+  if (!active) return { orderDoc: null, blocked: false };
+
+  const existingPhone = normalizeCustomerPhone(active.data().customerPhone || '');
+  if (!existingPhone) {
+    await auditLog('table_blocked_open_bill_no_phone', { tableNo });
+    return { orderDoc: active, blocked: true, message: 'This table has an open bill. Please contact staff.' };
+  }
+  if (submittedPhone && existingPhone === submittedPhone) return { orderDoc: active, blocked: false };
+  await auditLog('table_blocked_different_phone', { tableNo, existingPhoneMasked: existingPhone ? `******${existingPhone.slice(-4)}` : '', submittedPhoneMasked: submittedPhone ? `******${submittedPhone.slice(-4)}` : '' });
+  return { orderDoc: active, blocked: true, message: 'This table is already booked by another customer. Please choose another table or ask staff to close the bill.' };
 }
 
 function getOrderSectionCard() {
@@ -539,21 +584,9 @@ async function findOpenOrder() {
   if (isVendorMode()) return null;
   if (!customerPhone?.value.trim()) return null;
 
-  const normalizedPhone = `+91${customerPhone.value.trim().replace(/\D/g, '').slice(0, 10)}`;
-  const snap = await getDocs(collection(db, 'orders'));
-
-  return (
-    snap.docs.find(d => {
-      const x = d.data();
-      return (
-        String(x.restaurantId || '') === restaurantId &&
-        String(x.tableNo || '') === tableNo &&
-        String(x.customerPhone || '') === normalizedPhone &&
-        String(x.paymentStatus || 'unpaid').toLowerCase() !== 'paid' &&
-        !['cancelled', 'rejected'].includes(String(x.status || '').toLowerCase())
-      );
-    }) || null
-  );
+  const { orderDoc, blocked, message } = await findActiveTableOrderForPhone(customerPhone.value);
+  if (blocked) throw new Error(message || 'This table is already booked. Please change the table or contact staff.');
+  return orderDoc || null;
 }
 
 function localTokenDate() {
@@ -614,6 +647,46 @@ function mergeItems(existing = [], incoming = []) {
   });
 
   return [...map.values()];
+}
+
+function addonBatchId() {
+  return `ADDON${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function orderItemTotal(item = {}) {
+  return Number(item.total ?? (Number(item.price || 0) * Number(item.qty || item.quantity || 0)));
+}
+
+function toAddonItems(items = [], addedFrom = 'customer_track_panel') {
+  const batchId = addonBatchId();
+  const addedAt = new Date().toISOString();
+  return items.map(item => ({
+    ...item,
+    itemId: item.itemId || item.menuItemId || item.id || '',
+    quantity: Number(item.quantity || item.qty || 0),
+    qty: Number(item.qty || item.quantity || 0),
+    total: orderItemTotal(item),
+    isNewAddon: true,
+    seenByKitchen: false,
+    addonBatchId: batchId,
+    addedAt,
+    addedFrom,
+    kotPrinted: false,
+    kotPrintedAt: null
+  }));
+}
+
+function recalculateTotals(items = [], discount = {}) {
+  const itemsTotal = items.reduce((s, x) => s + Number(x.price || 0) * Number(x.qty || x.quantity || 0), 0);
+  const rawType = String(discount.discountType || '').toLowerCase();
+  const rawValue = Number(discount.discountValue || 0);
+  let discountAmount = Number(discount.discountAmount || 0);
+  if (rawType === 'flat') discountAmount = Math.min(itemsTotal, Math.max(0, rawValue));
+  if (rawType === 'percent') discountAmount = itemsTotal * Math.min(100, Math.max(0, rawValue)) / 100;
+  discountAmount = Math.min(itemsTotal, Math.max(0, discountAmount));
+  const taxableAmount = Math.max(0, itemsTotal - discountAmount);
+  const tax = taxableAmount * (Number(settings.taxPercent || 0) / 100);
+  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax };
 }
 
 function toRadians(value) {
@@ -728,10 +801,10 @@ async function placeOrder() {
 
     if (openOrder) {
       const current = openOrder.data();
-      const items = mergeItems(current.items || [], cart);
-      const itemsTotal = items.reduce((s, x) => s + Number(x.price || 0) * Number(x.qty || 0), 0);
-      const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
-      const grandTotal = itemsTotal + tax;
+      const addonItems = toAddonItems(cart, 'customer_track_panel');
+      const items = [...(current.items || []), ...addonItems];
+      const totals = recalculateTotals(items, current);
+      const newlyAddedItemsText = addonItems.map(i => `${itemDisplayName(i)} x${Number(i.qty || i.quantity || 0)}`).join(', ');
 
       orderId = current.orderId;
       createdDailyOrder = { displayOrderNo: current.displayOrderNo || current.dailyOrderNo || '-' };
@@ -742,15 +815,24 @@ async function placeOrder() {
         note: noteVal,
         whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
         items,
-        itemsTotal,
-        tax,
-        grandTotal,
+        itemsTotal: totals.itemsTotal,
+        subtotal: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        taxableAmount: totals.taxableAmount,
+        tax: totals.tax,
+        grandTotal: totals.grandTotal,
         status: current.status || 'pending',
         etaMinutes,
+        hasNewItems: true,
+        newlyAddedItems: addonItems,
+        newlyAddedItemsText,
+        newlyAddedNote: 'Add on order received',
+        kitchenAlertAt: serverTimestamp(),
         ...locationProof,
         updatedAt: serverTimestamp(),
         lastAddedAt: serverTimestamp()
       });
+      await auditLog('add_more_items', { orderId, tableNo, addonCount: addonItems.length, addedFrom: 'customer_track_panel' });
 
       await notifyBackend({
         restaurantId,
@@ -760,8 +842,8 @@ async function placeOrder() {
         customerName: customerName.value.trim(),
         customerPhone: whatsappConsent?.checked ? fullPhone : '',
         kitchenPhone: settings.kitchenWhatsApp || '',
-        items,
-        grandTotal,
+        items: addonItems,
+        grandTotal: totals.grandTotal,
         status: 'updated',
         etaMinutes,
         billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`
@@ -793,8 +875,11 @@ async function placeOrder() {
         customerPhone: fullPhone,
         note: noteVal,
         whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
-        items: cart,
+        items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: orderItemTotal(item), isNewAddon: false, seenByKitchen: true })),
         itemsTotal,
+        subtotal: itemsTotal,
+        discountAmount: 0,
+        taxableAmount: itemsTotal,
         tax,
         grandTotal,
         status: 'pending',
