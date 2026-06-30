@@ -1249,6 +1249,7 @@ import {
   getDoc,
   doc,
   addDoc,
+  updateDoc,
   runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1285,6 +1286,22 @@ import {
       currency: "INR",
       maximumFractionDigits: 0
     }).format(Number(v || 0));
+  }
+
+  function normalizeCustomerPhone(value = "") {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (digits.length > 10 && digits.startsWith("91")) digits = digits.slice(2);
+    while (digits.length > 10 && digits.startsWith("0")) digits = digits.slice(1);
+    return digits.slice(-10);
+  }
+
+  function isActiveUnpaidOrder(order = {}) {
+    const status = String(order.status || "pending").toLowerCase();
+    const payment = String(order.paymentStatus || "unpaid").toLowerCase();
+    const closed = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed", "delivered"]);
+    const active = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "bill_open", "customer_sitting"]);
+    if (order.billClosed === true || closed.has(status) || payment === "paid") return false;
+    return active.has(status) || payment === "unpaid";
   }
 
   function normalizedResetTime(value = "04:00") {
@@ -1341,6 +1358,12 @@ import {
     const closeCartBtn = document.getElementById("closeCartBtn");
     const digitalMenuBadge = document.getElementById("digitalMenuBadge");
     const planMenuNotice = document.getElementById("planMenuNotice");
+    const orderGrid = customerPage.querySelector(".order-grid");
+    const openBillPanel = document.createElement("section");
+    openBillPanel.id = "openBillPanel";
+    openBillPanel.className = "card hidden";
+    openBillPanel.style.cssText = "max-width:620px;margin:20px auto;padding:24px;text-align:center;";
+    orderGrid?.insertAdjacentElement("beforebegin", openBillPanel);
     let customerLoadDone = false;
     const customerLoadTimer = setTimeout(() => {
       if (customerLoadDone) return;
@@ -1362,6 +1385,9 @@ import {
     let cart = [];
     let taxPercent = 5;
     let tokenMode = false;
+    let activeOpenOrderDoc = null;
+    let addMoreMode = false;
+    let phoneCheckTimer = null;
     let restaurantPlanData = {};
     let canUseOrdering = true;
     let restaurantLocationSettings = {
@@ -1370,6 +1396,95 @@ import {
       allowedOrderRadiusMeters: 150,
       locationProtectionEnabled: false
     };
+
+    async function findActiveTableOrderForPhone(phone = "") {
+      if (tokenMode) return { orderDoc: null, blocked: false };
+      const submittedPhone = normalizeCustomerPhone(phone);
+      const snap = await getDocs(collection(db, "orders"));
+      const activeOrders = snap.docs
+        .filter(d => String(d.data().restaurantId || "") === restaurantId)
+        .filter(d => String(d.data().tableNo || d.data().tableNumber || "").padStart(2, "0") === String(table).padStart(2, "0"))
+        .filter(d => isActiveUnpaidOrder(d.data()))
+        .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0));
+      const active = activeOrders[0] || null;
+      if (!active) return { orderDoc: null, blocked: false };
+      const existingPhone = normalizeCustomerPhone(active.data().customerPhone || "");
+      if (!existingPhone) return { orderDoc: active, blocked: true, noPhone: true, message: "This table has an open bill. Please contact staff to add more items." };
+      if (submittedPhone && submittedPhone === existingPhone) return { orderDoc: active, blocked: false };
+      return { orderDoc: active, blocked: true, message: "This table already has an open bill. Please choose another table or contact staff." };
+    }
+
+    function showOrderGrid() {
+      openBillPanel.classList.add("hidden");
+      orderGrid?.classList.remove("hidden");
+    }
+
+    function showOpenBillChoice(orderDoc) {
+      const order = orderDoc.data();
+      const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.qty || item.quantity || 0), 0);
+      activeOpenOrderDoc = orderDoc;
+      addMoreMode = false;
+      placeOrderBtn.textContent = "Place Order";
+      orderGrid?.classList.add("hidden");
+      openBillPanel.classList.remove("hidden");
+      openBillPanel.innerHTML = `
+        <h2 style="margin:0 0 8px">Order already active on this table</h2>
+        <p class="muted" style="line-height:1.6;margin:0 0 18px">You can track your order or add more items to the same bill.</p>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 auto 16px;max-width:420px;text-align:left">
+          <div><span class="muted small">Table</span><br><strong>${table}</strong></div>
+          <div><span class="muted small">Items</span><br><strong>${itemCount}</strong></div>
+          <div><span class="muted small">Current bill</span><br><strong>${money(order.grandTotal || 0)}</strong></div>
+          <div><span class="muted small">Status</span><br><strong>${String(order.status || "pending")}</strong></div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <a class="btn btn-outline" href="./track.html?orderId=${encodeURIComponent(order.orderId || orderDoc.id)}">Track My Order</a>
+          <button id="startAddMoreBtn" class="btn btn-dark" type="button">Add More Items</button>
+        </div>
+        <p class="muted small" style="margin:14px 0 0">New items will be added to your current bill.</p>
+      `;
+      document.getElementById("startAddMoreBtn")?.addEventListener("click", () => {
+        addMoreMode = true;
+        if (order.customerName && !customerName.value.trim()) customerName.value = order.customerName;
+        placeOrderBtn.textContent = "Add to Existing Bill";
+        cart = [];
+        renderCart();
+        showOrderGrid();
+        document.body.classList.add("cart-open");
+      });
+    }
+
+    function showBlockedTable(message, noPhone = false) {
+      activeOpenOrderDoc = null;
+      addMoreMode = false;
+      orderGrid?.classList.add("hidden");
+      openBillPanel.classList.remove("hidden");
+      openBillPanel.innerHTML = `
+        <h2 style="margin:0 0 8px">Table already booked</h2>
+        <p class="muted" style="line-height:1.6;margin:0 0 18px">${message || (noPhone ? "This table has an open bill. Please contact staff to add more items." : "This table already has an open bill. Please choose another table or contact staff.")}</p>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <a class="btn btn-outline" href="./index.html?restaurantId=${encodeURIComponent(restaurantId)}">Choose Another Table</a>
+          ${restaurantPlanData.phone ? `<a class="btn btn-dark" href="tel:${String(restaurantPlanData.phone).replace(/[^+\d]/g, "")}">Call Staff</a>` : ""}
+        </div>
+      `;
+    }
+
+    async function checkOpenBillFromPhone() {
+      const phone = normalizeCustomerPhone(customerPhone.value);
+      if (tokenMode || phone.length !== 10) return;
+      try {
+        const result = await findActiveTableOrderForPhone(phone);
+        if (result.blocked) showBlockedTable(result.message, result.noPhone);
+        else if (result.orderDoc) showOpenBillChoice(result.orderDoc);
+        else {
+          activeOpenOrderDoc = null;
+          addMoreMode = false;
+          placeOrderBtn.textContent = "Place Order";
+          showOrderGrid();
+        }
+      } catch (error) {
+        console.warn("Open bill check failed", error);
+      }
+    }
 
     const locationDebug = (...args) => {
       if (["localhost", "127.0.0.1"].includes(location.hostname)) console.debug("[Scan2Plate location]", ...args);
@@ -1711,10 +1826,59 @@ import {
       grandTotalEl.textContent = money(grand);
     }
 
+    function itemTotal(item = {}) {
+      return Number(item.total ?? (Number(item.price || 0) * Number(item.qty || item.quantity || 0)));
+    }
+
+    function addonBatchId() {
+      return `ADDON${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    }
+
+    function addonItemsFromCart(items = [], addedFrom = "customer") {
+      const batchId = addonBatchId();
+      const addedAt = new Date().toISOString();
+      const addedByPhone = normalizeCustomerPhone(customerPhone.value);
+      return items.map(item => ({
+        ...item,
+        itemId: item.itemId || item.menuItemId || item.id || "",
+        quantity: Number(item.quantity || item.qty || 0),
+        qty: Number(item.qty || item.quantity || 0),
+        total: itemTotal(item),
+        isAddon: true,
+        isNewAddon: true,
+        addonBatchId: batchId,
+        seenByKitchen: false,
+        kotPrinted: false,
+        kotPrintedAt: null,
+        addedAt,
+        addedFrom,
+        addedByPhone
+      }));
+    }
+
+    function totalsForItems(items = [], existingOrder = {}) {
+      const itemsTotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || item.quantity || 0), 0);
+      const rawType = String(existingOrder.discountType || "").toLowerCase();
+      const rawValue = Number(existingOrder.discountValue || 0);
+      let discountAmount = Number(existingOrder.discountAmount || 0);
+      if (rawType === "flat") discountAmount = Math.min(itemsTotal, Math.max(0, rawValue));
+      if (rawType === "percent") discountAmount = itemsTotal * Math.min(100, Math.max(0, rawValue)) / 100;
+      discountAmount = Math.min(itemsTotal, Math.max(0, discountAmount));
+      const taxableAmount = Math.max(0, itemsTotal - discountAmount);
+      const tax = taxableAmount * (taxPercent / 100);
+      return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax };
+    }
+
     clearCartBtn.onclick = () => {
       cart = [];
       renderCart();
     };
+
+    customerPhone?.addEventListener("input", () => {
+      customerPhone.value = customerPhone.value.replace(/\D/g, "").slice(0, 10);
+      clearTimeout(phoneCheckTimer);
+      phoneCheckTimer = setTimeout(checkOpenBillFromPhone, 350);
+    });
 
     function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
       const R = 6371000;
@@ -1801,6 +1965,12 @@ import {
         return;
       }
 
+      customerPhone.value = customerPhone.value.replace(/\D/g, "").slice(0, 10);
+      if (customerPhone.value.length !== 10) {
+        alert("Please enter a valid 10 digit phone number.");
+        return;
+      }
+
       if (!cart.length) {
         alert("Add items first.");
         return;
@@ -1813,6 +1983,57 @@ import {
         if (!locationCheck.ok) return;
 
         const { ok, ...locationProof } = locationCheck;
+        const openBill = tokenMode ? { orderDoc: null, blocked: false } : await findActiveTableOrderForPhone(customerPhone.value);
+        if (openBill.blocked) {
+          showBlockedTable(openBill.message, openBill.noPhone);
+          return;
+        }
+
+        if (openBill.orderDoc || (addMoreMode && activeOpenOrderDoc)) {
+          const orderDoc = openBill.orderDoc || activeOpenOrderDoc;
+          const current = orderDoc.data();
+          const addonItems = addonItemsFromCart(cart, "customer");
+          const items = [...(current.items || []), ...addonItems];
+          const totals = totalsForItems(items, current);
+          const newlyAddedItemsText = addonItems.map(item => `${itemDisplayName(item)} x${Number(item.qty || item.quantity || 0)}`).join(", ");
+          const orderId = current.orderId || orderDoc.id;
+
+          await updateDoc(doc(db, "orders", orderDoc.id), {
+            customerName: customerName.value.trim() || current.customerName || "",
+            customerPhone: `+91${customerPhone.value.trim()}`,
+            note: customerNote.value.trim(),
+            items,
+            itemsTotal: totals.itemsTotal,
+            subtotal: totals.subtotal,
+            discountAmount: totals.discountAmount,
+            taxableAmount: totals.taxableAmount,
+            tax: totals.tax,
+            grandTotal: totals.grandTotal,
+            status: current.status || "pending",
+            paymentStatus: current.paymentStatus || "unpaid",
+            hasNewItems: true,
+            newlyAddedItems: addonItems,
+            newlyAddedItemsText,
+            newlyAddedNote: "Add on order received",
+            kitchenAlertAt: serverTimestamp(),
+            lastAddedAt: serverTimestamp(),
+            ...locationProof,
+            updatedAt: serverTimestamp()
+          });
+
+          orderSuccess.classList.remove("hidden");
+          orderSuccess.innerHTML = `
+            Items added to your existing bill.<br>
+            <strong>Order No:</strong> ${current.displayOrderNo || current.dailyOrderNo || "-"}<br>
+            <a href="./track.html?orderId=${encodeURIComponent(orderId)}">Track order</a>
+          `;
+
+          cart = [];
+          renderCart();
+          window.location.href = `./track.html?orderId=${encodeURIComponent(orderId)}`;
+          return;
+        }
+
         const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
         const tax = itemsTotal * (taxPercent / 100);
         const grandTotal = itemsTotal + tax;
@@ -1842,9 +2063,9 @@ import {
           orderMode: tokenMode ? "token" : "table",
           businessType: restaurantPlanData.businessType || "Restaurant",
           customerName: customerName.value.trim(),
-          customerPhone: customerPhone.value.trim(),
+          customerPhone: `+91${customerPhone.value.trim()}`,
           note: customerNote.value.trim(),
-          items: cart,
+          items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: itemTotal(item), isAddon: false, isNewAddon: false, seenByKitchen: true })),
           itemsTotal,
           tax,
           grandTotal,

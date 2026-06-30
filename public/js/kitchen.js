@@ -335,12 +335,16 @@ function getAlertKey(x) {
   });
 }
 
+function isAddonItem(item = {}) {
+  return item.isAddon === true || item.isNewAddon === true;
+}
+
 function pendingAddonItems(order = {}) {
-  return (order.items || []).filter(item => item.isNewAddon === true && item.seenByKitchen !== true);
+  return (order.items || []).filter(item => isAddonItem(item) && item.seenByKitchen !== true);
 }
 
 function newKotItems(order = {}) {
-  return (order.items || []).filter(item => item.isNewAddon === true && item.kotPrinted !== true);
+  return (order.items || []).filter(item => isAddonItem(item) && item.kotPrinted !== true);
 }
 
 /* ─────────────────────────────────────────
@@ -349,7 +353,7 @@ function newKotItems(order = {}) {
 function cardHtml(d) {
   const x         = d.data();
   const pendingAddons = pendingAddonItems(x);
-  const items     = (x.items || []).map(i => `${escapeHtml(itemDisplayName(i))} x ${i.qty}${i.isNewAddon === true && i.seenByKitchen !== true ? " NEW" : ""}`).join(", ");
+  const items     = (x.items || []).map(i => `${escapeHtml(itemDisplayName(i))} x ${i.qty}${isAddonItem(i) && i.seenByKitchen !== true ? " NEW ADD ON" : ""}`).join(", ");
   const eta       = Number(x.etaMinutes || 10);
   const hasNew    = x.hasNewItems === true;
   const newText   = escapeHtml(x.newlyAddedItemsText || "");
@@ -491,7 +495,7 @@ function bindActions(orderDocs, root = document) {
 
       const current     = found.data();
       const currItems   = current.items || [];
-      const nextItems = currItems.map(item => item.isNewAddon === true ? { ...item, seenByKitchen: true } : item);
+      const nextItems = currItems.map(item => isAddonItem(item) ? { ...item, seenByKitchen: true } : item);
       await updateDoc(doc(db, "orders", docId), {
         items: nextItems,
         hasNewItems:         false,
@@ -514,7 +518,7 @@ function bindActions(orderDocs, root = document) {
       printKOT(current, itemsToPrint, "NEW ITEMS ONLY");
       const printedAt = new Date().toISOString();
       await updateDoc(doc(db, "orders", docId), {
-        items: (current.items || []).map(item => item.isNewAddon === true && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
+        items: (current.items || []).map(item => isAddonItem(item) && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
         updatedAt: serverTimestamp()
       });
     };
@@ -540,7 +544,7 @@ function renderOrders(orderDocs) {
     const x = d.data();
     return (
       String(x.restaurantId || "") === restaurantId &&
-      !["cancelled","rejected","delivered","served"].includes(String(x.status || "").toLowerCase())
+      !["cancelled","rejected","delivered"].includes(String(x.status || "").toLowerCase())
     );
   });
 
@@ -577,7 +581,7 @@ onSnapshot(
       const x = d.data();
       return (
         String(x.restaurantId || "") === restaurantId &&
-        !["delivered","cancelled","rejected","served"].includes(String(x.status || "pending").toLowerCase())
+        !["delivered","cancelled","rejected"].includes(String(x.status || "pending").toLowerCase())
       );
     });
 

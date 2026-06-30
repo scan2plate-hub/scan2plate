@@ -217,11 +217,11 @@ async function findActiveTableOrderForPhone(phone = '') {
   const existingPhone = normalizeCustomerPhone(active.data().customerPhone || '');
   if (!existingPhone) {
     await auditLog('table_blocked_open_bill_no_phone', { tableNo });
-    return { orderDoc: active, blocked: true, message: 'This table has an open bill. Please contact staff.' };
+    return { orderDoc: active, blocked: true, message: 'This table has an open bill. Please contact staff to add more items.' };
   }
   if (submittedPhone && existingPhone === submittedPhone) return { orderDoc: active, blocked: false };
   await auditLog('table_blocked_different_phone', { tableNo, existingPhoneMasked: existingPhone ? `******${existingPhone.slice(-4)}` : '', submittedPhoneMasked: submittedPhone ? `******${submittedPhone.slice(-4)}` : '' });
-  return { orderDoc: active, blocked: true, message: 'This table is already booked by another customer. Please choose another table or ask staff to close the bill.' };
+  return { orderDoc: active, blocked: true, message: 'This table already has an open bill. Please choose another table or contact staff.' };
 }
 
 function getOrderSectionCard() {
@@ -657,20 +657,23 @@ function orderItemTotal(item = {}) {
   return Number(item.total ?? (Number(item.price || 0) * Number(item.qty || item.quantity || 0)));
 }
 
-function toAddonItems(items = [], addedFrom = 'customer_track_panel') {
+function toAddonItems(items = [], addedFrom = 'customer') {
   const batchId = addonBatchId();
   const addedAt = new Date().toISOString();
+  const addedByPhone = normalizeCustomerPhone(customerPhone?.value || '');
   return items.map(item => ({
     ...item,
     itemId: item.itemId || item.menuItemId || item.id || '',
     quantity: Number(item.quantity || item.qty || 0),
     qty: Number(item.qty || item.quantity || 0),
     total: orderItemTotal(item),
+    isAddon: true,
     isNewAddon: true,
     seenByKitchen: false,
     addonBatchId: batchId,
     addedAt,
     addedFrom,
+    addedByPhone,
     kotPrinted: false,
     kotPrintedAt: null
   }));
@@ -801,7 +804,7 @@ async function placeOrder() {
 
     if (openOrder) {
       const current = openOrder.data();
-      const addonItems = toAddonItems(cart, 'customer_track_panel');
+      const addonItems = toAddonItems(cart, 'customer');
       const items = [...(current.items || []), ...addonItems];
       const totals = recalculateTotals(items, current);
       const newlyAddedItemsText = addonItems.map(i => `${itemDisplayName(i)} x${Number(i.qty || i.quantity || 0)}`).join(', ');
@@ -832,7 +835,7 @@ async function placeOrder() {
         updatedAt: serverTimestamp(),
         lastAddedAt: serverTimestamp()
       });
-      await auditLog('add_more_items', { orderId, tableNo, addonCount: addonItems.length, addedFrom: 'customer_track_panel' });
+      await auditLog('add_more_items', { orderId, tableNo, addonCount: addonItems.length, addedFrom: 'customer' });
 
       await notifyBackend({
         restaurantId,
@@ -875,7 +878,7 @@ async function placeOrder() {
         customerPhone: fullPhone,
         note: noteVal,
         whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
-        items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: orderItemTotal(item), isNewAddon: false, seenByKitchen: true })),
+        items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: orderItemTotal(item), isAddon: false, isNewAddon: false, seenByKitchen: true })),
         itemsTotal,
         subtotal: itemsTotal,
         discountAmount: 0,
@@ -914,7 +917,7 @@ async function placeOrder() {
     if (orderSuccess) {
       orderSuccess.classList.remove('hidden');
       orderSuccess.innerHTML = `
-        Order saved successfully.<br>
+        ${openOrder ? 'Items added to your existing bill.' : 'Order saved successfully.'}<br>
         <b>Order No:</b> ${escapeHtml(createdDailyOrder?.displayOrderNo || '-')}<br>
         <b>${isVendorMode() ? 'Token' : 'Order ID'}:</b> ${escapeHtml(isVendorMode() ? `T-${createdTokenNumber}` : orderId)}<br>
         <a href="./track.html?orderId=${encodeURIComponent(orderId)}" style="color:#8f5500;text-decoration:underline">Track this order</a>

@@ -3062,6 +3062,7 @@ function nowIso() {
 function normalizeManualCartItem(item = {}) {
   const variantName = String(item.variantName || "").trim();
   const price = Number(item.price || item.variantPrice || item.unitPrice || 0);
+  const isAddon = item.isAddon === true || item.isNewAddon === true;
   return {
     id: item.id || item.menuItemId || "",
     menuItemId: item.menuItemId || item.id || "",
@@ -3075,6 +3076,13 @@ function normalizeManualCartItem(item = {}) {
     variantName,
     variantPrice: variantName ? Number(item.variantPrice || price) : null,
     hasVariants: item.hasVariants === true || Boolean(variantName),
+    isAddon,
+    isNewAddon: item.isNewAddon === true || item.isAddon === true,
+    seenByKitchen: item.seenByKitchen ?? !isAddon,
+    addonBatchId: item.addonBatchId || "",
+    addedFrom: item.addedFrom || "",
+    addedByPhone: item.addedByPhone || "",
+    existingBillItem: item.existingBillItem === true,
     addedAt: item.addedAt || nowIso(),
     kotPrinted: item.kotPrinted === true,
     kotPrintedAt: item.kotPrintedAt || null
@@ -3083,6 +3091,10 @@ function normalizeManualCartItem(item = {}) {
 
 function manualCartPayload(items = manualCart) {
   return items.map(normalizeManualCartItem);
+}
+
+function isAddonOrderItem(item = {}) {
+  return item.isAddon === true || item.isNewAddon === true;
 }
 
 function updateManualQty(lineId, delta) {
@@ -3284,7 +3296,11 @@ async function loadOrderIntoManualBill(orderDocId) {
     if (manualPaymentStatusEl) manualPaymentStatusEl.value = order.paymentStatus || "unpaid";
 
     manualCart = Array.isArray(order.items)
-      ? order.items.map(normalizeManualCartItem)
+      ? order.items.map(item => {
+        const normalized = normalizeManualCartItem(item);
+        const isAddon = normalized.isAddon === true || normalized.isNewAddon === true;
+        return { ...normalized, existingBillItem: true, seenByKitchen: isAddon ? normalized.seenByKitchen : true, kotPrinted: isAddon ? normalized.kotPrinted : true };
+      })
       : [];
     manualDiscount = {
       discountType: order.discountType || "",
@@ -3631,11 +3647,13 @@ async function createManualBill() {
         ...item,
         quantity: Number(item.quantity || item.qty || 0),
         total: Number(item.price || 0) * Number(item.qty || item.quantity || 0),
+        isAddon: true,
         isNewAddon: true,
         seenByKitchen: false,
         addonBatchId: item.addonBatchId || batchId,
         addedAt: item.addedAt || addedAt,
-        addedFrom: "admin_open_bill"
+        addedFrom: "staff",
+        addedByPhone: customerPhone
       } : item);
     }
     manualCart = cartItems;
@@ -3820,13 +3838,13 @@ async function handleAdminOrderAction(orderDocId, action) {
     }
 
     if (action === "printnewkot") {
-      const itemsToPrint = currentItems.filter(item => item.isNewAddon === true && item.kotPrinted !== true);
+      const itemsToPrint = currentItems.filter(item => isAddonOrderItem(item) && item.kotPrinted !== true);
       if (!itemsToPrint.length) return alert("No new add-on items to print.");
       const printed = printKOTFromOrder(order, itemsToPrint, "NEW ITEMS ONLY");
       if (printed) {
         const printedAt = nowIso();
         await updateDoc(orderRef, {
-          items: currentItems.map(item => item.isNewAddon === true && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
+          items: currentItems.map(item => isAddonOrderItem(item) && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
           updatedAt: serverTimestamp()
         });
       }
@@ -3863,7 +3881,7 @@ async function handleAdminOrderAction(orderDocId, action) {
       seenSnapshotMap.set(orderDocId, buildOrderItemSnapshot(currentItems));
 
       await updateDoc(orderRef, {
-        items: currentItems.map(item => item.isNewAddon === true ? { ...item, seenByKitchen: true } : item),
+        items: currentItems.map(item => isAddonOrderItem(item) ? { ...item, seenByKitchen: true } : item),
         hasNewItems: false,
         newlyAddedItems: [],
         newlyAddedItemsText: "",
@@ -4262,6 +4280,7 @@ function renderOrdersList(targetEl, orders) {
             data-id="${o.id}" data-status="unpaid"><i class="fas fa-times"></i> Unpaid</button>
 
           <button class="btn btn-outline pay-bill-btn" data-id="${o.id}"><i class="fas fa-edit"></i> Edit Bill</button>
+          <button class="btn btn-primary pay-bill-btn" data-id="${o.id}"><i class="fas fa-plus"></i> Add Items</button>
           <button class="btn btn-primary print-bill-btn" data-id="${o.id}"><i class="fas fa-print"></i> Print Bill</button>
         </div>
       </div>
