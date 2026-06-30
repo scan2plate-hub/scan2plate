@@ -462,6 +462,8 @@
     .floating-cart-bar{ display:none; }
 
     body.customer-menu-mode .nav-links{ display:none; }
+    body.customer-menu-mode .landing-nav-links,
+    body.customer-menu-mode .nav-actions{ display:none; }
 
     @media (max-width: 760px){
       body.customer-menu-mode .topbar{ z-index:50; box-shadow:0 8px 24px rgba(0,0,0,.06); }
@@ -624,6 +626,271 @@
       #landingPage .plan-card{padding:28px 23px;} #landingPage .plan-card.featured{transform:none;}
       #landingPage .footer-row{justify-content:center;text-align:center;font-size:12px;}
     }
+
+    /* Pre-order focused landing redesign */
+    body:not(.customer-menu-mode){
+      --s2p-cream:#fff8ef;
+      --s2p-cream-2:#fffdf8;
+      --s2p-orange:#e66f00;
+      --s2p-orange-2:#f49b2b;
+      --s2p-brown:#3a1f0e;
+      --s2p-text:#21160f;
+      --s2p-muted:#6f6256;
+      --s2p-line:#f0dfca;
+      --s2p-shadow:0 20px 50px rgba(83,47,10,.1);
+      background:var(--s2p-cream-2);
+      color:var(--s2p-text);
+    }
+    body:not(.customer-menu-mode) .topbar{
+      background:rgba(255,255,255,.9);
+      border-bottom:1px solid rgba(91,58,22,.12);
+      box-shadow:0 8px 24px rgba(75,45,12,.04);
+    }
+    body:not(.customer-menu-mode) .nav{min-height:72px;}
+    .landing-nav-links{display:flex;align-items:center;gap:26px;margin-left:auto;}
+    .landing-nav-links a{font-size:14px;font-weight:800;color:#2b2018;}
+    .landing-nav-links a:hover{color:var(--s2p-orange);}
+    .nav-actions{display:flex;align-items:center;gap:12px;}
+    body:not(.customer-menu-mode) .btn-primary{
+      background:linear-gradient(180deg,#f48918,#df6200);
+      color:#fff;
+      border:1px solid #dc6809;
+      box-shadow:0 12px 24px rgba(224,98,0,.22);
+    }
+    body:not(.customer-menu-mode) .btn-outline{
+      background:#fff;
+      border:1px solid #ebd6c0;
+      color:#3a2112;
+      box-shadow:0 8px 18px rgba(64,37,10,.04);
+    }
+    #landingPage .landing-hero{
+      position:relative;
+      overflow:hidden;
+      padding:34px 0 20px;
+      background:
+        radial-gradient(circle at 0% 18%,rgba(236,116,0,.08),transparent 18%),
+        radial-gradient(circle at 88% 24%,rgba(246,154,43,.13),transparent 23%),
+        linear-gradient(180deg,#fff2df 0%,#fffdf8 82%);
+    }
+    #landingPage .landing-hero::before,
+    #landingPage .landing-hero::after{
+      content:"";
+      position:absolute;
+      width:260px;
+      height:260px;
+      border:1px dashed rgba(230,111,0,.16);
+      border-radius:50%;
+      pointer-events:none;
+    }
+    #landingPage .landing-hero::before{left:-130px;top:72px;}
+    #landingPage .landing-hero::after{right:-100px;bottom:120px;}
+    .preorder-hero-grid{
+      display:grid;
+      grid-template-columns:minmax(0,.86fr) minmax(520px,1.14fr);
+      gap:42px;
+      align-items:center;
+    }
+    .preorder-label{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:9px 14px;
+      border-radius:999px;
+      background:#fff;
+      border:1px solid #f4ddc2;
+      color:#d86600;
+      font-size:12px;
+      font-weight:900;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      box-shadow:0 12px 28px rgba(96,52,10,.08);
+    }
+    .preorder-label::before{content:"";width:9px;height:9px;border-radius:3px;background:var(--s2p-orange);}
+    .preorder-copy h1{
+      margin:18px 0 12px;
+      max-width:560px;
+      font-size:clamp(42px,4.8vw,66px);
+      line-height:.98;
+      letter-spacing:-.055em;
+    }
+    .preorder-copy h1 span{color:var(--s2p-orange);}
+    .preorder-copy p{
+      max-width:610px;
+      margin:0;
+      color:#5f5348;
+      font-size:18px;
+      line-height:1.58;
+    }
+    .preorder-copy .hero-cta{margin:24px 0 26px;}
+    .preorder-chips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;max-width:660px;}
+    .preorder-chip{
+      display:flex;
+      gap:9px;
+      align-items:center;
+      min-height:48px;
+      padding:8px 10px;
+      border:1px solid #f0dfcc;
+      border-radius:12px;
+      background:rgba(255,255,255,.72);
+      box-shadow:0 10px 24px rgba(71,43,14,.05);
+    }
+    .chip-icon,.step-icon,.platform-icon,.benefit-icon{
+      display:grid;
+      place-items:center;
+      width:28px;
+      height:28px;
+      flex:0 0 auto;
+      border-radius:10px;
+      background:#fff2df;
+      color:#d86600;
+      font-weight:900;
+      font-size:12px;
+      border:1px solid #f2d3ac;
+    }
+    .preorder-chip strong{display:block;font-size:12px;line-height:1.1;}
+    .preorder-chip span{display:block;margin-top:2px;color:#776a5d;font-size:10px;line-height:1.2;}
+    .preorder-product{
+      position:relative;
+      min-height:468px;
+      border:1px solid rgba(126,76,24,.13);
+      border-radius:26px;
+      background:rgba(255,255,255,.78);
+      box-shadow:var(--s2p-shadow);
+      padding:18px;
+      transform:rotate(-1deg);
+    }
+    .browser-mock{
+      height:100%;
+      border:1px solid #eddcc9;
+      border-radius:22px;
+      background:#fff;
+      overflow:hidden;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+    }
+    .browser-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #f2e5d7;background:#fffdf9;}
+    .browser-brand{display:flex;align-items:center;gap:9px;font-weight:900;}
+    .browser-logo{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:#fff3df;color:#dc6800;border:1px solid #f0d6b8;font-size:12px;}
+    .browser-steps{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;padding:16px 24px 12px;border-bottom:1px solid #f5ebdf;}
+    .browser-step{text-align:center;color:#6d6155;font-size:10px;font-weight:800;}
+    .browser-step span{display:block;width:24px;height:24px;margin:0 auto 5px;border-radius:50%;background:#f5f1ec;border:1px solid #e5d9cc;line-height:22px;color:#6a5a4b;}
+    .browser-step.active{color:#e66f00}.browser-step.active span{background:#f18108;color:#fff;border-color:#e66f00;}
+    .browser-body{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:18px;}
+    .summary-card,.restaurant-photo-card{border:1px solid #f0dfcc;border-radius:16px;background:#fff;padding:16px;box-shadow:0 12px 25px rgba(69,43,15,.05);}
+    .summary-card h3{margin:0 0 13px;font-size:16px;}
+    .summary-restaurant{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid #f3e5d6;}
+    .food-dot{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#e66f00,#ffc36b);}
+    .summary-line{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #f6eee5;font-size:12px;}
+    .ready-note{margin-top:12px;padding:10px;border-radius:12px;background:#eff9ec;color:#3b8b33;font-weight:800;font-size:12px;}
+    .restaurant-photo-card{position:relative;min-height:270px;padding:0;overflow:hidden;background:#2d1b11;}
+    .restaurant-photo-card img{width:100%;height:100%;object-fit:cover;display:block;opacity:.9;}
+    .table-confirm{
+      position:absolute;
+      right:34px;
+      bottom:24px;
+      width:128px;
+      padding:18px 14px;
+      text-align:center;
+      border-radius:18px;
+      background:rgba(255,255,255,.94);
+      box-shadow:0 18px 38px rgba(28,16,7,.25);
+    }
+    .table-confirm .ok{display:grid;place-items:center;width:43px;height:43px;margin:0 auto 9px;border-radius:13px;background:#66bd57;color:#fff;font-weight:900;}
+    .table-confirm strong{display:block;font-size:24px;margin-top:2px;}
+    .phone-mock{
+      position:absolute;
+      left:-54px;
+      bottom:22px;
+      width:166px;
+      padding:10px;
+      border-radius:30px;
+      background:#15110e;
+      transform:rotate(-9deg);
+      box-shadow:0 22px 44px rgba(34,20,7,.28);
+    }
+    .phone-screen{border-radius:22px;background:#fff;padding:13px;font-size:10px;}
+    .phone-top{display:flex;justify-content:space-between;font-weight:900;margin-bottom:12px;}
+    .phone-bill{border:1px solid #f1dfcd;border-radius:13px;padding:10px;background:#fffaf4;}
+    .phone-bill .line{display:flex;justify-content:space-between;margin:8px 0;}
+    .phone-btn{margin-top:12px;padding:9px;border-radius:10px;text-align:center;background:#e66f00;color:#fff;font-weight:900;}
+    .step-strip{padding:18px 0 8px;background:#fffdf8;}
+    .step-title{text-align:center;margin:0 0 10px;font-size:22px;letter-spacing:-.02em;}
+    .steps-row{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;}
+    .step-card{position:relative;display:flex;align-items:center;gap:9px;min-height:72px;padding:12px;border:1px solid #f0deca;border-radius:14px;background:#fff;box-shadow:0 12px 24px rgba(76,45,12,.045);}
+    .step-card::after{content:">";position:absolute;right:-9px;color:#b8895b;font-weight:900;}
+    .step-card:last-child::after{display:none;}
+    .step-card strong{display:block;font-size:12px;line-height:1.1}.step-card span{display:block;color:#77695c;font-size:10px;margin-top:2px;}
+    .preorder-panel-section{padding:8px 0 22px;background:#fffdf8;}
+    .journey-board{
+      display:grid;
+      grid-template-columns:1.08fr 1.2fr 1.35fr 1.08fr 1.18fr 1.08fr;
+      gap:10px;
+      padding:12px;
+      border:1px solid #ecdcc9;
+      border-radius:18px;
+      background:rgba(255,255,255,.78);
+      box-shadow:0 18px 40px rgba(79,48,13,.08);
+    }
+    .journey-card{min-width:0;border-right:1px solid #f2e4d4;padding:2px 10px 0;}
+    .journey-card:last-child{border-right:0;}
+    .journey-card h3{margin:0 0 11px;font-size:14px;letter-spacing:-.01em;}
+    .demo-field{margin-bottom:9px;}
+    .demo-field label{display:block;margin-bottom:4px;color:#62564c;font-size:10px;font-weight:800;}
+    .demo-select,.demo-input{width:100%;height:34px;border:1px solid #ead9c6;border-radius:8px;background:#fff;color:#453429;padding:0 9px;font-size:11px;}
+    .demo-btn{width:100%;height:36px;border:0;border-radius:9px;background:#e66f00;color:#fff;font-size:11px;font-weight:900;}
+    .restaurant-list{display:grid;gap:8px;}
+    .restaurant-row{display:grid;grid-template-columns:48px 1fr auto;gap:8px;align-items:center;padding:7px;border:1px solid #f0dfcc;border-radius:11px;background:#fff;}
+    .restaurant-row img{width:48px;height:42px;border-radius:9px;object-fit:cover;}
+    .restaurant-row strong{display:block;font-size:11px}.restaurant-row span{display:block;color:#75675b;font-size:9px}.restaurant-row em{font-style:normal;color:#dd6b00;font-size:9px;font-weight:900;}
+    .menu-tabs{display:flex;gap:5px;margin-bottom:9px;overflow:hidden;}
+    .menu-tabs span{padding:6px 8px;border-radius:7px;background:#f6efe7;font-size:10px;font-weight:800;white-space:nowrap;}
+    .menu-tabs .active{background:#fff0df;color:#dd6b00;}
+    .demo-menu-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #f4e8dc;font-size:11px;}
+    .demo-stepper{display:flex;align-items:center;gap:7px;border:1px solid #ead9c6;border-radius:8px;padding:3px 6px;font-weight:900;}
+    .cart-summary{display:flex;justify-content:space-between;margin-top:10px;color:#df6500;font-size:11px;font-weight:900;}
+    .payment-choice{padding:11px;border:1px solid #ead9c6;border-radius:11px;margin-bottom:9px;background:#fff;}
+    .payment-choice.active{border-color:#f08b22;background:#fff7ec;box-shadow:0 0 0 2px rgba(230,111,0,.08);}
+    .payment-choice strong{display:flex;justify-content:space-between;font-size:11px}.payment-choice span{display:block;margin-top:3px;color:#76685c;font-size:9px;}
+    .pay-total{margin-top:12px;border-top:1px solid #f1e2d3;padding-top:9px;font-size:11px}.pay-total div{display:flex;justify-content:space-between;margin:7px 0;}.pay-now{color:#e66f00;font-weight:900;}
+    .table-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+    .table-cell{min-height:45px;border-radius:10px;border:1px solid #cfe7bd;background:#f3fbef;text-align:center;padding:7px 4px;color:#287b24;font-size:10px;font-weight:900;}
+    .table-cell.booked{border-color:#fac5b6;background:#fff0ec;color:#d9431f;}
+    .table-cell.selected{background:#4caf3d;color:#fff;border-color:#4caf3d;}
+    .confirm-summary{border:1px solid #f0dfcc;border-radius:13px;background:#fff;padding:13px;}
+    .confirm-summary h4{margin:0 0 4px;font-size:14px;}.confirm-summary .row{font-size:11px;padding:9px 0;border-bottom:1px solid #f3e5d7;}
+    .confirm-note{margin:12px 0;padding:10px;border-radius:10px;background:#eff9ec;color:#3b8b33;text-align:center;font-size:11px;font-weight:900;}
+    .platform-section{padding:12px 0 8px;background:#fffdf8;}
+    .platform-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .platform-card{border:1px solid #eadac8;border-radius:18px;background:#fff;padding:22px;box-shadow:0 15px 35px rgba(80,50,17,.06);}
+    .platform-card h2{margin:0 0 14px;font-size:24px;letter-spacing:-.03em;}
+    .feature-mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+    .platform-feature,.benefit-chip{display:flex;gap:10px;align-items:center;min-height:58px;padding:10px;border:1px solid #f0dfcc;border-radius:12px;background:#fffaf4;}
+    .platform-feature strong,.benefit-chip strong{display:block;font-size:11px}.platform-feature span,.benefit-chip span{display:block;margin-top:3px;color:#716356;font-size:9px;}
+    .restaurant-benefits{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:17px;}
+    .restaurant-story{display:grid;grid-template-columns:1.45fr .9fr;gap:18px;align-items:stretch;}
+    .story-image{min-height:156px;border-radius:15px;overflow:hidden;background:#3b2112;}
+    .story-image img{width:100%;height:100%;object-fit:cover;display:block;opacity:.88;}
+    .trust-strip{padding:10px 0 24px;background:#fffdf8;}
+    .trust-bar{display:grid;grid-template-columns:1fr auto auto auto;gap:16px;align-items:center;padding:18px 22px;border-radius:17px;background:linear-gradient(90deg,#6b2f00,#823f0d,#6a3414);color:#fff;box-shadow:0 18px 38px rgba(88,45,10,.18);}
+    .trust-main{display:flex;align-items:center;gap:14px;font-size:20px;font-weight:900;letter-spacing:-.02em;}
+    .trust-main .mark{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;background:#f07a00;color:#fff;border:1px solid rgba(255,255,255,.25);}
+    .trust-item{min-width:145px;padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.1);font-size:11px;font-weight:800;}
+    .trust-item span{display:block;margin-top:3px;color:rgba(255,255,255,.72);font-size:9px;}
+    @media (max-width:1180px){
+      .preorder-hero-grid{grid-template-columns:1fr;}.preorder-product{max-width:820px;margin:0 auto;}.phone-mock{left:8px;}
+      .steps-row{grid-template-columns:repeat(4,1fr);}.step-card:nth-child(4)::after,.step-card:nth-child(8)::after{display:none;}
+      .journey-board{grid-template-columns:repeat(3,1fr);}.journey-card:nth-child(3){border-right:0}.journey-card{border-bottom:1px solid #f2e4d4;padding-bottom:12px}.journey-card:nth-child(n+4){border-bottom:0}
+    }
+    @media (max-width:820px){
+      .landing-nav-links{display:none}.nav-actions{margin-left:auto}
+      .preorder-chips,.steps-row,.platform-grid,.feature-mini-grid,.restaurant-benefits,.trust-bar{grid-template-columns:1fr;}
+      .journey-board{grid-template-columns:1fr;}.journey-card{border-right:0!important;border-bottom:1px solid #f2e4d4!important}.journey-card:last-child{border-bottom:0!important}
+      .browser-body{grid-template-columns:1fr}.phone-mock{display:none}.preorder-product{min-height:auto;transform:none}.restaurant-story{grid-template-columns:1fr}.trust-main{font-size:16px}
+    }
+    @media (max-width:520px){
+      body:not(.customer-menu-mode) .nav{align-items:center}.nav-actions .btn-outline{display:none}.nav-actions .btn-primary{padding:10px 12px;font-size:12px}
+      #landingPage .landing-hero{padding-top:24px}.preorder-copy h1{font-size:40px}.preorder-copy p{font-size:15px}.preorder-copy .hero-cta{display:grid;grid-template-columns:1fr}
+      .browser-steps{grid-template-columns:repeat(3,1fr);padding:12px}.browser-step{font-size:9px}.table-confirm{right:16px;bottom:16px}.step-card::after{display:none}
+    }
   </style>
 </head>
 <body>
@@ -637,84 +904,214 @@
         </div>
       </div>
 
-      <div class="nav-links">
-        <a href="#plans" class="btn btn-outline" id="menuTopBtn">Plans</a>
-        <a href="./track.html" class="btn btn-outline">Track Order</a>
-        <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-dark">Admin Login</a>
+      <nav class="landing-nav-links" aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="#preorder">Pre-Order</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#restaurants">Restaurants</a>
+        <a href="#plans">Pricing</a>
+        <a href="./track.html">Track Order</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-outline">Admin Login</a>
+        <a href="#preorder" class="btn btn-primary">Start Pre-Order</a>
       </div>
     </div>
   </header>
 
   <!-- LANDING PAGE -->
   <main id="landingPage">
-    <section class="hero">
-      <div class="container hero-grid">
-        <div>
-          <span class="badge">Scan Based Ordering System</span>
-          <h1>Scan2Plate helps restaurants, cafes, vendors and hotels <span>scan, order & relax</span></h1>
+    <section class="landing-hero" id="preorder">
+      <div class="container preorder-hero-grid">
+        <div class="preorder-copy">
+          <span class="preorder-label">Pre-Order System</span>
+          <h1>Pre-order food before you <span>arrive.</span></h1>
           <p>
-            One simple ordering flow for table service, counter pickup, room service and delivery.
-            Customers scan, order instantly, receive updates, and your team keeps billing and kitchen work in sync.
+            Choose your location, restaurant, menu, payment type and table before reaching the venue.
+            Pay 25% advance or full amount, then arrive with your order ready.
           </p>
-
           <div class="hero-cta">
-            <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-dark">Admin Login</a>
-            <a href="#plans" class="btn btn-outline">View Plans</a>
+            <a href="#preorder-demo" class="btn btn-primary">Start Pre-Order</a>
+            <a href="#restaurants" class="btn btn-outline">Explore Restaurants</a>
           </div>
-
-          <div class="mini-grid">
-            <div class="mini-card">
-              <strong>QR Ordering</strong>
-              <span>Customers scan table QR and order instantly.</span>
-            </div>
-            <div class="mini-card">
-              <strong>Kitchen Flow</strong>
-              <span>Accept, reject, preparing, ready and ETA updates.</span>
-            </div>
-            <div class="mini-card">
-              <strong>Billing + WhatsApp</strong>
-              <span>Bill links, payment status and customer alerts.</span>
-            </div>
+          <div class="preorder-chips">
+            <div class="preorder-chip"><span class="chip-icon">T</span><div><strong>Save Time</strong><span>Pre-order in advance</span></div></div>
+            <div class="preorder-chip"><span class="chip-icon">S</span><div><strong>Secure Payments</strong><span>Advance or full</span></div></div>
+            <div class="preorder-chip"><span class="chip-icon">R</span><div><strong>Order Ready</strong><span>When you arrive</span></div></div>
+            <div class="preorder-chip"><span class="chip-icon">U</span><div><strong>Real-time Updates</strong><span>Live order tracking</span></div></div>
           </div>
         </div>
 
-        <div class="hero-visual">
-          <img src="./assets/scan2plate-hero.jpg" alt="Scan2Plate preview">
-          <div class="float-card float-left">
-            <strong>Scan QR To Order</strong>
-            <span>No waiting • Live menu • Faster service</span>
+        <div class="preorder-product" aria-label="Pre-order product preview">
+          <div class="browser-mock">
+            <div class="browser-head">
+              <div class="browser-brand"><span class="browser-logo">S2</span>Scan2Plate</div>
+              <span class="preorder-label" style="padding:6px 10px;font-size:10px;">Live Demo</span>
+            </div>
+            <div class="browser-steps">
+              <div class="browser-step active"><span>1</span>Choose Location</div>
+              <div class="browser-step"><span>2</span>Browse Menu</div>
+              <div class="browser-step"><span>3</span>Select Table</div>
+              <div class="browser-step"><span>4</span>Payment</div>
+              <div class="browser-step"><span>5</span>Confirm Order</div>
+            </div>
+            <div class="browser-body">
+              <div class="summary-card">
+                <h3>Pre-Order Summary</h3>
+                <div class="summary-restaurant">
+                  <span class="food-dot"></span>
+                  <div><strong>The Grand Bites Restaurant</strong><br><small>City Center, Pune</small></div>
+                </div>
+                <div class="summary-line"><span>Chicken Biryani x1</span><strong>₹250</strong></div>
+                <div class="summary-line"><span>Paneer Butter Masala x1</span><strong>₹220</strong></div>
+                <div class="summary-line"><span>Masala Roti x2</span><strong>₹60</strong></div>
+                <div class="summary-line"><span>Subtotal</span><strong>₹530</strong></div>
+                <div class="summary-line"><span>Advance (25%)</span><strong>₹133</strong></div>
+                <div class="ready-note">Order ready when you arrive</div>
+              </div>
+              <div class="restaurant-photo-card">
+                <img src="./assets/scan2plate-hero.jpg" alt="Premium restaurant dining preview">
+                <div class="table-confirm">
+                  <div class="ok">OK</div>
+                  <small>Your Table</small>
+                  <strong>A12</strong>
+                  <small>Confirmed</small>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="float-card float-right">
-            <strong>WhatsApp Updates</strong>
-            <span>Customers get order and bill links instantly</span>
+          <div class="phone-mock">
+            <div class="phone-screen">
+              <div class="phone-top"><span>My Pre-Order</span><span>9:41</span></div>
+              <div class="phone-bill">
+                <strong>Order #SP2567</strong>
+                <div class="line"><span>Items</span><strong>4</strong></div>
+                <div class="line"><span>Total</span><strong>₹530</strong></div>
+                <div class="line"><span>Pay now</span><strong>₹133</strong></div>
+              </div>
+              <div class="phone-btn">Track Order</div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section">
+    <section class="step-strip" id="how-it-works">
       <div class="container">
-        <div class="section-head">
-          <span class="badge">Features</span>
-          <h2>Everything needed to run smart restaurant ordering</h2>
-          <p>From QR scan to kitchen control to billing and payment status, Scan2Plate keeps the full restaurant flow connected.</p>
+        <h2 class="step-title">How Pre-Order Works - 8 Simple Steps</h2>
+        <div class="steps-row">
+          <div class="step-card"><span class="step-icon">1</span><div><strong>Choose Country</strong><span>Start location</span></div></div>
+          <div class="step-card"><span class="step-icon">2</span><div><strong>Select State</strong><span>Pick region</span></div></div>
+          <div class="step-card"><span class="step-icon">3</span><div><strong>Select District / City</strong><span>Find area</span></div></div>
+          <div class="step-card"><span class="step-icon">4</span><div><strong>Browse Restaurants</strong><span>Choose venue</span></div></div>
+          <div class="step-card"><span class="step-icon">5</span><div><strong>Open Menu</strong><span>Add food</span></div></div>
+          <div class="step-card"><span class="step-icon">6</span><div><strong>Choose Payment</strong><span>25% or full</span></div></div>
+          <div class="step-card"><span class="step-icon">7</span><div><strong>Select Table</strong><span>Book table</span></div></div>
+          <div class="step-card"><span class="step-icon">8</span><div><strong>Confirm Pre-Order</strong><span>Arrive ready</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="preorder-panel-section" id="preorder-demo">
+      <div class="container journey-board">
+        <div class="journey-card">
+          <h3>1. Choose Location</h3>
+          <div class="demo-field"><label>Country</label><select class="demo-select"><option>India</option></select></div>
+          <div class="demo-field"><label>State</label><select class="demo-select"><option>Maharashtra</option></select></div>
+          <div class="demo-field"><label>District / City</label><select class="demo-select"><option>Pune</option></select></div>
+          <div class="demo-field"><label>Restaurant</label><select class="demo-select"><option>The Grand Bites</option></select></div>
+          <button class="demo-btn" type="button">Find Restaurants</button>
         </div>
 
-        <div class="features">
-          <div class="feature-box">
-            <div class="feature-icon" aria-hidden="true">⌁</div>
-            <h3>No Waiting</h3>
-            <p>Customers order directly from their table without waiting for a waiter to take order.</p>
+        <div class="journey-card" id="restaurants">
+          <h3>2. Select Restaurant</h3>
+          <div class="restaurant-list">
+            <div class="restaurant-row"><img src="./assets/placeholder-food.jpg" alt=""><div><strong>The Grand Bites</strong><span>City Center, Pune</span><em>4.6</em></div><span>25 min</span></div>
+            <div class="restaurant-row"><img src="./assets/scan2plate-hero.jpg" alt=""><div><strong>Spice Hub</strong><span>Koregaon Park</span><em>4.4</em></div><span>35 min</span></div>
+            <div class="restaurant-row"><img src="./assets/placeholder-food.jpg" alt=""><div><strong>Royal Treat</strong><span>Baner, Pune</span><em>4.5</em></div><span>20 min</span></div>
+            <button class="demo-btn" type="button" style="background:#fff;color:#3a2112;border:1px solid #ead9c6;">View More Restaurants</button>
           </div>
-          <div class="feature-box">
-            <div class="feature-icon" aria-hidden="true">⌾</div>
-            <h3>No Fake Orders</h3>
-            <p>Table-based QR flow helps restaurants reduce random and fake order confusion.</p>
+        </div>
+
+        <div class="journey-card">
+          <h3>3. Open Menu</h3>
+          <div class="menu-tabs"><span class="active">Biryani</span><span>Starters</span><span>Main Course</span><span>Beverages</span></div>
+          <div class="demo-menu-row"><span>Chicken Biryani</span><strong>₹250</strong><span class="demo-stepper">- 1 +</span></div>
+          <div class="demo-menu-row"><span>Paneer Butter Masala</span><strong>₹220</strong><span class="demo-stepper">- 1 +</span></div>
+          <div class="demo-menu-row"><span>Masala Roti</span><strong>₹30</strong><span class="demo-stepper">- 2 +</span></div>
+          <div class="demo-menu-row"><span>Fresh Lime Soda</span><strong>₹60</strong><span class="demo-stepper">- 1 +</span></div>
+          <div class="cart-summary"><span>View Cart (4 items)</span><strong>₹560</strong></div>
+        </div>
+
+        <div class="journey-card">
+          <h3>4. Payment Option</h3>
+          <div class="payment-choice active"><strong>Pay 25% Advance <small>Recommended</small></strong><span>Minimum advance supported</span></div>
+          <div class="payment-choice"><strong>Pay Full Amount</strong><span>Pay the complete bill now</span></div>
+          <div class="pay-total">
+            <div><span>Order Total</span><strong>₹560</strong></div>
+            <div><span>Advance (25%)</span><strong>₹140</strong></div>
+            <div class="pay-now"><span>Pay Now</span><strong>₹140</strong></div>
+            <small>Secure and encrypted payments</small>
           </div>
-          <div class="feature-box">
-            <div class="feature-icon" aria-hidden="true">✦</div>
-            <h3>Live Kitchen + Billing</h3>
-            <p>Kitchen accepts or rejects orders, admin updates payment and customer gets clear bill status.</p>
+        </div>
+
+        <div class="journey-card">
+          <h3>5. Select Table</h3>
+          <div style="display:flex;gap:14px;margin-bottom:9px;font-size:10px;"><span style="color:#d9431f;">Booked / Unpaid</span><span style="color:#287b24;">Available / Empty</span></div>
+          <div class="table-grid">
+            <div class="table-cell booked">A1<br>Booked</div><div class="table-cell">A2<br>Empty</div><div class="table-cell">A3<br>Empty</div><div class="table-cell">A4<br>Empty</div>
+            <div class="table-cell">A5<br>Empty</div><div class="table-cell booked">A6<br>Booked</div><div class="table-cell">A7<br>Empty</div><div class="table-cell">A8<br>Empty</div>
+            <div class="table-cell">A9<br>Empty</div><div class="table-cell">A10<br>Empty</div><div class="table-cell">A11<br>Empty</div><div class="table-cell selected">A12<br>Empty</div>
+          </div>
+        </div>
+
+        <div class="journey-card">
+          <h3>6. Confirm Pre-Order</h3>
+          <div class="confirm-summary">
+            <h4>The Grand Bites</h4>
+            <small>City Center, Pune</small>
+            <div class="row"><span>Table</span><strong>A12</strong></div>
+            <div class="row"><span>Order Items</span><strong>4 items</strong></div>
+            <div class="row"><span>Payment</span><strong>Advance (25%)</strong></div>
+            <div class="row"><span>Pay Now</span><strong>₹140</strong></div>
+          </div>
+          <div class="confirm-note">Your order is confirmed</div>
+          <button class="demo-btn" type="button">Confirm Pre-Order</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="platform-section" id="features">
+      <div class="container platform-grid">
+        <div class="platform-card">
+          <h2>Everything You Need, All in One Platform</h2>
+          <div class="feature-mini-grid">
+            <div class="platform-feature"><span class="platform-icon">QR</span><div><strong>QR-Based Ordering</strong><span>Scan QR, order instantly</span></div></div>
+            <div class="platform-feature"><span class="platform-icon">BI</span><div><strong>Billing System</strong><span>Fast billing and invoices</span></div></div>
+            <div class="platform-feature"><span class="platform-icon">KO</span><div><strong>Kitchen/KOT</strong><span>Manage orders easily</span></div></div>
+            <div class="platform-feature"><span class="platform-icon">LI</span><div><strong>Live Order Tracking</strong><span>Track in real-time</span></div></div>
+            <div class="platform-feature"><span class="platform-icon">TA</span><div><strong>Table Management</strong><span>Smart table control</span></div></div>
+            <div class="platform-feature"><span class="platform-icon">PO</span><div><strong>Pre-Order System</strong><span>Advance booking and pay</span></div></div>
+          </div>
+        </div>
+
+        <div class="platform-card">
+          <div class="restaurant-story">
+            <div>
+              <h2>How Scan2Plate Works for Restaurants</h2>
+              <p style="color:#6f6256;line-height:1.65;margin:0;">
+                Scan2Plate is a complete billing and QR-based food ordering system for restaurants, cafes, hotels and vendors.
+                It helps you streamline orders, manage tables, accept pre-orders with advance payment, print KOTs and deliver a better dining experience.
+              </p>
+              <div class="restaurant-benefits">
+                <div class="benefit-chip"><span class="benefit-icon">IE</span><div><strong>Increase Efficiency</strong><span>Automate order flow</span></div></div>
+                <div class="benefit-chip"><span class="benefit-icon">RW</span><div><strong>Reduce Wait Time</strong><span>Faster service</span></div></div>
+                <div class="benefit-chip"><span class="benefit-icon">HC</span><div><strong>Happy Customers</strong><span>Better experience</span></div></div>
+                <div class="benefit-chip"><span class="benefit-icon">GY</span><div><strong>Grow Your Business</strong><span>More orders, more repeat</span></div></div>
+              </div>
+            </div>
+            <div class="story-image"><img src="./assets/scan2plate-hero.jpg" alt="Restaurant using Scan2Plate"></div>
           </div>
         </div>
       </div>
@@ -738,7 +1135,7 @@
               <li>Order tracking</li>
               <li>Basic billing</li>
             </ul>
-            <a href="./restaurant-login.html" class="btn btn-outline">Get Started</a>
+            <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-outline">Get Started</a>
           </div>
 
           <div class="plan-card featured">
@@ -752,18 +1149,20 @@
               <li>Manual order billing</li>
               <li>Reports and payment updates</li>
             </ul>
-            <a href="./restaurant-login.html" class="btn btn-dark">Choose Advance</a>
+            <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-dark">Choose Advance</a>
           </div>
         </div>
       </div>
     </section>
 
-    <footer class="footer">
-      <div class="container footer-row">
-        <div>Powered by <strong>Scan2Plate</strong></div>
-        <div>Scan based ordering for restaurants</div>
+    <section class="trust-strip">
+      <div class="container trust-bar">
+        <div class="trust-main"><span class="mark">S2</span>Scan2Plate is a billing and QR-based food ordering system with pre-order support.</div>
+        <div class="trust-item">Secure Payments<span>100% protected</span></div>
+        <div class="trust-item">Trusted by Restaurants<span>Across India</span></div>
+        <div class="trust-item">24/7 Support<span>We are here to help</span></div>
       </div>
-    </footer>
+    </section>
   </main>
 
   <!-- CUSTOMER ORDER PAGE -->
