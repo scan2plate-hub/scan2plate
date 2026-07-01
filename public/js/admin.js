@@ -2920,11 +2920,10 @@ function isTableOccupyingOrder(order = {}, range = tableBusinessDayRange()) {
   if (!order) return false;
   const status = String(order.status || "pending").toLowerCase();
   const payment = String(order.paymentStatus || "unpaid").toLowerCase();
-  const closedStatuses = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed"]);
+  const closedStatuses = new Set(["completed", "closed", "cancelled", "rejected", "bill_closed"]);
   if (order.billClosed === true || closedStatuses.has(payment) || closedStatuses.has(status)) return false;
-  const occupyingStatuses = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting", "bill_open"]);
-  const activeUnpaid = occupyingStatuses.has(status) || payment === "unpaid";
-  return activeUnpaid && (orderInRange(order, range) || payment !== "paid");
+  const activeUnpaid = payment !== "paid";
+  return activeUnpaid;
 }
 
 function getTableStatus(tableNo, tableOrders = [], managedTable = {}, range = tableBusinessDayRange()) {
@@ -2932,12 +2931,12 @@ function getTableStatus(tableNo, tableOrders = [], managedTable = {}, range = ta
   const sorted = [...tableOrders].sort((a, b) => tsToMs(orderCreatedDate(b)) - tsToMs(orderCreatedDate(a)));
   const activeOrder = sorted.find(order => isTableOccupyingOrder(order, range));
   const recentOrder = sorted.find(order => orderInRange(order, range));
-  if (disabled) return { state: "disabled", disabled: true, occupied: false, label: "Disabled", order: recentOrder || activeOrder || null };
-  if (activeOrder) return { state: "occupied", disabled: false, occupied: true, label: "Customer Sitting", order: activeOrder };
+  if (disabled) return { state: "disabled", disabled: true, occupied: false, label: "Disabled", order: activeOrder || null, lastOrder: recentOrder || null };
+  if (activeOrder) return { state: "occupied", disabled: false, occupied: true, label: "Customer Sitting", order: activeOrder, lastOrder: recentOrder || activeOrder };
   if (recentOrder && (recentOrder.billClosed === true || ["paid", "completed", "closed", "bill_closed"].includes(String(recentOrder.status || "").toLowerCase()) || String(recentOrder.paymentStatus || "").toLowerCase() === "paid")) {
-    return { state: "available", disabled: false, occupied: false, label: "Available", order: recentOrder };
+    return { state: "available", disabled: false, occupied: false, label: "Available", order: null, lastOrder: recentOrder };
   }
-  return { state: "available", disabled: false, occupied: false, label: "Available", order: null };
+  return { state: "available", disabled: false, occupied: false, label: "Available", order: null, lastOrder: null };
 }
 
 function renderTablesSection() {
@@ -2997,7 +2996,7 @@ function renderTablesSection() {
   }
 
   tablesGridEl.innerHTML = visibleTableStatuses.map(table => {
-    const { tableNo, order, occupied, disabled } = table;
+    const { tableNo, order, occupied, disabled, lastOrder } = table;
     const cardClass = table.state;
     const statusText = table.label;
     const isPaid = String(order?.paymentStatus || "").toLowerCase() === "paid";
@@ -3006,6 +3005,8 @@ function renderTablesSection() {
     const customerText = order?.customerName || (order ? "Walk-in" : "Ready for next customer");
     const billStatus = isPaid ? "Paid" : order ? "Unpaid / Open" : statusText;
     const amountText = order ? money(withEffectiveOrderTotals(order).grandTotal || 0) : money(0);
+    const lastPaidOrder = !order && lastOrder && String(lastOrder.paymentStatus || "").toLowerCase() === "paid" ? withEffectiveOrderTotals(lastOrder) : null;
+    const lastPaidText = lastPaidOrder ? money(lastPaidOrder.grandTotal || 0) : "";
 
     const actionBtn = disabled
       ? `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="false">Enable Table</button>`
@@ -3031,6 +3032,7 @@ function renderTablesSection() {
         <div class="table-meta">
           <span>Bill: <strong>${escapeHtml(billStatus)}</strong></span>
           ${order ? `<span>Amount: <strong>${amountText}</strong></span>` : ""}
+          ${lastPaidOrder ? `<span>Last Paid: <strong>${lastPaidText}</strong></span>` : ""}
         </div>
         <div class="table-actions">${actionBtn}${paymentAction}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">QR</button></div>
       </div>
