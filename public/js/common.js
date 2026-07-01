@@ -87,9 +87,11 @@ export function calculateOrderTotals(items = [], settings = {}, order = {}) {
 const modulePermissions = {
   owner: "all",
   admin: "all",
+  "restaurant admin": "all",
+  staff: ["orders", "tables", "kot", "billing", "liveOrders", "quickBilling", "printBills", "kotManagement"],
   manager: ["liveOrders", "quickBilling", "tables", "printBills", "kotManagement", "kitchenDisplay", "orders", "billing", "kot"],
   cashier: ["quickBilling", "tables", "printBills", "liveOrders", "orders", "billing"],
-  kitchen: ["liveOrders", "kotManagement", "kitchenDisplay", "orders", "kot"],
+  kitchen: ["kot", "kotManagement", "kitchenDisplay"],
   waiter: ["liveOrders", "tables", "quickBilling", "orders", "billing"]
 };
 

@@ -1204,20 +1204,32 @@
       <!-- TABLES -->
       <section class="content-section" id="section-tables">
 
-        <div class="card" style="margin-bottom:18px;"><div class="card-body" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;"><div class="form-group" style="margin:0;min-width:170px;"><label class="form-label">Add More Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><div class="form-group" style="margin:0;min-width:min(260px,100%);flex:1;"><label class="form-label">Search Tables</label><input id="tableSearch" class="form-input" type="search" placeholder="Search table number..." /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add More Tables</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button">Download All Table QRs</button></div></div>
+        <div class="tables-toolbar card"><div class="card-body"><div class="form-group"><label class="form-label">Add Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><div class="form-group table-search-group"><label class="form-label">Search Tables</label><input id="tableSearch" class="form-input" type="search" placeholder="Table, order, customer..." /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button"><i class="fas fa-download"></i> QR Codes</button></div></div>
 
         <!-- Summary stats -->
-        <div class="stats-grid" id="tableSummary" style="grid-template-columns:repeat(2,1fr);max-width:500px;margin-bottom:20px;"></div>
+        <div class="table-summary-grid" id="tableSummary"></div>
 
         <!-- Table cards grid -->
-        <div id="tablesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;"></div>
+        <div id="tablesGrid" class="tables-grid"></div>
 
         <style>
+          #section-tables{padding-top:0}
+          .tables-toolbar{margin-bottom:10px}
+          .tables-toolbar .card-body{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:12px 14px}
+          .tables-toolbar .form-group{margin:0;min-width:130px}
+          .tables-toolbar .table-search-group{min-width:min(240px,100%);flex:1}
+          .tables-toolbar .btn{min-height:38px;padding:9px 12px}
+          .table-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+          .table-summary-grid .stat-card{padding:11px 12px;min-height:auto;border-radius:10px}
+          .table-summary-grid .stat-icon{width:34px;height:34px;font-size:14px}
+          .table-summary-grid .stat-info h3{font-size:10px;margin-bottom:2px;white-space:nowrap}
+          .table-summary-grid .stat-info .value{font-size:20px}
+          .tables-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
           .table-card {
             background: var(--surface);
             border: 1.5px solid var(--border);
             border-radius: var(--radius);
-            padding: 16px;
+            padding: 12px;
             transition: var(--t);
             position: relative;
             overflow: hidden;
@@ -1238,7 +1250,7 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 8px;
+            margin-bottom: 7px;
             gap: 8px;
           }
           .table-title { font-size: 15px; font-weight: 800; color: var(--text-1); }
@@ -1257,15 +1269,26 @@
           .table-customer {
             font-size: 13px;
             color: var(--text-2);
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             font-weight: 600;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
           }
 
-          .table-actions { display: flex; gap: 7px; }
-          .table-actions .btn { flex: 1; }
+          .table-meta{display:grid;gap:4px;margin-bottom:9px;font-size:11px;color:var(--text-3)}
+          .table-meta strong{color:var(--text-1)}
+          .table-paid-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:999px;background:var(--success-light);color:var(--success);font-size:11px;font-weight:800}
+          .table-actions { display: grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap: 6px; }
+          .table-actions .btn { min-width:0;padding:8px 9px;font-size:11px;white-space:nowrap; }
+          @media(max-width:760px){
+            .table-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+            .tables-toolbar .card-body{align-items:stretch}
+            .tables-toolbar .form-group,.tables-toolbar .btn{flex:1 1 calc(50% - 8px)}
+            .tables-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+            .table-card{padding:10px}
+            .table-actions{grid-template-columns:1fr}
+          }
 
           /* stat-icon for tables danger */
           .stat-icon.danger { background: var(--danger-light); color: var(--danger); }

@@ -480,6 +480,7 @@ let inventoryUnsubscribe = null;
 let inventoryLogsUnsubscribe = null;
 const adminAcceptedSnapshots = new Map();
 const seenSnapshotMap = new Map();
+const paymentUpdateLocks = new Set();
 
 function currentRole() {
   return String(currentUser.role || "owner").toLowerCase();
@@ -514,8 +515,15 @@ function applyStaffPermissions() {
     if (sectionEl && !allowed) sectionEl.innerHTML = `<div class="card"><div class="card-body" style="padding:28px;text-align:center;"><h3>Owner Only</h3><p class="muted">Owner access required. Please login with owner account.</p></div></div>`;
   });
   if (!canAccessModule(role, "dashboard") && !isOwnerLike()) {
-    document.querySelector('.nav-item[data-section="orders"]')?.click();
+    document.querySelector(".nav-item:not(.hidden)")?.click();
   }
+  const quickActionModules = { "new-order": "billing", "print-kot": "kot", "print-bill": "billing", reports: "reports", settings: "settings" };
+  Object.entries(quickActionModules).forEach(([action, moduleName]) => {
+    document.querySelectorAll(`.quick-action[data-action="${action}"]`).forEach(button => {
+      button.classList.toggle("hidden", !(isOwnerLike() || canAccessModule(role, moduleName)));
+    });
+  });
+  if (!isOwnerLike()) document.getElementById("quickResetDataBtn")?.remove();
 }
 window.scan2plateCanOpenSection = section => {
   const role = currentRole() || "owner";
@@ -1466,6 +1474,18 @@ function setNotice(message = "", type = "info") {
   manualBillMsgEl.innerHTML = `<i class="fas fa-info-circle"></i><span>${escapeHtml(message)}</span>`;
 }
 
+function showAdminToast(message = "", type = "success") {
+  const old = document.getElementById("adminToast");
+  if (old) old.remove();
+  const toast = document.createElement("div");
+  toast.id = "adminToast";
+  const tone = type === "danger" ? "var(--danger)" : type === "warning" ? "var(--warning)" : "var(--success)";
+  toast.style.cssText = `position:fixed;right:18px;bottom:18px;z-index:100000;background:${tone};color:#fff;padding:12px 14px;border-radius:12px;box-shadow:var(--shadow-lg);font-size:13px;font-weight:800;max-width:min(92vw,360px);`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3200);
+}
+
 function getTableOptions() {
   const seen = new Set();
   const count = Math.max(1, Number(restaurantSettings.tableCount || 20));
@@ -1736,10 +1756,10 @@ function showPaymentMethodModal(orderId) {
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <button class="pay-method-btn" data-method="cash">💵 Cash</button>
-        <button class="pay-method-btn" data-method="upi">📱 UPI</button>
-        <button class="pay-method-btn" data-method="debit_card">💳 Debit Card</button>
-        <button class="pay-method-btn" data-method="credit_card">💳 Credit Card</button>
+        <button class="pay-method-btn" data-method="cash">Cash</button>
+        <button class="pay-method-btn" data-method="upi">UPI</button>
+        <button class="pay-method-btn" data-method="card">Card</button>
+        <button class="pay-method-btn" data-method="other">Other</button>
       </div>
 
       <button id="closePaymentMethodModal" style="
@@ -1771,8 +1791,15 @@ function showPaymentMethodModal(orderId) {
     `;
 
     btn.addEventListener("click", async () => {
-      await updatePaymentStatus(orderId, "paid", btn.dataset.method || "cash");
-      overlay.remove();
+      if (btn.disabled) return;
+      overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = true);
+      btn.textContent = "Saving...";
+      const ok = await updatePaymentStatus(orderId, "paid", btn.dataset.method || "cash");
+      if (ok) overlay.remove();
+      else {
+        overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = false);
+        btn.textContent = btn.dataset.method === "cash" ? "Cash" : btn.dataset.method === "upi" ? "UPI" : btn.dataset.method === "card" ? "Card" : "Other";
+      }
     });
   });
 
@@ -2908,7 +2935,7 @@ function getTableStatus(tableNo, tableOrders = [], managedTable = {}, range = ta
   if (disabled) return { state: "disabled", disabled: true, occupied: false, label: "Disabled", order: recentOrder || activeOrder || null };
   if (activeOrder) return { state: "occupied", disabled: false, occupied: true, label: "Customer Sitting", order: activeOrder };
   if (recentOrder && (recentOrder.billClosed === true || ["paid", "completed", "closed", "bill_closed"].includes(String(recentOrder.status || "").toLowerCase()) || String(recentOrder.paymentStatus || "").toLowerCase() === "paid")) {
-    return { state: "available", disabled: false, occupied: false, label: "Bill Closed", order: recentOrder };
+    return { state: "available", disabled: false, occupied: false, label: "Available", order: recentOrder };
   }
   return { state: "available", disabled: false, occupied: false, label: "Available", order: null };
 }
@@ -2973,16 +3000,23 @@ function renderTablesSection() {
     const { tableNo, order, occupied, disabled } = table;
     const cardClass = table.state;
     const statusText = table.label;
-    const orderText = occupied && order?.orderId ? `Order: ${order.orderId}` : (statusText === "Bill Closed" ? "Bill closed" : "No active bill");
-    const customerText = occupied
-      ? order.customerName || "Walk-in"
-      : "Ready for next customer";
+    const isPaid = String(order?.paymentStatus || "").toLowerCase() === "paid";
+    const canMarkPaid = Boolean(order?.id && !isPaid && !disabled && (isOwnerLike() || canAccessModule(currentRole(), "billing") || canAccessModule(currentRole(), "tables")));
+    const orderText = order?.orderId ? `Order: ${order.orderId}` : "No active bill";
+    const customerText = order?.customerName || (order ? "Walk-in" : "Ready for next customer");
+    const billStatus = isPaid ? "Paid" : order ? "Unpaid / Open" : statusText;
+    const amountText = order ? money(withEffectiveOrderTotals(order).grandTotal || 0) : money(0);
 
     const actionBtn = disabled
       ? `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="false">Enable Table</button>`
-      : occupied
+      : order
       ? `<button class="btn btn-sm btn-outline table-open-bill-btn" data-id="${order.id}"><i class="fas fa-edit"></i> Open Bill</button>`
       : `<button class="btn btn-sm btn-primary table-new-bill-btn" data-table="${escapeHtml(tableNo)}"><i class="fas fa-plus"></i> New Bill</button>`;
+    const paymentAction = isPaid
+      ? `<span class="table-paid-badge"><i class="fas fa-check"></i> Paid</span>`
+      : canMarkPaid
+        ? `<button class="btn btn-sm btn-success table-paid-btn" data-id="${order.id}"><i class="fas fa-check"></i> Paid</button>`
+        : "";
 
     return `
       <div class="table-card ${cardClass}">
@@ -2994,13 +3028,21 @@ function renderTablesSection() {
           <span class="table-state">${escapeHtml(statusText)}</span>
         </div>
         <div class="table-customer">${escapeHtml(customerText)}</div>
-        <div class="table-actions">${actionBtn}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">Download QR</button></div>
+        <div class="table-meta">
+          <span>Bill: <strong>${escapeHtml(billStatus)}</strong></span>
+          ${order ? `<span>Amount: <strong>${amountText}</strong></span>` : ""}
+        </div>
+        <div class="table-actions">${actionBtn}${paymentAction}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">QR</button></div>
       </div>
     `;
   }).join("");
 
   tablesGridEl.querySelectorAll(".table-open-bill-btn").forEach(btn => {
     btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || ""));
+  });
+
+  tablesGridEl.querySelectorAll(".table-paid-btn").forEach(btn => {
+    btn.addEventListener("click", () => showPaymentMethodModal(btn.dataset.id || ""));
   });
 
   tablesGridEl.querySelectorAll(".table-new-bill-btn").forEach(btn => {
@@ -3959,10 +4001,15 @@ async function handleAdminOrderAction(orderDocId, action) {
 
 async function updatePaymentStatus(orderDocId, status, selectedMethod = "cash") {
   if (!canUseOrdering) { alert("Your Basic plan supports digital menu only. Upgrade to Advance to manage payments."); return; }
+  if (!orderDocId || paymentUpdateLocks.has(orderDocId)) return false;
+  paymentUpdateLocks.add(orderDocId);
   try {
     const orderRef = doc(db, "orders", orderDocId);
     const snap = await getDoc(orderRef);
-    if (!snap.exists()) return alert("Order not found.");
+    if (!snap.exists()) {
+      showAdminToast("Order not found.", "danger");
+      return false;
+    }
 
     const data = snap.data();
     const effective = withEffectiveOrderTotals(data);
@@ -3979,6 +4026,7 @@ async function updatePaymentStatus(orderDocId, status, selectedMethod = "cash") 
 
     if (status === "paid") {
       payload.billClosed = true;
+      payload.paidAt = serverTimestamp();
       if (["pending", "accepted", "preparing", "ready"].includes(currentStatus)) {
         payload.status = "completed";
       } else if (!currentStatus) {
@@ -3992,9 +4040,15 @@ async function updatePaymentStatus(orderDocId, status, selectedMethod = "cash") 
     }
 
     await updateDoc(orderRef, payload);
+    showAdminToast(status === "paid" ? `Bill marked paid by ${selectedMethod.replace("_", " ")}.` : "Bill marked unpaid.", "success");
+    renderTablesSection();
+    return true;
   } catch (err) {
     console.error("updatePaymentStatus error", err);
-    alert("Failed to update payment: " + err.message);
+    showAdminToast("Payment update failed: " + err.message, "danger");
+    return false;
+  } finally {
+    paymentUpdateLocks.delete(orderDocId);
   }
 }
 
@@ -4007,8 +4061,10 @@ function getPaymentMethodPill(o) {
   const methods = {
     cash: { icon: "fa-money-bill-wave", label: "Cash", color: "#16a34a" },
     upi: { icon: "fa-qrcode", label: "UPI / Online", color: "#7c3aed" },
+    card: { icon: "fa-credit-card", label: "Card", color: "#2563eb" },
     debit_card: { icon: "fa-credit-card", label: "Debit Card", color: "#2563eb" },
-    credit_card: { icon: "fa-credit-card", label: "Credit Card", color: "#dc2626" }
+    credit_card: { icon: "fa-credit-card", label: "Credit Card", color: "#dc2626" },
+    other: { icon: "fa-circle-dot", label: "Other", color: "#64748b" }
   };
 
   const m = methods[pm] || {
