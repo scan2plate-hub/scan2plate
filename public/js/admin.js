@@ -18,7 +18,9 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js";
+
+installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
 /* =========================================================
    LOGIN / USER
@@ -33,15 +35,13 @@ if (!rawUser) {
   throw new Error("No login data");
 }
 
-let currentUser = {};
-try {
-  currentUser = JSON.parse(rawUser);
-} catch (e) {
+let currentUser = readValidatedLocal(localStorage.getItem("scan2plate_user") ? "scan2plate_user" : "scan2serve_user", null, value => value && typeof value === "object");
+if (!currentUser) {
   localStorage.removeItem("scan2plate_user");
   localStorage.removeItem("scan2serve_user");
   alert("Login session invalid. Please login again.");
   window.location.href = "./admin-login.html";
-  throw e;
+  throw new Error("Invalid login data");
 }
 
 const restaurantId =
@@ -121,6 +121,7 @@ function cleanupFirestoreListeners(...listeners) {
       console.warn("Firestore listener cleanup failed", error);
     }
   });
+  cleanupRegisteredListeners();
 }
 
 /* =========================================================
@@ -1794,8 +1795,7 @@ function showPaymentMethodModal(orderId) {
       cursor:pointer;
     `;
 
-    btn.addEventListener("click", async () => {
-      if (btn.disabled) return;
+    btn.addEventListener("click", () => guardedAction(btn, async () => {
       overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = true);
       btn.textContent = "Saving...";
       const ok = await updatePaymentStatus(orderId, "paid", btn.dataset.method || "cash");
@@ -1804,7 +1804,7 @@ function showPaymentMethodModal(orderId) {
         overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = false);
         btn.textContent = btn.dataset.method === "cash" ? "Cash" : btn.dataset.method === "upi" ? "UPI" : btn.dataset.method === "card" ? "Card" : "Other";
       }
-    });
+    }, { timeoutMs: 20000, errorMessage: false }));
   });
 
   document.getElementById("closePaymentMethodModal")?.addEventListener("click", () => {
@@ -2885,19 +2885,19 @@ function startInventoryListeners() {
   cleanupFirestoreListeners(inventoryUnsubscribe, inventoryLogsUnsubscribe);
   inventoryUnsubscribe = null;
   inventoryLogsUnsubscribe = null;
-  inventoryUnsubscribe = onSnapshot(collection(db, "restaurants", restaurantId, "inventory"), snap => {
+  inventoryUnsubscribe = registerCleanup(onSnapshot(collection(db, "restaurants", restaurantId, "inventory"), snap => {
     allInventoryItems = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => String(a.itemName).localeCompare(String(b.itemName)));
     renderInventory();
-  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
-  inventoryLogsUnsubscribe = onSnapshot(collection(db, "restaurants", restaurantId, "inventory_logs"), snap => {
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error)));
+  inventoryLogsUnsubscribe = registerCleanup(onSnapshot(collection(db, "restaurants", restaurantId, "inventory_logs"), snap => {
     inventoryLogs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
     renderInventoryHistory();
     renderInventoryReports(allInventoryItems.filter(inventoryStatus));
-  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
-  onSnapshot(collection(db, "restaurants", restaurantId, "purchase_bills"), snap => {
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error)));
+  registerCleanup(onSnapshot(collection(db, "restaurants", restaurantId, "purchase_bills"), snap => {
     purchaseBills = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.uploadedAt?.seconds || 0) - (a.uploadedAt?.seconds || 0));
     renderPurchaseHistory();
-  }, error => showLoadingNotice("Unable to load data. Please retry.", error));
+  }, error => showLoadingNotice("Unable to load data. Please retry.", error)));
 }
 
 /* =========================================================
@@ -4731,14 +4731,14 @@ async function loadOrders() {
     ordersUnsubscribe = null;
 
     devLog("orders query started", { restaurantId });
-    ordersUnsubscribe = onSnapshot(
+    ordersUnsubscribe = registerCleanup(onSnapshot(
       query(collection(db, "orders"), where("restaurantId", "==", restaurantId)),
       snap => processOrdersSnapshot(snap),
       err => {
         console.error("orders listener error", err);
         showLoadingNotice("Unable to load data. Please retry.", err);
       }
-    );
+    ));
   } catch (err) {
     console.error("loadOrders error", err);
     showLoadingNotice("Unable to load data. Please retry.", err);
@@ -4777,15 +4777,15 @@ logoutBtn?.addEventListener("click", async () => {
   window.location.href = "./admin-login.html";
 });
 
-refreshBtn?.addEventListener("click", async () => {
+refreshBtn?.addEventListener("click", () => guardedAction(refreshBtn, async () => {
   stopAdminAlert();
   await loadMenuData();
   renderMenuManagement();
   renderManualMenuPicker();
-});
+}, { loadingText: "Refreshing...", timeoutMs: 25000 }));
 
-saveMenuBtn?.addEventListener("click", saveMenuItem);
-deleteMenuBtn?.addEventListener("click", deleteMenuItem);
+saveMenuBtn?.addEventListener("click", () => guardedAction(saveMenuBtn, saveMenuItem, { loadingText: "Saving...", timeoutMs: 25000 }));
+deleteMenuBtn?.addEventListener("click", () => guardedAction(deleteMenuBtn, deleteMenuItem, { loadingText: "Deleting...", timeoutMs: 25000 }));
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
 itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
 menuSearchEl?.addEventListener("input", renderMenuManagement);
@@ -4861,10 +4861,10 @@ addInventoryUsageBtn?.addEventListener("click", () => renderInventoryUsageRows([
   })) : []),
   {}
 ]));
-saveInventoryBtn?.addEventListener("click", saveInventoryItem);
+saveInventoryBtn?.addEventListener("click", () => guardedAction(saveInventoryBtn, saveInventoryItem, { loadingText: "Saving...", timeoutMs: 25000 }));
 clearInventoryBtn?.addEventListener("click", clearInventoryForm);
-saveAdjustmentBtn?.addEventListener("click", saveInventoryAdjustment);
-addTablesBtn?.addEventListener("click", async () => {
+saveAdjustmentBtn?.addEventListener("click", () => guardedAction(saveAdjustmentBtn, saveInventoryAdjustment, { loadingText: "Saving...", timeoutMs: 25000 }));
+addTablesBtn?.addEventListener("click", () => guardedAction(addTablesBtn, async () => {
   const addCount = Number(addTablesCountEl?.value || 0);
   if (!Number.isInteger(addCount) || addCount < 1) return alert("Enter the number of tables to add.");
   const currentCount = Math.max(Number(restaurantSettings.tableCount || 20), ...managedTables.map(t => Number(t.tableNo || t.id) || 0), ...getTableOptions().map(Number));
@@ -4882,7 +4882,7 @@ addTablesBtn?.addEventListener("click", async () => {
   if (addTablesCountEl) addTablesCountEl.value = "";
   renderTableNumberOptions(); renderTablesSection();
   alert(`${addCount} new table${addCount === 1 ? "" : "s"} added (Table ${String(currentCount + 1).padStart(2,"0")}–${String(nextCount).padStart(2,"0")}).`);
-});
+}, { loadingText: "Adding...", timeoutMs: 30000 }));
 downloadAllTableQrsBtn?.addEventListener("click", () => {
   const rows = getTableOptions().map(tableNo => [`Table ${tableNo}`, `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`]);
   const csv = [["Table", "QR Link"], ...rows].map(row => row.map(value => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\n");
@@ -4894,7 +4894,7 @@ rescanPurchaseBillBtn?.addEventListener("click", () => { purchaseReviewEl?.class
 addPurchaseReviewRowBtn?.addEventListener("click", () => { purchaseReviewRowsEl?.insertAdjacentHTML("beforeend", purchaseReviewRow()); bindPurchaseReviewRowActions(); });
 savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 
-saveSettingsBtn?.addEventListener("click", saveSettings);
+saveSettingsBtn?.addEventListener("click", () => guardedAction(saveSettingsBtn, saveSettings, { loadingText: "Saving...", timeoutMs: 45000, errorMessage: false }));
 useCurrentLocationBtn?.addEventListener("click", useAdminCurrentLocation);
 restaurantLogoUploadEl?.addEventListener("change", async () => {
   restaurantLogoMarkedForRemoval = false;
@@ -4928,7 +4928,7 @@ restaurantLogoUploadEl?.addEventListener("change", async () => {
 });
 removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
 
-createManualBillBtn?.addEventListener("click", createManualBill);
+createManualBillBtn?.addEventListener("click", () => guardedAction(createManualBillBtn, createManualBill, { loadingText: "Saving...", timeoutMs: 30000 }));
 manualUpiBtn?.addEventListener("click", openManualUpi);
 clearCartBtn?.addEventListener("click", resetManualBillForm);
 
@@ -4988,7 +4988,7 @@ document.getElementById("printKotBtn")?.addEventListener("click", () => {
   printKOTFromOrder(kotOrder, manualCartPayload(), "ALL ITEMS");
 });
 
-document.getElementById("printBillBtn")?.addEventListener("click", async () => {
+document.getElementById("printBillBtn")?.addEventListener("click", event => guardedAction(event.currentTarget, async () => {
   const win = window.open("", "_blank", "width=380,height=700");
   if (!win) return alert("Allow popup to print.");
   const order = currentBillOrder;
@@ -5033,7 +5033,7 @@ document.getElementById("printBillBtn")?.addEventListener("click", async () => {
     win.print();
     win.close();
   }, 500);
-});
+}, { loadingText: "Preparing...", timeoutMs: 30000, errorMessage: false }));
 
 window.fillBillPreview = fillBillPreview;
 
@@ -5280,19 +5280,19 @@ if (reportYearEl && !reportYearEl.value) reportYearEl.value = todayDateStr().sli
 
 startInitialLoadTimeout("Admin Dashboard");
 try {
-  const subscriptionBlocked = await checkRestaurantSubscription();
+  const subscriptionBlocked = await withTimeout(checkRestaurantSubscription(), 15000, "Subscription check timed out");
   setInterval(checkRestaurantSubscription, 5 * 60 * 1000);
 
   if (!subscriptionBlocked) {
-    await loadSettings();
+    await withTimeout(loadSettings(), 20000, "Settings load timed out");
     mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
     if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
       const quickActions = document.querySelector(".quick-actions");
       if (quickActions && !document.getElementById("quickResetDataBtn")) { const button=document.createElement("div"); button.id="quickResetDataBtn"; button.className="quick-action"; button.innerHTML="<i class=\"fas fa-triangle-exclamation\"></i>Reset Data"; button.addEventListener("click",()=>{document.querySelector('.nav-item[data-section="settings"]')?.click(); document.getElementById("safeResetZone")?.scrollIntoView({behavior:"smooth"});}); quickActions.append(button); }
     }
-    await loadMenuData();
+    await withTimeout(loadMenuData(), 20000, "Menu load timed out");
     startInventoryListeners();
-    onSnapshot(
+    registerCleanup(onSnapshot(
       collection(db, "restaurants", restaurantId, "tables"),
       snap => {
         managedTables = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -5303,11 +5303,11 @@ try {
         console.error("tables listener error", error);
         showLoadingNotice("Unable to load data. Please retry.", error);
       }
-    );
+    ));
     renderMenuManagement();
     renderManualMenuPicker();
     renderManualCart();
-    await loadOrders();
+    await withTimeout(loadOrders(), 20000, "Orders load timed out");
   } else {
     markInitialLoadDone();
   }

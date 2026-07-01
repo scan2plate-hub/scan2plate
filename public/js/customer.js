@@ -30,8 +30,14 @@ import {
   calculateOrderTotals,
   orderItemTotal,
   getBusinessDate,
-  normalizeResetTime
+  normalizeResetTime,
+  installAppSafety,
+  withTimeout,
+  guardedAction,
+  readValidatedLocal
 } from './common.js';
+
+installAppSafety({ pageName: 'Customer Menu', stuckTimeoutMs: 16000 });
 
 const landingHero = qs('#landingHero');
 const customerApp = qs('#customerApp');
@@ -85,7 +91,7 @@ const currentOrderMode = () => isVendorMode() ? 'token' : (settings.orderMode ==
 
 let menu = [];
 let activeCategory = 'All';
-let cart = readLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, []);
+let cart = readValidatedLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, [], value => Array.isArray(value));
 let customerLoadDone = false;
 let customerLoadTimer = null;
 let activeOpenOrderDoc = null;
@@ -155,14 +161,18 @@ clearCartBtn?.addEventListener('click', () => {
   cart = [];
   syncCart();
 });
-placeOrderBtn?.addEventListener('click', placeOrder);
+placeOrderBtn?.addEventListener('click', () => guardedAction(placeOrderBtn, placeOrder, {
+  loadingText: addonOrderIdParam ? 'Adding...' : 'Placing...',
+  timeoutMs: 30000,
+  errorMessage: false
+}));
 
 if (restaurantId) {
   startCustomerLoadTimeout();
   try {
-    await loadSettings();
+    await withTimeout(loadSettings(), 20000, 'Settings load timed out. Please retry.');
     if (await showActiveOrderLandingIfNeeded() && await validateTableAvailability()) {
-      await loadMenu();
+      await withTimeout(loadMenu(), 20000, 'Menu load timed out. Please retry.');
       renderCart();
     }
     finishCustomerLoad();
@@ -846,8 +856,6 @@ async function placeOrder() {
     return toast('Cart is empty. Please add items first.');
   }
 
-  if (placeOrderBtn) placeOrderBtn.disabled = true;
-
   try {
     const locationProof = await verifyCustomerLocation();
     const openOrder = await findOpenOrder();
@@ -869,7 +877,7 @@ async function placeOrder() {
       orderId = current.orderId;
       createdDailyOrder = { displayOrderNo: current.displayOrderNo || current.dailyOrderNo || '-' };
 
-      await updateDoc(doc(db, 'orders', openOrder.id), {
+      await withTimeout(updateDoc(doc(db, 'orders', openOrder.id), {
         customerName: customerName.value.trim(),
         customerPhone: fullPhone,
         note: noteVal,
@@ -892,10 +900,10 @@ async function placeOrder() {
         ...locationProof,
         updatedAt: serverTimestamp(),
         lastAddedAt: serverTimestamp()
-      });
-      await auditLog('add_more_items', { orderId, tableNo, addonCount: addonItems.length, addedFrom: 'customer' });
+      }), 20000, 'Could not update active order. Please retry.');
+      await withTimeout(auditLog('add_more_items', { orderId, tableNo, addonCount: addonItems.length, addedFrom: 'customer' }), 10000, 'Audit log timed out.');
 
-      await notifyBackend({
+      await withTimeout(notifyBackend({
         restaurantId,
         restaurantName: settings.restaurantName || 'Restaurant',
         orderId,
@@ -908,7 +916,7 @@ async function placeOrder() {
         status: 'updated',
         etaMinutes,
         billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`
-      });
+      }), 15000, 'Kitchen notification timed out.');
     } else {
       orderId = uid('ORD');
 
@@ -952,9 +960,9 @@ async function placeOrder() {
         updatedAt: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'orders'), payload);
+      await withTimeout(addDoc(collection(db, 'orders'), payload), 20000, 'Could not place order. Please retry.');
 
-      await notifyBackend({
+      await withTimeout(notifyBackend({
         restaurantId,
         restaurantName: settings.restaurantName || 'Restaurant',
         orderId,
@@ -968,7 +976,7 @@ async function placeOrder() {
         status: 'pending',
         etaMinutes,
         billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`
-      });
+      }), 15000, 'Kitchen notification timed out.');
     }
 
     if (orderSuccess) {
@@ -992,7 +1000,6 @@ async function placeOrder() {
   } catch (e) {
     console.error('Place order error:', e);
     toast(e?.message || 'Failed to place order. Check Firestore rules, restaurant ID, and backend URL.');
+    throw e;
   }
-
-  if (placeOrderBtn) placeOrderBtn.disabled = false;
 }

@@ -1,7 +1,9 @@
 import { app, auth, db } from "./firebase.js";
 import { collection, doc, addDoc, setDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { getBusinessDate, normalizeResetTime } from "./common.js";
+import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup } from "./common.js";
+
+installAppSafety({ pageName: "Admin Modules", stuckTimeoutMs: 18000 });
 
 const user = JSON.parse(localStorage.getItem("scan2plate_user") || localStorage.getItem("scan2serve_user") || "{}");
 const restaurantId = user.restaurantId || localStorage.getItem("scan2plate_last_restaurant_id");
@@ -22,8 +24,8 @@ setTimeout(() => {
   const open = () => { document.querySelectorAll(".content-section").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));document.getElementById("module-print-bills")?.classList.add("active");document.querySelector('.module-nav[data-module="print-bills"]')?.classList.add("active");document.getElementById("pageTitle").textContent="Print Bills";document.getElementById("pageSubtitle").textContent="Select and print an order";window.closeSidebarOnMobile?.();render(); };
   window.openOrderBillPicker=open;
   const nav=document.querySelector('.module-nav[data-module="print-bills"]'),main=document.querySelectorAll(".nav-group")[0],tables=document.querySelector('.nav-item[data-section="tables"]');if(nav&&main)main.insertBefore(nav,tables||null);nav?.addEventListener("click",e=>{e.preventDefault();open()}); const date=document.getElementById("bill-date");if(date){date.value=today();date.insertAdjacentHTML("afterend",'<button id="bill-all-dates" class="btn btn-outline btn-sm" type="button">All Dates</button>');document.getElementById("bill-all-dates")?.addEventListener("click",()=>{date.value="";render()});["bill-q","bill-date","bill-status"].forEach(id=>document.getElementById(id)?.addEventListener("input",render));}
-  onSnapshot(collection(db,"orders"),snap=>{orders=snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>String(o.restaurantId||"")===String(restaurantId));render();});
-  onSnapshot(doc(db,"restaurants",restaurantId),snap=>{moduleSettings=snap.exists()?snap.data():{};render();});
+  registerCleanup(onSnapshot(collection(db,"orders"),snap=>{orders=snap.docs.map(d=>({id:d.id,...d.data()})).filter(o=>String(o.restaurantId||"")===String(restaurantId));render();}));
+  registerCleanup(onSnapshot(doc(db,"restaurants",restaurantId),snap=>{moduleSettings=snap.exists()?snap.data():{};render();}));
 }, 0);
 
 function nav(name, icon, title) { document.querySelectorAll(".nav-group")[1]?.insertAdjacentHTML("beforeend", `<a class="nav-item module-nav" data-module="${name}"><span class="nav-icon"><i class="fas ${icon}"></i></span>${title}</a>`); }

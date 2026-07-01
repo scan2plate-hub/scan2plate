@@ -30,12 +30,141 @@ export function readLocal(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
   } catch {
+    localStorage.removeItem(key);
     return fallback;
   }
 }
 
 export function toast(message) {
   alert(message);
+}
+
+export function isDevHost() {
+  return ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+}
+
+export function devError(...args) {
+  if (isDevHost()) console.error(...args);
+}
+
+export function withTimeout(promise, ms = 20000, label = "Request timed out") {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(label)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+export function readValidatedLocal(key, fallback, validator = value => value != null) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!validator(parsed)) throw new Error(`Invalid ${key}`);
+    return parsed;
+  } catch (error) {
+    devError("Invalid localStorage entry removed", key, error);
+    localStorage.removeItem(key);
+    return fallback;
+  }
+}
+
+const globalCleanupFns = new Set();
+
+export function registerCleanup(fn) {
+  if (typeof fn !== "function") return fn;
+  globalCleanupFns.add(fn);
+  return () => {
+    try { fn(); } catch (error) { devError("Cleanup failed", error); }
+    globalCleanupFns.delete(fn);
+  };
+}
+
+export function cleanupRegisteredListeners() {
+  [...globalCleanupFns].forEach(fn => {
+    try { fn(); } catch (error) { devError("Cleanup failed", error); }
+    globalCleanupFns.delete(fn);
+  });
+}
+
+export function showStuckFallback(message = "This page is taking longer than expected.") {
+  if (document.getElementById("scan2plateStuckFallback")) return;
+  const box = document.createElement("div");
+  box.id = "scan2plateStuckFallback";
+  box.style.cssText = "position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:99999;width:min(92vw,520px);padding:12px 14px;border:1px solid #fed7aa;border-radius:14px;background:#fff7ed;color:#9a3412;box-shadow:0 18px 50px rgba(0,0,0,.14);font:13px/1.45 Arial,sans-serif;";
+  box.innerHTML = `<strong>${escapeHtml(message)}</strong><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button id="scan2plateRefreshPageBtn" type="button" style="border:0;border-radius:9px;background:#e07c1a;color:#fff;padding:8px 11px;font-weight:800;cursor:pointer">Refresh Page</button><button id="scan2plateDismissStuckBtn" type="button" style="border:1px solid #fed7aa;border-radius:9px;background:#fff;color:#9a3412;padding:8px 11px;font-weight:800;cursor:pointer">Dismiss</button></div>`;
+  document.body.appendChild(box);
+  document.getElementById("scan2plateRefreshPageBtn")?.addEventListener("click", () => location.reload());
+  document.getElementById("scan2plateDismissStuckBtn")?.addEventListener("click", () => box.remove());
+}
+
+export function closeStaleOverlays() {
+  document.querySelectorAll(".modal-overlay.active").forEach(overlay => {
+    const visibleModal = overlay.querySelector(".modal,.s2p-login-modal-card");
+    if (!visibleModal || getComputedStyle(overlay).pointerEvents === "none") overlay.classList.remove("active", "open");
+  });
+  document.body.classList.remove("modal-open");
+}
+
+export function installAppSafety(options = {}) {
+  const timeoutMs = Number(options.stuckTimeoutMs || 15000);
+  const pageName = options.pageName || "Scan2Plate";
+  window.addEventListener("error", event => {
+    devError(`[${pageName}] uncaught error`, event.error || event.message);
+    showStuckFallback("Something went wrong. Refresh if the page is stuck.");
+    closeStaleOverlays();
+  });
+  window.addEventListener("unhandledrejection", event => {
+    devError(`[${pageName}] unhandled promise`, event.reason);
+    showStuckFallback("Network or app action failed. Refresh if buttons stop responding.");
+    closeStaleOverlays();
+  });
+  window.addEventListener("offline", () => showStuckFallback("Internet connection lost. Reconnect, then refresh if needed."));
+  window.addEventListener("pagehide", cleanupRegisteredListeners);
+  window.addEventListener("beforeunload", cleanupRegisteredListeners);
+  document.addEventListener("click", event => {
+    const close = event.target.closest(".modal-close,[data-modal-close]");
+    if (close) {
+      close.closest(".modal-overlay,.s2p-login-modal")?.classList.remove("active", "open");
+      setTimeout(closeStaleOverlays, 0);
+    }
+    if (event.target?.classList?.contains("modal-overlay")) {
+      event.target.classList.remove("active", "open");
+      setTimeout(closeStaleOverlays, 0);
+    }
+  });
+  setTimeout(() => {
+    const stillBusy = document.querySelector(".is-loading,.loading,.loading-spinner,[aria-busy='true'],#adminLoadingNotice,#tokenLoadNotice");
+    if (document.visibilityState === "visible" && stillBusy) {
+      showStuckFallback(`${pageName} is still loading. You can refresh safely if needed.`);
+    }
+  }, timeoutMs);
+}
+
+export async function guardedAction(button, action, options = {}) {
+  if (button?.dataset.busy === "true") return;
+  const originalText = button?.textContent;
+  const loadingText = options.loadingText;
+  try {
+    if (button) {
+      button.dataset.busy = "true";
+      button.disabled = true;
+      if (loadingText) button.textContent = loadingText;
+    }
+    return await withTimeout(Promise.resolve().then(action), options.timeoutMs || 20000, options.timeoutMessage || "Action timed out. Please retry.");
+  } catch (error) {
+    devError("Action failed", error);
+    if (options.errorMessage !== false) alert(error?.message || options.errorMessage || "Action failed. Please retry.");
+    if (options.rethrow) throw error;
+    return undefined;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.dataset.busy = "false";
+      if (loadingText) button.textContent = originalText;
+    }
+    closeStaleOverlays();
+  }
 }
 
 export function normalizeCustomerPhone(value = "") {

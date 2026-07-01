@@ -13,8 +13,14 @@ import {
   escapeHtml,
   fmtCurrency,
   notifyBackend,
-  getRestaurantContext
+  getRestaurantContext,
+  installAppSafety,
+  withTimeout,
+  registerCleanup,
+  guardedAction
 } from "./common.js";
+
+installAppSafety({ pageName: "Kitchen Dashboard", stuckTimeoutMs: 15000 });
 
 const newWrap       = qs("#newOrders");
 const preparingWrap = qs("#preparingOrders");
@@ -452,8 +458,8 @@ function bindActions(orderDocs, root = document) {
         payload.etaStartedAt = serverTimestamp();
       }
 
-      await updateDoc(doc(db, "orders", docId), payload);
-      await sendOrderUpdate(found, nextStatus, eta);
+      await withTimeout(updateDoc(doc(db, "orders", docId), payload), 15000, "Could not update order status.");
+      await withTimeout(sendOrderUpdate(found, nextStatus, eta), 15000, "Kitchen notification timed out.");
 
       // ── PRINT KOT when order is ACCEPTED + save item snapshot ──
       if (nextStatus === "accepted") {
@@ -464,6 +470,8 @@ function bindActions(orderDocs, root = document) {
         acceptedSnapshots.set(docId, snapshot);
       }
     };
+    const handler = btn.onclick;
+    btn.onclick = () => guardedAction(btn, handler, { loadingText: "Saving...", timeoutMs: 25000, errorMessage: false });
   });
 
   /* ── +10 min ── */
@@ -477,13 +485,15 @@ function bindActions(orderDocs, root = document) {
       const current        = found.data();
       const nextEtaMinutes = Number(current.etaMinutes || 10) + 10;
 
-      await updateDoc(doc(db, "orders", docId), {
+      await withTimeout(updateDoc(doc(db, "orders", docId), {
         etaMinutes:          nextEtaMinutes,
         updatedAt:           serverTimestamp()
-      });
+      }), 15000, "Could not add time.");
 
-      await sendOrderUpdate(found, current.status || "pending", nextEtaMinutes);
+      await withTimeout(sendOrderUpdate(found, current.status || "pending", nextEtaMinutes), 15000, "Kitchen notification timed out.");
     };
+    const handler = btn.onclick;
+    btn.onclick = () => guardedAction(btn, handler, { loadingText: "Saving...", timeoutMs: 25000, errorMessage: false });
   });
 
   root.querySelectorAll("[data-seenaddons]").forEach(btn => {
@@ -496,15 +506,17 @@ function bindActions(orderDocs, root = document) {
       const current     = found.data();
       const currItems   = current.items || [];
       const nextItems = currItems.map(item => isAddonItem(item) ? { ...item, seenByKitchen: true } : item);
-      await updateDoc(doc(db, "orders", docId), {
+      await withTimeout(updateDoc(doc(db, "orders", docId), {
         items: nextItems,
         hasNewItems:         false,
         newlyAddedItems:     [],
         newlyAddedItemsText: "",
         newlyAddedNote:      "",
         updatedAt:           serverTimestamp()
-      });
+      }), 15000, "Could not mark add-on items as seen.");
     };
+    const handler = btn.onclick;
+    btn.onclick = () => guardedAction(btn, handler, { loadingText: "Saving...", timeoutMs: 25000, errorMessage: false });
   });
 
   root.querySelectorAll("[data-printnew]").forEach(btn => {
@@ -517,11 +529,13 @@ function bindActions(orderDocs, root = document) {
       if (!itemsToPrint.length) return alert("No new add-on items to print.");
       printKOT(current, itemsToPrint, "NEW ITEMS ONLY");
       const printedAt = new Date().toISOString();
-      await updateDoc(doc(db, "orders", docId), {
+      await withTimeout(updateDoc(doc(db, "orders", docId), {
         items: (current.items || []).map(item => isAddonItem(item) && item.kotPrinted !== true ? { ...item, kotPrinted: true, kotPrintedAt: printedAt } : item),
         updatedAt: serverTimestamp()
-      });
+      }), 15000, "Could not mark KOT as printed.");
     };
+    const handler = btn.onclick;
+    btn.onclick = () => guardedAction(btn, handler, { loadingText: "Printing...", timeoutMs: 25000, errorMessage: false });
   });
 
   /* ── Manual Print KOT button (full order) ── */
@@ -565,16 +579,16 @@ function renderOrders(orderDocs) {
 /* ─────────────────────────────────────────
    REAL-TIME LISTENER
 ───────────────────────────────────────── */
-const kitchenRestaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
+const kitchenRestaurantSnap = await withTimeout(getDoc(doc(db, "restaurants", restaurantId)), 15000, "Restaurant details timed out.");
 const kitchenRestaurant = kitchenRestaurantSnap.exists() ? kitchenRestaurantSnap.data() : {};
 if (String(kitchenRestaurant.plan || "").toLowerCase() === "basic") {
   showKitchenPlanLock("Kitchen dashboard is available only in Advance plan.");
 } else if (isPlanExpired(kitchenRestaurant)) {
   showKitchenPlanLock("Your plan has expired. Please renew to continue.");
 } else {
-await loadSettings();
+await withTimeout(loadSettings(), 15000, "Kitchen settings load timed out.");
 
-onSnapshot(
+registerCleanup(onSnapshot(
   collection(db, "orders"),
   snap => {
     const activeDocs = snap.docs.filter(d => {
@@ -622,6 +636,9 @@ onSnapshot(
     firstLoadDone = true;
     renderOrders(snap.docs);
   },
-  err => console.error(err)
-);
+  err => {
+    console.error(err);
+    newWrap.innerHTML = `<div class="empty-box">Unable to load kitchen orders. <button class="btn btn-outline" type="button" onclick="location.reload()">Retry</button></div>`;
+  }
+));
 }

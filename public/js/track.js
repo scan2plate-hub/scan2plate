@@ -8,7 +8,9 @@ import {
   query,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { calculateOrderTotals } from "./common.js";
+import { calculateOrderTotals, installAppSafety, withTimeout, registerCleanup, guardedAction } from "./common.js";
+
+installAppSafety({ pageName: "Track Order", stuckTimeoutMs: 15000 });
 
 const searchInput = document.getElementById("searchInput");
 const trackBtn = document.getElementById("trackBtn");
@@ -228,8 +230,8 @@ async function loadRestaurantDetails(restaurantId) {
   if (!restaurantId || restaurantDetails.id === restaurantId) return;
   restaurantDetails = { id: restaurantId, name: "Restaurant", phone: "", taxPercent: 0 };
   try {
-    const settings = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
-    const root = await getDoc(doc(db, "restaurants", restaurantId));
+    const settings = await withTimeout(getDoc(doc(db, "restaurants", restaurantId, "settings", "general")), 12000, "Restaurant settings timed out.");
+    const root = await withTimeout(getDoc(doc(db, "restaurants", restaurantId)), 12000, "Restaurant details timed out.");
     const rootData = root.exists() ? root.data() : {};
     if (settings.exists()) {
       const data = settings.data();
@@ -258,16 +260,16 @@ async function findOrder(searchTerm) {
   const orders = collection(db, "orders");
 
   if (/^ORD/i.test(value)) {
-    const results = await getDocs(query(orders, where("orderId", "==", value)));
+    const results = await withTimeout(getDocs(query(orders, where("orderId", "==", value))), 12000, "Order lookup timed out.");
     return latestOrder(results.docs);
   }
 
   const normalized = normalizePhone(value);
   if (!normalized) return null;
   const values = [...new Set([value, normalized, `91${normalized}`, `+91${normalized}`])];
-  const snapshots = await Promise.all(values.map(phone =>
+  const snapshots = await withTimeout(Promise.all(values.map(phone =>
     getDocs(query(orders, where("customerPhone", "==", phone)))
-  ));
+  )), 15000, "Phone lookup timed out.");
   const unique = new Map();
   snapshots.flatMap(snapshot => snapshot.docs).forEach(snapshot => unique.set(snapshot.id, snapshot));
   return latestOrder([...unique.values()]);
@@ -294,7 +296,7 @@ async function beginTracking(searchTerm) {
 
     await loadRestaurantDetails(foundOrder.restaurantId);
     const orderRef = doc(db, "orders", foundOrder.id);
-    unsubscribeOrder = onSnapshot(orderRef, snapshot => {
+    unsubscribeOrder = registerCleanup(onSnapshot(orderRef, snapshot => {
       if (!snapshot.exists()) {
         stopTracking();
         showError("This order is no longer available. Search again to track another order.");
@@ -304,7 +306,7 @@ async function beginTracking(searchTerm) {
     }, error => {
       console.error("Live tracking error:", error);
       showError("Live updates could not load. Check your connection and try again.");
-    });
+    }));
   } catch (error) {
     console.error("Order lookup error:", error);
     showError("Unable to find this order right now. Please try again.");
@@ -313,9 +315,17 @@ async function beginTracking(searchTerm) {
   }
 }
 
-trackBtn.addEventListener("click", () => beginTracking(searchInput.value));
+trackBtn.addEventListener("click", () => guardedAction(trackBtn, () => beginTracking(searchInput.value), {
+  loadingText: "Tracking...",
+  timeoutMs: 25000,
+  errorMessage: false
+}));
 searchInput.addEventListener("keydown", event => {
-  if (event.key === "Enter") beginTracking(searchInput.value);
+  if (event.key === "Enter") guardedAction(trackBtn, () => beginTracking(searchInput.value), {
+    loadingText: "Tracking...",
+    timeoutMs: 25000,
+    errorMessage: false
+  });
 });
 
 stickyRefreshBtn?.addEventListener("click", () => {
