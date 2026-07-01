@@ -28,7 +28,9 @@ import {
   isActiveUnpaidOrder,
   taxPercentFromSettings,
   calculateOrderTotals,
-  orderItemTotal
+  orderItemTotal,
+  getBusinessDate,
+  normalizeResetTime
 } from './common.js';
 
 const landingHero = qs('#landingHero');
@@ -672,23 +674,7 @@ async function findOpenOrder() {
 }
 
 function localTokenDate() {
-  const now = new Date();
-  const tzOffset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - tzOffset).toISOString().slice(0, 10);
-}
-
-function normalizedResetTime(value = '04:00') {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : '04:00';
-}
-
-function businessDateFor(date = new Date(), resetTime = '04:00') {
-  const [hours, minutes] = normalizedResetTime(resetTime).split(':').map(Number);
-  const businessDate = new Date(date);
-  const resetToday = new Date(date);
-  resetToday.setHours(hours, minutes, 0, 0);
-  if (date < resetToday) businessDate.setDate(businessDate.getDate() - 1);
-  const tzOffset = businessDate.getTimezoneOffset() * 60000;
-  return new Date(businessDate.getTime() - tzOffset).toISOString().slice(0, 10);
+  return getBusinessDate(settings.dailyOrderResetTime || '04:00', settings.timezone || settings.timeZone || 'Asia/Kolkata');
 }
 
 async function nextVendorToken() {
@@ -704,16 +690,17 @@ async function nextVendorToken() {
 }
 
 async function nextDailyOrderMeta() {
-  const dailyResetTime = normalizedResetTime(settings.dailyOrderResetTime || '04:00');
-  const businessDate = businessDateFor(new Date(), dailyResetTime);
+  const dailyResetTime = normalizeResetTime(settings.dailyOrderResetTime || '04:00');
+  const businessTimezone = settings.timezone || settings.timeZone || 'Asia/Kolkata';
+  const businessDate = getBusinessDate(dailyResetTime, businessTimezone);
   const counterRef = doc(db, 'restaurants', restaurantId, 'counters', businessDate);
   const dailyOrderNo = await runTransaction(db, async transaction => {
     const counter = await transaction.get(counterRef);
     const next = Number(counter.exists() ? counter.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, businessTimezone, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
     return next;
   });
-  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, displayOrderNo: String(dailyOrderNo) };
+  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, businessTimezone, displayOrderNo: String(dailyOrderNo) };
 }
 
 function mergeItems(existing = [], incoming = []) {

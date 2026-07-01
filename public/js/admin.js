@@ -18,7 +18,7 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime } from "./common.js";
 
 /* =========================================================
    LOGIN / USER
@@ -986,35 +986,42 @@ function withEffectiveOrderTotals(order = {}) {
   return { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
 }
 
-function todayDateStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function restaurantTimezone() {
+  return restaurantSettings.timezone || restaurantSettings.timeZone || "Asia/Kolkata";
 }
 
-function normalizedResetTime(value = "04:00") {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || "")) ? String(value) : "04:00";
+function dailyResetTime() {
+  return normalizeResetTime(restaurantSettings.businessDayStartTime || restaurantSettings.dailyOrderResetTime || dailyOrderResetTimeFieldEl?.value || "04:00");
 }
 
-function businessDateFor(date = new Date(), resetTime = "04:00") {
-  const [hours, minutes] = normalizedResetTime(resetTime).split(":").map(Number);
-  const businessDate = new Date(date);
-  const resetToday = new Date(date);
-  resetToday.setHours(hours, minutes, 0, 0);
-  if (date < resetToday) businessDate.setDate(businessDate.getDate() - 1);
-  return `${businessDate.getFullYear()}-${String(businessDate.getMonth() + 1).padStart(2, "0")}-${String(businessDate.getDate()).padStart(2, "0")}`;
+function todayDateStr(date = new Date()) {
+  return getBusinessDate(dailyResetTime(), restaurantTimezone(), date);
+}
+
+function orderBusinessDate(order = {}) {
+  if (order.businessDate) return String(order.businessDate);
+  if (order.dailyOrderDate) return String(order.dailyOrderDate);
+  const date = orderCreatedDate(order);
+  return date ? todayDateStr(date) : "";
+}
+
+function timestampBusinessDate(value) {
+  const date = timestampToDate(value);
+  return date ? todayDateStr(date) : "";
 }
 
 async function nextDailyOrderMeta() {
-  const dailyResetTime = normalizedResetTime(restaurantSettings.dailyOrderResetTime || dailyOrderResetTimeFieldEl?.value || "04:00");
-  const businessDate = businessDateFor(new Date(), dailyResetTime);
+  const resetTime = dailyResetTime();
+  const timezone = restaurantTimezone();
+  const businessDate = getBusinessDate(resetTime, timezone);
   const counterRef = doc(db, "restaurants", restaurantId, "counters", businessDate);
   const dailyOrderNo = await runTransaction(db, async transaction => {
     const snap = await transaction.get(counterRef);
     const next = Number(snap.exists() ? snap.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
+    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime: resetTime, businessTimezone: timezone, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
     return next;
   });
-  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, displayOrderNo: String(dailyOrderNo) };
+  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime: resetTime, dailyOrderDate: businessDate, businessTimezone: timezone, displayOrderNo: String(dailyOrderNo) };
 }
 
 function timestampToDate(ts) {
@@ -1076,10 +1083,7 @@ function filterOrdersByDateRange(orders = [], startDate = null, endDate = null) 
 }
 
 function isOrderToday(order = {}) {
-  const date = orderCreatedDate(order);
-  if (!date) return false;
-  const { startOfDay, endOfDay } = getTodayRange();
-  return date >= startOfDay && date <= endOfDay;
+  return orderBusinessDate(order) === todayDateStr();
 }
 
 function isOrderActive(order = {}) {
@@ -1841,7 +1845,7 @@ async function loadSettings() {
     if (restaurantHelpNumberFieldEl) restaurantHelpNumberFieldEl.value = restaurantSettings.restaurantHelpNumber || "";
     if (restaurantSignatureMessageFieldEl) restaurantSignatureMessageFieldEl.value = restaurantSettings.restaurantSignatureMessage || "";
     if (billFooterMessageFieldEl) billFooterMessageFieldEl.value = restaurantSettings.billFooterMessage || "";
-    if (dailyOrderResetTimeFieldEl) dailyOrderResetTimeFieldEl.value = normalizedResetTime(restaurantSettings.dailyOrderResetTime || "04:00");
+    if (dailyOrderResetTimeFieldEl) dailyOrderResetTimeFieldEl.value = normalizeResetTime(restaurantSettings.dailyOrderResetTime || "04:00");
     if (showQrOnPaidBillsFieldEl) showQrOnPaidBillsFieldEl.checked = restaurantSettings.showQrOnPaidBills !== false;
     setLogoPreview(getRestaurantLogoUrl());
     if (kitchenWhatsAppFieldEl) kitchenWhatsAppFieldEl.value = restaurantSettings.kitchenWhatsApp || "";
@@ -1937,7 +1941,7 @@ async function saveSettings() {
       restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
       restaurantSignatureMessage: restaurantSignatureMessageFieldEl?.value.trim() || "",
       billFooterMessage: billFooterMessageFieldEl?.value.trim() || "",
-      dailyOrderResetTime: normalizedResetTime(dailyOrderResetTimeFieldEl?.value || "04:00"),
+      dailyOrderResetTime: normalizeResetTime(dailyOrderResetTimeFieldEl?.value || "04:00"),
       showQrOnPaidBills: showQrOnPaidBillsFieldEl?.checked !== false,
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
       backendUrl: getBackendBaseUrl(),
@@ -2578,7 +2582,7 @@ function renderInventoryReports(lowStock) {
     <div class="stat-card orange"><div class="stat-label">Low Stock</div><div class="stat-value">${lowStock.length}</div></div>
     <div class="stat-card blue"><div class="stat-label">Ingredients</div><div class="stat-value">${allInventoryItems.length}</div></div>`;
   const usage = new Map();
-  inventoryLogs.filter(log => log.type === "stock_out" && log.reason === "Completed order").forEach(log => {
+  inventoryLogs.filter(log => log.type === "stock_out" && log.reason === "Completed order" && timestampBusinessDate(log.createdAt || log.updatedAt) === todayDateStr()).forEach(log => {
     usage.set(log.itemName, (usage.get(log.itemName) || 0) + Number(log.quantity || 0));
   });
   if (inventoryMostUsedEl) inventoryMostUsedEl.innerHTML = usage.size ? [...usage.entries()].sort((a,b) => b[1] - a[1]).slice(0, 5).map(([name, quantity]) => `<div>${escapeHtml(name)}: <strong>${quantity}</strong></div>`).join("") : "No completed-order usage yet.";
@@ -2900,20 +2904,11 @@ function startInventoryListeners() {
    TABLES
 ========================================================= */
 function tableBusinessDayRange(now = new Date()) {
-  const resetTime = normalizedResetTime(restaurantSettings.businessDayStartTime || restaurantSettings.dailyOrderResetTime || "04:00");
-  const [hours, minutes] = resetTime.split(":").map(Number);
-  const start = new Date(now);
-  start.setHours(hours, minutes, 0, 0);
-  if (now < start) start.setDate(start.getDate() - 1);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  end.setMilliseconds(end.getMilliseconds() - 1);
-  return { start, end };
+  return { businessDate: todayDateStr(now) };
 }
 
 function orderInRange(order = {}, range = tableBusinessDayRange()) {
-  const date = orderCreatedDate(order);
-  return Boolean(date && date >= range.start && date <= range.end);
+  return orderBusinessDate(order) === range.businessDate;
 }
 
 function isTableOccupyingOrder(order = {}, range = tableBusinessDayRange()) {
@@ -4487,13 +4482,13 @@ function renderBestSelling(orders) {
 ========================================================= */
 function filterOrdersByReportType(type, date, month, year, startDate, endDate) {
   return allOrders.filter(order => {
-    const orderDate = orderCreatedDate(order);
-    if (!orderDate) return false;
-    const day = formatDateOnly(orderDate);
-    const orderMonth = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, "0")}`;
+    const day = orderBusinessDate(order);
+    if (!day) return false;
+    const orderMonth = day.slice(0, 7);
+    const orderYear = day.slice(0, 4);
     if (type === "daily") return !date || day === date;
     if (type === "monthly") return !month || orderMonth === month;
-    if (type === "yearly") return !year || orderDate.getFullYear() === Number(year);
+    if (type === "yearly") return !year || orderYear === String(year);
     if (type === "custom") return (!startDate || day >= startDate) && (!endDate || day <= endDate);
     return true;
   });
@@ -5281,7 +5276,7 @@ renderTableNumberOptions("01");
 bindOrderFilterButtons();
 if (reportDateEl && !reportDateEl.value) reportDateEl.value = todayDateStr();
 if (reportMonthEl && !reportMonthEl.value) reportMonthEl.value = todayDateStr().slice(0, 7);
-if (reportYearEl && !reportYearEl.value) reportYearEl.value = String(new Date().getFullYear());
+if (reportYearEl && !reportYearEl.value) reportYearEl.value = todayDateStr().slice(0, 4);
 
 startInitialLoadTimeout("Admin Dashboard");
 try {

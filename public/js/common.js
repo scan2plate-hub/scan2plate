@@ -84,6 +84,63 @@ export function calculateOrderTotals(items = [], settings = {}, order = {}) {
   return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax, taxPercent };
 }
 
+export function normalizeResetTime(value = "04:00") {
+  const raw = String(value || "").trim();
+  const twelveHour = raw.match(/^(\d{1,2})(?::([0-5]\d))?\s*(AM|PM)$/i);
+  if (twelveHour) {
+    let hours = Number(twelveHour[1]);
+    const minutes = twelveHour[2] || "00";
+    const meridian = twelveHour[3].toUpperCase();
+    if (hours < 1 || hours > 12) return "04:00";
+    if (meridian === "AM") hours = hours === 12 ? 0 : hours;
+    if (meridian === "PM") hours = hours === 12 ? 12 : hours + 12;
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+  const twentyFourHour = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (twentyFourHour) {
+    return `${String(Number(twentyFourHour[1])).padStart(2, "0")}:${twentyFourHour[2]}`;
+  }
+  return "04:00";
+}
+
+function timezoneParts(date = new Date(), timezone = "Asia/Kolkata") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone || "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second)
+  };
+}
+
+function ymdFromParts({ year, month, day }) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export function getBusinessDate(resetTime = "04:00", timezone = "Asia/Kolkata", date = new Date()) {
+  const [resetHour, resetMinute] = normalizeResetTime(resetTime).split(":").map(Number);
+  const parts = timezoneParts(date, timezone);
+  const currentMinutes = parts.hour * 60 + parts.minute;
+  const resetMinutes = resetHour * 60 + resetMinute;
+  if (currentMinutes >= resetMinutes) return ymdFromParts(parts);
+  const previousDayUtc = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - 1));
+  return previousDayUtc.toISOString().slice(0, 10);
+}
+
 const modulePermissions = {
   owner: "all",
   admin: "all",
