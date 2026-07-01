@@ -48,10 +48,40 @@ export function normalizeCustomerPhone(value = "") {
 export function isActiveUnpaidOrder(order = {}) {
   const status = String(order.status || "pending").toLowerCase();
   const payment = String(order.paymentStatus || "unpaid").toLowerCase();
-  const closed = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed", "delivered"]);
-  const active = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "customer_sitting", "bill_open"]);
-  if (order.billClosed === true || closed.has(status) || payment === "paid") return false;
-  return active.has(status) || payment === "unpaid";
+  const active = new Set(["pending", "accepted", "preparing", "ready"]);
+  if (order.billClosed === true || payment === "paid") return false;
+  return active.has(status);
+}
+
+export function taxPercentFromSettings(settings = {}) {
+  const tax = Number(settings.taxPercent || 0);
+  return Number.isFinite(tax) ? Math.max(0, tax) : 0;
+}
+
+export function taxPercentForOrder(order = {}, settings = {}) {
+  const snapshot = Number(order.taxPercentSnapshot);
+  return Number.isFinite(snapshot) ? Math.max(0, snapshot) : taxPercentFromSettings(settings);
+}
+
+export function orderItemTotal(item = {}) {
+  const qty = Number(item.qty ?? item.quantity);
+  const price = Number(item.price ?? item.unitPrice);
+  if (Number.isFinite(qty) && Number.isFinite(price)) return price * qty;
+  return Number(item.total || 0);
+}
+
+export function calculateOrderTotals(items = [], settings = {}, order = {}) {
+  const itemsTotal = (items || []).reduce((sum, item) => sum + orderItemTotal(item), 0);
+  const rawType = String(order.discountType || "").toLowerCase();
+  const rawValue = Number(order.discountValue || 0);
+  let discountAmount = Number(order.discountAmount || 0);
+  if (rawType === "flat") discountAmount = Math.min(itemsTotal, Math.max(0, rawValue));
+  if (rawType === "percent") discountAmount = itemsTotal * Math.min(100, Math.max(0, rawValue)) / 100;
+  discountAmount = Math.min(itemsTotal, Math.max(0, discountAmount));
+  const taxableAmount = Math.max(0, itemsTotal - discountAmount);
+  const taxPercent = taxPercentForOrder(order, settings);
+  const tax = taxableAmount * (taxPercent / 100);
+  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax, taxPercent };
 }
 
 const modulePermissions = {

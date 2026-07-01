@@ -18,7 +18,7 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings } from "./common.js";
 
 /* =========================================================
    LOGIN / USER
@@ -967,6 +967,15 @@ function downloadMenuExcelFormat() {
 
 function getTaxPercent() {
   return Number(restaurantSettings.taxPercent || 0);
+}
+
+function effectiveOrderTotals(order = {}) {
+  return calculateOrderTotals(order.items || [], restaurantSettings, order);
+}
+
+function withEffectiveOrderTotals(order = {}) {
+  const totals = effectiveOrderTotals(order);
+  return { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
 }
 
 function todayDateStr() {
@@ -3431,6 +3440,7 @@ function fillKotPreviewFromCart(orderId = "") {
 }
 
 function fillBillPreview(order) {
+  order = withEffectiveOrderTotals(order);
   currentBillOrder = order;
   const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
   const address = addressFieldEl?.value.trim() || restaurantSettings.address || "";
@@ -3563,6 +3573,7 @@ function thermalBillItemRows(items = []) {
 }
 
 function buildThermalBillHtml(order, qrDataUrl = "") {
+  order = withEffectiveOrderTotals(order);
   const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
   const address = addressFieldEl?.value.trim() || restaurantSettings.address || "";
   const phone = phoneFieldEl?.value.trim() || restaurantSettings.phone || "";
@@ -3685,6 +3696,7 @@ async function createManualBill() {
     if (!manualCart.length) return alert("Select at least one menu item.");
 
     const { itemsTotal, subtotal, discountAmount, taxableAmount, tax, grandTotal } = renderManualTotals();
+    const taxPercentSnapshot = taxPercentFromSettings(restaurantSettings);
     let cartItems = manualCartPayload();
     if (editingOrderDocId) {
       const batchId = `ADDON${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
@@ -3725,6 +3737,7 @@ async function createManualBill() {
         paymentMethod,
         grandTotal,
         tax,
+        taxPercentSnapshot: Number.isFinite(Number(oldData.taxPercentSnapshot)) ? Number(oldData.taxPercentSnapshot) : taxPercentSnapshot,
         itemsTotal,
         subtotal,
         taxableAmount,
@@ -3773,6 +3786,7 @@ async function createManualBill() {
         paymentMethod,
         grandTotal,
         tax,
+        taxPercentSnapshot,
         itemsTotal,
         subtotal,
         taxableAmount,
@@ -3951,7 +3965,8 @@ async function updatePaymentStatus(orderDocId, status, selectedMethod = "cash") 
     if (!snap.exists()) return alert("Order not found.");
 
     const data = snap.data();
-    const grandTotal = Number(data.grandTotal || 0);
+    const effective = withEffectiveOrderTotals(data);
+    const grandTotal = Number(effective.grandTotal || 0);
     const currentStatus = String(data.status || "").toLowerCase();
 
     const payload = {
@@ -4431,11 +4446,12 @@ function getFilteredReportOrders() {
 }
 
 function renderReportSummary(filteredOrders) {
-  const grossSales = filteredOrders.reduce((sum, order) => sum + Number(order.itemsTotal || order.subtotal || order.grandTotal || 0), 0);
-  const totalDiscounts = filteredOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
-  const totalSales = filteredOrders.reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
+  const effectiveOrders = filteredOrders.map(withEffectiveOrderTotals);
+  const grossSales = effectiveOrders.reduce((sum, order) => sum + Number(order.itemsTotal || order.subtotal || order.grandTotal || 0), 0);
+  const totalDiscounts = effectiveOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
+  const totalSales = effectiveOrders.reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
   const paidOrders = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid");
-  const paidSales = paidOrders.reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
+  const paidSales = paidOrders.map(withEffectiveOrderTotals).reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
   const unpaidOrders = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() !== "paid");
   const completed = filteredOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase())).length;
   const cancelled = filteredOrders.filter(order => ["cancelled", "rejected"].includes(String(order.status || "").toLowerCase())).length;
@@ -4450,10 +4466,10 @@ function renderReportSummary(filteredOrders) {
 }
 
 function renderPaymentBreakdown(filteredOrders) {
-  const paid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid");
+  const paid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid").map(withEffectiveOrderTotals);
   const amountFor = test => paid.filter(order => test(String(order.paymentMethod || "cash").toLowerCase())).reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
-  const unpaid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() !== "paid").reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
-  const discountTotal = filteredOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
+  const unpaid = filteredOrders.filter(order => String(order.paymentStatus || "").toLowerCase() !== "paid").map(withEffectiveOrderTotals).reduce((sum, order) => sum + Number(order.grandTotal || 0), 0);
+  const discountTotal = filteredOrders.map(withEffectiveOrderTotals).reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
   reportPaymentBreakdownEl.innerHTML = [["Cash Sales", amountFor(method => method === "cash")], ["UPI Sales", amountFor(method => method === "upi" || method.includes("upi"))], ["Card Sales", amountFor(method => method.includes("card"))], ["Total Discounts", discountTotal], ["Unpaid Amount", unpaid]].map(([label, value]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);"><span>${label}</span><strong>${money(value)}</strong></div>`).join("");
 }
 
@@ -4475,7 +4491,8 @@ function renderTableWiseReport(filteredOrders) {
   filteredOrders.forEach(order => {
     const table = order.tableNo || "-";
     const current = tables.get(table) || { count: 0, sales: 0 };
-    current.count += 1; current.sales += Number(order.grandTotal || 0); tables.set(table, current);
+    const effective = withEffectiveOrderTotals(order);
+    current.count += 1; current.sales += Number(effective.grandTotal || 0); tables.set(table, current);
   });
   reportTableWiseEl.innerHTML = tables.size ? [...tables.entries()].sort((a,b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true })).map(([table, values]) => `<tr><td>${escapeHtml(table)}</td><td>${values.count}</td><td>${money(values.sales)}</td></tr>`).join("") : `<tr><td colspan="3" class="muted">No table orders found for this period.</td></tr>`;
 }
@@ -4486,7 +4503,7 @@ function renderReportRows(filteredOrders = getFilteredReportOrders()) {
   renderPaymentBreakdown(filteredOrders);
   renderBestSellingReport(filteredOrders);
   renderTableWiseReport(filteredOrders);
-  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(order => `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`; }).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
   reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
 }
 
@@ -4498,7 +4515,7 @@ function reportLabel() {
 }
 
 function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
-  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(order => [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)])];
+  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)]; })];
   const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));

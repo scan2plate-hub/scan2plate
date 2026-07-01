@@ -86,7 +86,7 @@ loadBtn?.addEventListener("click", async () => {
         <div>
           <div><strong>Restaurant ID:</strong> ${escapeHtml(restaurantId)}</div>
           <div><strong>UPI ID:</strong> ${escapeHtml(settings.upiId || "-")}</div>
-          <div><strong>Tax %:</strong> ${escapeHtml(String(settings.taxPercent ?? 5))}</div>
+          <div><strong>Tax %:</strong> ${escapeHtml(String(settings.taxPercent ?? 0))}</div>
           <div><strong>Kitchen WhatsApp:</strong> ${escapeHtml(settings.kitchenWhatsApp || "-")}</div>
         </div>
       </div>

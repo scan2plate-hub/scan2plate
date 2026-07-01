@@ -8,6 +8,7 @@ import {
   query,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { calculateOrderTotals } from "./common.js";
 
 const searchInput = document.getElementById("searchInput");
 const trackBtn = document.getElementById("trackBtn");
@@ -17,7 +18,7 @@ const stickyHelpBtn = document.getElementById("stickyHelpBtn");
 
 let unsubscribeOrder = null;
 let currentOrder = null;
-let restaurantDetails = { id: null, name: "Restaurant", phone: "" };
+let restaurantDetails = { id: null, name: "Restaurant", phone: "", taxPercent: 0 };
 
 function escapeHtml(value = "") {
   return String(value)
@@ -125,7 +126,7 @@ function paymentHtml(order) {
 function orderIsActiveForAddon(order = {}) {
   const status = String(order.status || "pending").toLowerCase();
   const payment = String(order.paymentStatus || "unpaid").toLowerCase();
-  return payment !== "paid" && !["completed", "closed", "cancelled", "rejected", "delivered"].includes(status);
+  return payment !== "paid" && ["pending", "accepted", "preparing", "ready"].includes(status);
 }
 
 function orderMenuUrl(order = {}) {
@@ -137,6 +138,8 @@ function orderMenuUrl(order = {}) {
 }
 
 function render(order) {
+  const totals = calculateOrderTotals(order.items || [], restaurantDetails, order);
+  order = { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
   currentOrder = order;
   const items = Array.isArray(order.items) ? order.items : [];
   const status = normalStatus(order.status);
@@ -223,7 +226,7 @@ function stopTracking() {
 
 async function loadRestaurantDetails(restaurantId) {
   if (!restaurantId || restaurantDetails.id === restaurantId) return;
-  restaurantDetails = { id: restaurantId, name: "Restaurant", phone: "" };
+  restaurantDetails = { id: restaurantId, name: "Restaurant", phone: "", taxPercent: 0 };
   try {
     const settings = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
     const root = await getDoc(doc(db, "restaurants", restaurantId));
@@ -232,9 +235,11 @@ async function loadRestaurantDetails(restaurantId) {
       const data = settings.data();
       restaurantDetails.name = data.restaurantName || rootData.restaurantName || restaurantDetails.name;
       restaurantDetails.phone = preferredRestaurantContact(data) || preferredRestaurantContact(rootData);
+      restaurantDetails.taxPercent = Number(data.taxPercent || 0);
     } else {
       restaurantDetails.name = rootData.restaurantName || restaurantDetails.name;
       restaurantDetails.phone = preferredRestaurantContact(rootData);
+      restaurantDetails.taxPercent = Number(rootData.taxPercent || 0);
     }
   } catch (error) {
     console.warn("Restaurant contact could not load:", error);

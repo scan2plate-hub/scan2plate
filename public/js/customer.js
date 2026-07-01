@@ -25,7 +25,10 @@ import {
   getBackendBaseUrl,
   getRestaurantIdFromUrlOrStorage,
   normalizeCustomerPhone,
-  isActiveUnpaidOrder
+  isActiveUnpaidOrder,
+  taxPercentFromSettings,
+  calculateOrderTotals,
+  orderItemTotal
 } from './common.js';
 
 const landingHero = qs('#landingHero');
@@ -60,7 +63,7 @@ const addonOrderIdParam = getParam('addToOrder');
 
 let settings = {
   restaurantName: 'Restaurant',
-  taxPercent: 5,
+  taxPercent: 0,
   kitchenWhatsApp: '',
   phone: '',
   backendUrl: '',
@@ -83,6 +86,7 @@ let activeCategory = 'All';
 let cart = readLocal(`scan2plate_cart_${restaurantId}_${tableNo}`, []);
 let customerLoadDone = false;
 let customerLoadTimer = null;
+let activeOpenOrderDoc = null;
 
 function ensureMenuFilters() {
   if (!categoryChips || foodTypeFilter) return;
@@ -155,7 +159,7 @@ if (restaurantId) {
   startCustomerLoadTimeout();
   try {
     await loadSettings();
-    if (await validateTableAvailability()) {
+    if (await showActiveOrderLandingIfNeeded() && await validateTableAvailability()) {
       await loadMenu();
       renderCart();
     }
@@ -223,6 +227,78 @@ async function findActiveTableOrderForPhone(phone = '') {
   if (submittedPhone && existingPhone === submittedPhone) return { orderDoc: active, blocked: false };
   await auditLog('table_blocked_different_phone', { tableNo, existingPhoneMasked: existingPhone ? `******${existingPhone.slice(-4)}` : '', submittedPhoneMasked: submittedPhone ? `******${submittedPhone.slice(-4)}` : '' });
   return { orderDoc: active, blocked: true, message: 'This table already has an open bill. Please choose another table or contact staff.' };
+}
+
+async function findActiveTableOrder() {
+  if (isVendorMode()) return null;
+  const snap = await activeTableOrdersSnapshot();
+  return snap.docs
+    .filter(d => String(d.data().tableNo || d.data().tableNumber || '').padStart(2, '0') === String(tableNo).padStart(2, '0'))
+    .filter(d => isActiveUnpaidOrder(d.data()))
+    .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0))[0] || null;
+}
+
+async function findActiveOrderByPublicId(publicOrderId = '') {
+  const clean = String(publicOrderId || '').trim();
+  if (!clean) return null;
+  const snap = await activeTableOrdersSnapshot();
+  return snap.docs.find(d => d.id === clean || String(d.data().orderId || '') === clean) || null;
+}
+
+function activeOrderMenuUrl(order = {}) {
+  const params = new URLSearchParams();
+  params.set('restaurantId', restaurantId);
+  params.set('table', tableNo);
+  params.set('addToOrder', order.orderId || activeOpenOrderDoc?.id || '');
+  return `./index.html?${params.toString()}`;
+}
+
+function showActiveOrderScreen(orderDoc) {
+  const order = orderDoc.data();
+  activeOpenOrderDoc = orderDoc;
+  const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.qty || item.quantity || 0), 0);
+  const panel = document.createElement('section');
+  panel.className = 'card';
+  panel.style.cssText = 'max-width:640px;margin:20px auto;padding:24px;text-align:center;';
+  panel.innerHTML = `
+    <h2 style="margin:0 0 8px">Order already active on this table</h2>
+    <p class="muted" style="line-height:1.6;margin:0 0 18px">You can track your order or add more items to the same bill.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 auto 16px;max-width:420px;text-align:left">
+      <div><span class="muted small">Table</span><br><strong>${escapeHtml(tableNo)}</strong></div>
+      <div><span class="muted small">Items</span><br><strong>${itemCount}</strong></div>
+      <div><span class="muted small">Current bill</span><br><strong>${fmtCurrency(order.grandTotal || 0)}</strong></div>
+      <div><span class="muted small">Status</span><br><strong>${escapeHtml(order.status || 'pending')}</strong></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <a class="btn btn-outline" href="./track.html?orderId=${encodeURIComponent(order.orderId || orderDoc.id)}">Track My Order</a>
+      <a class="btn btn-primary" href="${escapeHtml(activeOrderMenuUrl(order))}">Add More Items</a>
+    </div>
+    <p class="muted small" style="margin:14px 0 0">New items will be added to your current unpaid bill.</p>
+  `;
+  customerApp?.prepend(panel);
+  menuGrid?.closest('.card')?.classList.add('hidden');
+  categoryChips?.classList.add('hidden');
+  getOrderSectionCard()?.classList.add('hidden');
+}
+
+async function showActiveOrderLandingIfNeeded() {
+  if (isVendorMode()) return true;
+  if (addonOrderIdParam) {
+    activeOpenOrderDoc = await findActiveOrderByPublicId(addonOrderIdParam);
+    if (!activeOpenOrderDoc) activeOpenOrderDoc = await findActiveTableOrder();
+    if (activeOpenOrderDoc?.data && placeOrderBtn) {
+      placeOrderBtn.textContent = 'Add to Existing Bill';
+      const active = activeOpenOrderDoc.data();
+      if (customerName && active.customerName && !customerName.value.trim()) customerName.value = active.customerName;
+      const phone = normalizeCustomerPhone(active.customerPhone || '');
+      if (customerPhone && phone && !customerPhone.value.trim()) customerPhone.value = phone;
+    }
+    return true;
+  }
+  const active = await findActiveTableOrder();
+  if (!active) return true;
+  showActiveOrderScreen(active);
+  return false;
 }
 
 function getOrderSectionCard() {
@@ -572,17 +648,22 @@ function renderCart() {
   });
 
   const itemsTotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
-  const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
-  const grand = itemsTotal + tax;
+  const totals = calculateOrderTotals(cart, settings, {});
 
   if (itemsTotalEl) itemsTotalEl.textContent = fmtCurrency(itemsTotal);
-  if (taxTotalEl) taxTotalEl.textContent = fmtCurrency(tax);
-  if (grandTotalEl) grandTotalEl.textContent = fmtCurrency(grand);
+  if (taxTotalEl) taxTotalEl.textContent = fmtCurrency(totals.tax);
+  if (grandTotalEl) grandTotalEl.textContent = fmtCurrency(totals.grandTotal);
 }
 
 async function findOpenOrder() {
   // Each vendor checkout is a new counter token, never an update to a prior order.
   if (isVendorMode()) return null;
+  if (addonOrderIdParam) {
+    activeOpenOrderDoc = activeOpenOrderDoc || await findActiveOrderByPublicId(addonOrderIdParam) || await findActiveTableOrder();
+    if (!activeOpenOrderDoc) throw new Error('Active order not found. Please scan the table QR again.');
+    if (!isActiveUnpaidOrder(activeOpenOrderDoc.data())) throw new Error('This order is already closed. Please start a new order with restaurant staff.');
+    return activeOpenOrderDoc;
+  }
   if (!customerPhone?.value.trim()) return null;
 
   const { orderDoc, blocked, message } = await findActiveTableOrderForPhone(customerPhone.value);
@@ -654,10 +735,6 @@ function addonBatchId() {
   return `ADDON${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function orderItemTotal(item = {}) {
-  return Number(item.total ?? (Number(item.price || 0) * Number(item.qty || item.quantity || 0)));
-}
-
 function toAddonItems(items = [], addedFrom = 'customer') {
   const batchId = addonBatchId();
   const addedAt = new Date().toISOString();
@@ -681,16 +758,7 @@ function toAddonItems(items = [], addedFrom = 'customer') {
 }
 
 function recalculateTotals(items = [], discount = {}) {
-  const itemsTotal = items.reduce((s, x) => s + Number(x.price || 0) * Number(x.qty || x.quantity || 0), 0);
-  const rawType = String(discount.discountType || '').toLowerCase();
-  const rawValue = Number(discount.discountValue || 0);
-  let discountAmount = Number(discount.discountAmount || 0);
-  if (rawType === 'flat') discountAmount = Math.min(itemsTotal, Math.max(0, rawValue));
-  if (rawType === 'percent') discountAmount = itemsTotal * Math.min(100, Math.max(0, rawValue)) / 100;
-  discountAmount = Math.min(itemsTotal, Math.max(0, discountAmount));
-  const taxableAmount = Math.max(0, itemsTotal - discountAmount);
-  const tax = taxableAmount * (Number(settings.taxPercent || 0) / 100);
-  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax };
+  return calculateOrderTotals(items, settings, discount);
 }
 
 function toRadians(value) {
@@ -808,6 +876,7 @@ async function placeOrder() {
       const addonItems = toAddonItems(cart, 'customer');
       const items = [...(current.items || []), ...addonItems];
       const totals = recalculateTotals(items, current);
+      const taxPercentSnapshot = Number.isFinite(Number(current.taxPercentSnapshot)) ? Number(current.taxPercentSnapshot) : taxPercentFromSettings(settings);
       const newlyAddedItemsText = addonItems.map(i => `${itemDisplayName(i)} x${Number(i.qty || i.quantity || 0)}`).join(', ');
 
       orderId = current.orderId;
@@ -825,6 +894,7 @@ async function placeOrder() {
         taxableAmount: totals.taxableAmount,
         tax: totals.tax,
         grandTotal: totals.grandTotal,
+        taxPercentSnapshot,
         status: current.status || 'pending',
         etaMinutes,
         hasNewItems: true,
@@ -855,9 +925,7 @@ async function placeOrder() {
     } else {
       orderId = uid('ORD');
 
-      const itemsTotal = cart.reduce((s, x) => s + x.price * x.qty, 0);
-      const tax = itemsTotal * (Number(settings.taxPercent || 0) / 100);
-      const grandTotal = itemsTotal + tax;
+      const totals = calculateOrderTotals(cart, settings, {});
 
       const vendorToken = isVendorMode() ? await nextVendorToken() : { tokenDate: null, tokenNumber: null };
       createdTokenNumber = vendorToken.tokenNumber;
@@ -880,12 +948,13 @@ async function placeOrder() {
         note: noteVal,
         whatsappConsent: whatsappConsent ? whatsappConsent.checked : true,
         items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: orderItemTotal(item), isAddon: false, isNewAddon: false, seenByKitchen: true })),
-        itemsTotal,
-        subtotal: itemsTotal,
+        itemsTotal: totals.itemsTotal,
+        subtotal: totals.subtotal,
         discountAmount: 0,
-        taxableAmount: itemsTotal,
-        tax,
-        grandTotal,
+        taxableAmount: totals.taxableAmount,
+        tax: totals.tax,
+        grandTotal: totals.grandTotal,
+        taxPercentSnapshot: taxPercentFromSettings(settings),
         status: 'pending',
         paymentStatus: 'unpaid',
         source: 'qr-order',
@@ -908,7 +977,7 @@ async function placeOrder() {
         customerPhone: whatsappConsent?.checked ? fullPhone : '',
         kitchenPhone: settings.kitchenWhatsApp || '',
         items: cart,
-        grandTotal,
+        grandTotal: totals.grandTotal,
         status: 'pending',
         etaMinutes,
         billUrl: `${location.origin}/bill.html?orderId=${encodeURIComponent(orderId)}`

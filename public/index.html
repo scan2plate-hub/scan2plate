@@ -1267,6 +1267,7 @@ import {
     params.get("t") ||
     "01"
   ).trim() || "01";
+  const addToOrderParam = (params.get("addToOrder") || "").trim();
 
   const landingPage = document.getElementById("landingPage");
     const customerPage = document.getElementById("customerPage");
@@ -1298,10 +1299,9 @@ import {
   function isActiveUnpaidOrder(order = {}) {
     const status = String(order.status || "pending").toLowerCase();
     const payment = String(order.paymentStatus || "unpaid").toLowerCase();
-    const closed = new Set(["paid", "completed", "closed", "cancelled", "rejected", "bill_closed", "delivered"]);
-    const active = new Set(["new", "pending", "accepted", "preparing", "ready", "served", "unpaid", "bill_open", "customer_sitting"]);
-    if (order.billClosed === true || closed.has(status) || payment === "paid") return false;
-    return active.has(status) || payment === "unpaid";
+    const active = new Set(["pending", "accepted", "preparing", "ready"]);
+    if (order.billClosed === true || payment === "paid") return false;
+    return active.has(status);
   }
 
   function normalizedResetTime(value = "04:00") {
@@ -1383,7 +1383,7 @@ import {
     let menu = [];
     let activeCategory = "All";
     let cart = [];
-    let taxPercent = 5;
+    let taxPercent = 0;
     let tokenMode = false;
     let activeOpenOrderDoc = null;
     let addMoreMode = false;
@@ -1414,6 +1414,24 @@ import {
       return { orderDoc: active, blocked: true, message: "This table already has an open bill. Please choose another table or contact staff." };
     }
 
+    async function findActiveTableOrder() {
+      if (tokenMode) return null;
+      const snap = await getDocs(collection(db, "orders"));
+      return snap.docs
+        .filter(d => String(d.data().restaurantId || "") === restaurantId)
+        .filter(d => String(d.data().tableNo || d.data().tableNumber || "").padStart(2, "0") === String(table).padStart(2, "0"))
+        .filter(d => isActiveUnpaidOrder(d.data()))
+        .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0))[0] || null;
+    }
+
+    async function findActiveOrderByPublicId(publicOrderId = "") {
+      const clean = String(publicOrderId || "").trim();
+      if (!clean) return null;
+      const active = await findActiveTableOrder();
+      if (active && (active.id === clean || String(active.data().orderId || "") === clean)) return active;
+      return active || null;
+    }
+
     function showOrderGrid() {
       openBillPanel.classList.add("hidden");
       orderGrid?.classList.remove("hidden");
@@ -1438,7 +1456,7 @@ import {
         </div>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
           <a class="btn btn-outline" href="./track.html?orderId=${encodeURIComponent(order.orderId || orderDoc.id)}">Track My Order</a>
-          <button id="startAddMoreBtn" class="btn btn-dark" type="button">Add More Items</button>
+          <a id="startAddMoreBtn" class="btn btn-dark" href="./index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(table)}&addToOrder=${encodeURIComponent(order.orderId || orderDoc.id)}">Add More Items</a>
         </div>
         <p class="muted small" style="margin:14px 0 0">New items will be added to your current bill.</p>
       `;
@@ -1520,7 +1538,7 @@ import {
           const hasExplicitOrderMode = Boolean(restaurantPlanData.orderMode || data.orderMode);
           tokenMode = String(resolvedOrderMode).toLowerCase() === "token" || (!hasExplicitOrderMode && String(data.businessMode || restaurantPlanData.businessMode || "").toLowerCase() === "vendor");
           restaurantTitle.textContent = `${data.restaurantName || "Restaurant"} Menu`;
-          taxPercent = Number(data.taxPercent || 5);
+          taxPercent = Number(data.taxPercent || 0);
           restaurantLocationSettings = {
             restaurantLat: data.restaurantLat ?? null,
             restaurantLng: data.restaurantLng ?? null,
@@ -1540,6 +1558,13 @@ import {
         if (tokenMode) {
           tableNoText.textContent = "Pickup Token";
           tableNoText.parentElement.firstChild.textContent = "Order: ";
+        } else if (addToOrderParam) {
+          activeOpenOrderDoc = await findActiveOrderByPublicId(addToOrderParam);
+          addMoreMode = Boolean(activeOpenOrderDoc);
+          if (activeOpenOrderDoc) placeOrderBtn.textContent = "Add to Existing Bill";
+        } else {
+          const activeOrder = await findActiveTableOrder();
+          if (activeOrder) showOpenBillChoice(activeOrder);
         }
       } catch (e) {
         restaurantTitle.textContent = "Restaurant Menu";
@@ -1818,7 +1843,7 @@ import {
       }
 
       const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
-      const tax = itemsTotal * (taxPercent / 100);
+      const tax = itemsTotal * (Number(taxPercent || 0) / 100);
       const grand = itemsTotal + tax;
 
       itemsTotalEl.textContent = money(itemsTotal);
@@ -1865,8 +1890,9 @@ import {
       if (rawType === "percent") discountAmount = itemsTotal * Math.min(100, Math.max(0, rawValue)) / 100;
       discountAmount = Math.min(itemsTotal, Math.max(0, discountAmount));
       const taxableAmount = Math.max(0, itemsTotal - discountAmount);
-      const tax = taxableAmount * (taxPercent / 100);
-      return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax };
+      const taxPercentForOrder = Number.isFinite(Number(existingOrder.taxPercentSnapshot)) ? Number(existingOrder.taxPercentSnapshot) : Number(taxPercent || 0);
+      const tax = taxableAmount * (taxPercentForOrder / 100);
+      return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal: taxableAmount + tax, taxPercent: taxPercentForOrder };
     }
 
     clearCartBtn.onclick = () => {
@@ -1983,7 +2009,11 @@ import {
         if (!locationCheck.ok) return;
 
         const { ok, ...locationProof } = locationCheck;
-        const openBill = tokenMode ? { orderDoc: null, blocked: false } : await findActiveTableOrderForPhone(customerPhone.value);
+        let openBill = tokenMode ? { orderDoc: null, blocked: false } : await findActiveTableOrderForPhone(customerPhone.value);
+        if (!openBill.orderDoc && addMoreMode) {
+          activeOpenOrderDoc = activeOpenOrderDoc || await findActiveOrderByPublicId(addToOrderParam) || await findActiveTableOrder();
+          openBill = { orderDoc: activeOpenOrderDoc, blocked: false };
+        }
         if (openBill.blocked) {
           showBlockedTable(openBill.message, openBill.noPhone);
           return;
@@ -1995,6 +2025,7 @@ import {
           const addonItems = addonItemsFromCart(cart, "customer");
           const items = [...(current.items || []), ...addonItems];
           const totals = totalsForItems(items, current);
+          const taxPercentSnapshot = Number.isFinite(Number(current.taxPercentSnapshot)) ? Number(current.taxPercentSnapshot) : Number(totals.taxPercent || taxPercent || 0);
           const newlyAddedItemsText = addonItems.map(item => `${itemDisplayName(item)} x${Number(item.qty || item.quantity || 0)}`).join(", ");
           const orderId = current.orderId || orderDoc.id;
 
@@ -2009,6 +2040,7 @@ import {
             taxableAmount: totals.taxableAmount,
             tax: totals.tax,
             grandTotal: totals.grandTotal,
+            taxPercentSnapshot,
             status: current.status || "pending",
             paymentStatus: current.paymentStatus || "unpaid",
             hasNewItems: true,
@@ -2035,7 +2067,7 @@ import {
         }
 
         const itemsTotal = cart.reduce((sum, x) => sum + x.price * x.qty, 0);
-        const tax = itemsTotal * (taxPercent / 100);
+        const tax = itemsTotal * (Number(taxPercent || 0) / 100);
         const grandTotal = itemsTotal + tax;
         const orderId = "ORD" + Date.now();
         const dailyOrder = await nextDailyOrderMeta(restaurantPlanData);
@@ -2067,8 +2099,11 @@ import {
           note: customerNote.value.trim(),
           items: cart.map(item => ({ ...item, quantity: Number(item.quantity || item.qty || 0), total: itemTotal(item), isAddon: false, isNewAddon: false, seenByKitchen: true })),
           itemsTotal,
+          subtotal: itemsTotal,
+          taxableAmount: itemsTotal,
           tax,
           grandTotal,
+          taxPercentSnapshot: Number(taxPercent || 0),
           status: "pending",
           paymentStatus: "unpaid",
           paymentMethod: "cash",

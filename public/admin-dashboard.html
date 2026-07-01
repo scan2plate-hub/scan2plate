@@ -500,6 +500,13 @@
     .kot-details div{display:flex;justify-content:space-between;gap:10px;margin-bottom:3px}
     .kot-items{border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:9px 0}
     .kot-item{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+    .thermal-bill-head,.thermal-item-row{display:grid;grid-template-columns:minmax(0,1fr) 42px 78px;gap:8px;align-items:start}
+    .thermal-bill-head{font-weight:800;border-bottom:1px dashed #999;padding-bottom:5px;margin-bottom:6px}
+    .thermal-bill-head span:nth-child(2),.thermal-item-qty{text-align:center}
+    .thermal-bill-head span:nth-child(3),.thermal-item-amount{text-align:right}
+    .thermal-item-row{padding:5px 0;border-bottom:1px dotted #ddd}
+    .thermal-item-name{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+    .thermal-modifier-row{font-size:11px;color:var(--text-3)}
     .kot-footer{text-align:center;padding-top:11px;font-size:10px;color:var(--text-3)}
 
     /* ── EMPTY STATE ── */
@@ -1080,7 +1087,7 @@
               <div class="form-group"><label class="form-label">Order Mode</label><select class="form-input" id="orderModeField"><option value="table">Table Service Mode</option><option value="token">Token Mode</option><option value="hybrid">Hybrid Mode</option></select><div style="font-size:11px;color:#6b7280;margin-top:4px;">Missing values remain Table Service Mode for existing restaurants.</div></div>
               <div class="form-row">
                 <div class="form-group"><label class="form-label">Phone Number</label><input class="form-input" id="phoneField" placeholder="+91..." /></div>
-                <div class="form-group"><label class="form-label">Tax %</label><input class="form-input" id="taxField" type="number" placeholder="5" /></div>
+                <div class="form-group"><label class="form-label">Tax %</label><input class="form-input" id="taxField" type="number" placeholder="0" /></div>
               </div>
               <div class="form-group">
                 <label class="form-label">GST Number (GSTIN)</label>

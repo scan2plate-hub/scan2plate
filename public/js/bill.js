@@ -10,7 +10,8 @@ import {
   getParam,
   fmtCurrency,
   nowStr,
-  escapeHtml
+  escapeHtml,
+  calculateOrderTotals
 } from './common.js';
 
 const billRoot = qs('#billRoot');
@@ -78,6 +79,7 @@ async function load() {
 
     const settings = {
       restaurantName: 'Restaurant',
+      taxPercent: 0,
       upiId: '',
       phone: '',
       address: '',
@@ -85,8 +87,10 @@ async function load() {
       ...(root.exists() ? root.data() : {}),
       ...(scoped && scoped.exists() ? scoped.data() : {})
     };
+    const totals = calculateOrderTotals(order.items || [], settings, order);
+    const billOrder = { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
 
-    const upiLink = buildUpiLink(order, settings);
+    const upiLink = buildUpiLink(billOrder, settings);
 
     billRoot.innerHTML = `
       <div class="bill-header">
@@ -100,15 +104,15 @@ async function load() {
             <h1 style="margin:0">${escapeHtml(settings.restaurantName || 'Restaurant')}</h1>
             <div class="muted">${escapeHtml(settings.address || 'Add address in settings')}</div>
             <div class="muted">Phone: ${escapeHtml(settings.phone || '-')}</div>
-            <div class="muted">Order No: ${escapeHtml(order.displayOrderNo || order.dailyOrderNo || '-')}</div>
-            <div class="muted">Order ID: ${escapeHtml(order.orderId || '-')}</div>
-            <div class="muted">Date: ${nowStr(order.createdAt)}</div>
+            <div class="muted">Order No: ${escapeHtml(billOrder.displayOrderNo || billOrder.dailyOrderNo || '-')}</div>
+            <div class="muted">Order ID: ${escapeHtml(billOrder.orderId || '-')}</div>
+            <div class="muted">Date: ${nowStr(billOrder.createdAt)}</div>
           </div>
         </div>
 
         <div class="center">
-          <div class="status status-${order.paymentStatus === 'paid' ? 'served' : 'pending'}">
-            ${escapeHtml(order.paymentStatus || 'unpaid')}
+          <div class="status status-${billOrder.paymentStatus === 'paid' ? 'served' : 'pending'}">
+            ${escapeHtml(billOrder.paymentStatus || 'unpaid')}
           </div>
           <div style="margin-top:10px">
             <button class="btn btn-dark" onclick="window.print()">Print Bill</button>
@@ -119,16 +123,16 @@ async function load() {
       <div class="grid-2" style="margin-top:16px">
         <div>
           <strong>Customer</strong>
-          <div class="muted">${escapeHtml(order.customerName || '-')}</div>
-          <div class="muted">${escapeHtml(order.customerPhone || '-')}</div>
-          <div class="muted">Table ${escapeHtml(order.tableNo || '-')}</div>
+          <div class="muted">${escapeHtml(billOrder.customerName || '-')}</div>
+          <div class="muted">${escapeHtml(billOrder.customerPhone || '-')}</div>
+          <div class="muted">Table ${escapeHtml(billOrder.tableNo || '-')}</div>
         </div>
 
         <div>
           <strong>Status</strong>
-          <div class="muted">Order: ${escapeHtml(order.status || 'pending')}</div>
-          <div class="muted">Payment: ${escapeHtml(order.paymentStatus || 'unpaid')}</div>
-          <div class="muted">Source: ${escapeHtml(order.source || (order.isManualBill ? 'manual' : 'direct'))}</div>
+          <div class="muted">Order: ${escapeHtml(billOrder.status || 'pending')}</div>
+          <div class="muted">Payment: ${escapeHtml(billOrder.paymentStatus || 'unpaid')}</div>
+          <div class="muted">Source: ${escapeHtml(billOrder.source || (billOrder.isManualBill ? 'manual' : 'direct'))}</div>
         </div>
       </div>
 
@@ -142,7 +146,7 @@ async function load() {
           </tr>
         </thead>
         <tbody>
-          ${(order.items || []).map(i => `
+          ${(billOrder.items || []).map(i => `
             <tr>
               <td>${escapeHtml(itemDisplayName(i))}</td>
               <td>${Number(i.qty || 0)}</td>
@@ -163,9 +167,9 @@ async function load() {
         </div>
 
         <div class="card" style="background:#fafafa">
-          <div class="row"><span>Items Total</span><strong>${fmtCurrency(order.itemsTotal || 0)}</strong></div>
-          <div class="row"><span>Tax</span><strong>${fmtCurrency(order.tax || 0)}</strong></div>
-          <div class="row"><span>Grand Total</span><strong>${fmtCurrency(order.grandTotal || 0)}</strong></div>
+          <div class="row"><span>Items Total</span><strong>${fmtCurrency(billOrder.itemsTotal || 0)}</strong></div>
+          <div class="row"><span>Tax</span><strong>${fmtCurrency(billOrder.tax || 0)}</strong></div>
+          <div class="row"><span>Grand Total</span><strong>${fmtCurrency(billOrder.grandTotal || 0)}</strong></div>
         </div>
       </div>
     `;
