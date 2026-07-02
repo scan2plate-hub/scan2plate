@@ -18,7 +18,7 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, getSafeLogoUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -1201,8 +1201,108 @@ function waitForImageLoad(image, timeoutMs = 8000) {
   });
 }
 
-function waitForLogoLoad(image) {
-  return waitForImageLoad(image, 2000);
+function logoCacheKey() {
+  return `scan2plate_bill_logo_${restaurantId || "restaurant"}`;
+}
+
+function readCachedRestaurantLogo() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(logoCacheKey()) || "{}");
+    return cached && typeof cached === "object" ? cached : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedRestaurantLogo(sourceUrl, dataUrl) {
+  if (!sourceUrl || !dataUrl || !String(dataUrl).startsWith("data:image/")) return;
+  try {
+    localStorage.setItem(logoCacheKey(), JSON.stringify({ sourceUrl, dataUrl, cachedAt: Date.now() }));
+  } catch (error) {
+    console.warn("Restaurant logo cache skipped", error);
+  }
+}
+
+function clearCachedRestaurantLogo() {
+  try {
+    localStorage.removeItem(logoCacheKey());
+  } catch {}
+}
+
+function configuredRestaurantLogoUrl() {
+  return String(
+    restaurantSettings.uploadedLogoUrl ||
+    restaurantSettings.restaurantLogoUrl ||
+    restaurantSettings.logoUrl ||
+    ""
+  ).trim();
+}
+
+function cachedLogoForCurrentUrl() {
+  const cached = readCachedRestaurantLogo();
+  if (!cached.dataUrl) return "";
+  const logoUrl = configuredRestaurantLogoUrl();
+  return logoUrl && cached.sourceUrl === logoUrl ? cached.dataUrl : "";
+}
+
+async function imageUrlToDataUrl(url, timeoutMs = 3000) {
+  if (!url) return "";
+  if (String(url).startsWith("data:image/")) return url;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { mode: "cors", cache: "force-cache", signal: controller.signal });
+    if (!response.ok) throw new Error("Logo download failed");
+    const blob = await response.blob();
+    if (!String(blob.type || "").startsWith("image/")) throw new Error("Logo response is not an image");
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Logo conversion failed"));
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveBillLogoSource({ allowRemote = true } = {}) {
+  const uploadedLogoUrl = String(restaurantSettings.uploadedLogoUrl || restaurantSettings.restaurantLogoUrl || "").trim();
+  const logoUrl = String(restaurantSettings.logoUrl || "").trim();
+  const cachedLogo = cachedLogoForCurrentUrl();
+  const sourceUrl = uploadedLogoUrl || logoUrl;
+
+  if (!allowRemote) return cachedLogo || "";
+  if (!sourceUrl) return cachedLogo || "";
+
+  try {
+    const dataUrl = await imageUrlToDataUrl(sourceUrl, 3000);
+    if (dataUrl) {
+      writeCachedRestaurantLogo(sourceUrl, dataUrl);
+      return dataUrl;
+    }
+  } catch (error) {
+    console.warn("Restaurant logo not ready; using cached/text fallback", error);
+  }
+  return cachedLogo || "";
+}
+
+function applyBillLogoSource(src = "") {
+  if (!billLogoEl) return;
+  billLogoEl.onload = null;
+  billLogoEl.onerror = null;
+  if (!src) {
+    billLogoEl.style.display = "none";
+    billLogoEl.removeAttribute("src");
+    return;
+  }
+  billLogoEl.onerror = () => {
+    billLogoEl.onerror = null;
+    billLogoEl.style.display = "none";
+    billLogoEl.removeAttribute("src");
+  };
+  billLogoEl.src = src;
+  billLogoEl.style.display = "block";
 }
 
 async function billQrAsPngDataUrl() {
@@ -1228,7 +1328,7 @@ async function billQrAsPngDataUrl() {
 }
 
 function getRestaurantLogoUrl() {
-  return getSafeLogoUrl(restaurantSettings);
+  return configuredRestaurantLogoUrl();
 }
 
 function setLogoPreview(url = "") {
@@ -1255,6 +1355,7 @@ function markRestaurantLogoRemoved() {
     URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
     restaurantLogoPreviewObjectUrl = "";
   }
+  clearCachedRestaurantLogo();
   setLogoPreview("");
 }
 
@@ -1921,6 +2022,7 @@ async function saveSettings() {
     const logoUrlValue = logoFieldEl?.value.trim() || "";
     const existingUploadedLogo = restaurantSettings.restaurantLogoUrl || "";
     const existingLogoUrl = restaurantSettings.logoUrl || "";
+    const previousLogoUrl = configuredRestaurantLogoUrl();
     const finalUploadedLogoUrl = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || existingUploadedLogo);
     const finalStoragePath = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || "");
     const finalLogoUrl = restaurantLogoMarkedForRemoval
@@ -1936,6 +2038,7 @@ async function saveSettings() {
       phone: phoneFieldEl?.value.trim() || "",
       address: addressFieldEl?.value.trim() || "",
       logoUrl: finalLogoUrl,
+      uploadedLogoUrl: finalUploadedLogoUrl,
       restaurantLogoUrl: finalUploadedLogoUrl,
       restaurantLogoStoragePath: finalStoragePath,
       restaurantHelpNumber: restaurantHelpNumberFieldEl?.value.trim() || "",
@@ -1967,6 +2070,7 @@ async function saveSettings() {
           tableCount: payload.tableCount,
           dailyOrderResetTime: payload.dailyOrderResetTime,
           restaurantLogoUrl: payload.restaurantLogoUrl,
+          uploadedLogoUrl: payload.uploadedLogoUrl,
           restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
           logoUrl: payload.logoUrl,
           updatedAt: serverTimestamp()
@@ -1978,6 +2082,7 @@ async function saveSettings() {
     );
     console.log("[Settings Save] settings save success", { restaurantId });
     restaurantSettings = { ...restaurantSettings, ...payload };
+    if (restaurantLogoMarkedForRemoval || previousLogoUrl !== configuredRestaurantLogoUrl()) clearCachedRestaurantLogo();
     if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
     selectedRestaurantLogoFile = null;
     window.scan2plateSelectedRestaurantLogoFile = null;
@@ -3488,19 +3593,8 @@ function fillBillPreview(order) {
 
   if (billRestaurantNameEl) billRestaurantNameEl.textContent = restaurantName;
   if (billLogoEl) {
-    const logoUrl = getRestaurantLogoUrl();
-    if (logoUrl) {
-      billLogoEl.src = logoUrl;
-      billLogoEl.style.display = "block";
-      billLogoEl.onerror = () => {
-        billLogoEl.onerror = null;
-        billLogoEl.src = "./logo.PNG";
-        billLogoEl.style.display = "block";
-      };
-    } else {
-      billLogoEl.style.display = "none";
-      billLogoEl.removeAttribute("src");
-    }
+    applyBillLogoSource(cachedLogoForCurrentUrl());
+    resolveBillLogoSource().then(applyBillLogoSource).catch(() => applyBillLogoSource(""));
   }
   const gst = String(restaurantSettings.gstNumber || "").trim().toUpperCase();
 
@@ -3611,7 +3705,7 @@ function thermalBillItemRows(items = []) {
   }).join("");
 }
 
-function buildThermalBillHtml(order, qrDataUrl = "") {
+function buildThermalBillHtml(order, qrDataUrl = "", logoSrc = "") {
   order = withEffectiveOrderTotals(order);
   const restaurantName = restaurantFieldEl?.value.trim() || restaurantSettings.restaurantName || "Restaurant";
   const address = addressFieldEl?.value.trim() || restaurantSettings.address || "";
@@ -3619,7 +3713,6 @@ function buildThermalBillHtml(order, qrDataUrl = "") {
   const gst = String(restaurantSettings.gstNumber || "").trim().toUpperCase();
   const signature = String(restaurantSettings.restaurantSignatureMessage || "").trim();
   const footer = String(restaurantSettings.billFooterMessage || "Thank you for dining with us!").trim();
-  const logoUrl = getRestaurantLogoUrl();
   const isPaid = String(order.paymentStatus || "unpaid").toLowerCase() === "paid";
   const pm = String(order.paymentMethod || "cash").toLowerCase();
   const pmLabels = { cash: "Cash", upi: "UPI", debit_card: "Debit Card", credit_card: "Credit Card" };
@@ -3637,7 +3730,7 @@ function buildThermalBillHtml(order, qrDataUrl = "") {
     body{margin:0;padding:0;background:#fff;color:#000}
     .thermal-bill{width:72mm;margin:0 auto;padding:2mm;font-family:"Courier New",monospace,Arial,sans-serif;color:#000;background:#fff;font-size:12px;line-height:1.35;font-weight:600}
     .center{text-align:center}.right{text-align:right}.strong{font-weight:900}.muted{font-size:10.5px}
-    .bill-logo{width:18mm;max-height:15mm;object-fit:contain;display:block;margin:0 auto 1mm auto;image-rendering:crisp-edges;filter:grayscale(1) contrast(1.35)}
+    .bill-logo{width:auto;max-width:70px;max-height:70px;object-fit:contain;display:block;margin:0 auto 1mm auto;image-rendering:crisp-edges;filter:grayscale(1) contrast(1.35)}
     .bill-title{font-size:18px;font-weight:900;text-align:center;line-height:1.1;margin:1mm 0 0}
     .bill-signature{font-size:11px;text-align:center;font-style:italic;margin-top:1mm}
     .bill-meta-small{font-size:10.5px;text-align:center;overflow-wrap:anywhere}
@@ -3656,13 +3749,13 @@ function buildThermalBillHtml(order, qrDataUrl = "") {
     .upi-qr{width:42mm!important;height:42mm!important;padding:4mm!important;background:#fff!important;display:block;margin:2mm auto 1mm!important;object-fit:contain!important;image-rendering:pixelated;image-rendering:crisp-edges}
     .upi-details{font-size:9px;line-height:1.2;text-align:center;word-break:break-all;overflow-wrap:anywhere}
     .footer{font-size:12px;text-align:center;font-weight:800;margin-top:2mm}
-    @media print{body{margin:0;padding:0;background:#fff}.thermal-bill{width:72mm;margin:0 auto;padding:2mm}.bill-logo{width:18mm;max-height:15mm}.upi-qr{width:42mm!important;height:42mm!important;padding:4mm!important}}
+    @media print{body{margin:0;padding:0;background:#fff}.thermal-bill{width:72mm;margin:0 auto;padding:2mm}.bill-logo{max-width:70px;max-height:70px}.upi-qr{width:42mm!important;height:42mm!important;padding:4mm!important}}
   </style>
 </head>
 <body>
   <main class="thermal-bill">
     <header class="center">
-      ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" class="bill-logo" alt="">` : ""}
+      ${logoSrc ? `<img src="${escapeHtml(logoSrc)}" class="bill-logo" alt="">` : ""}
       <div class="bill-title">${escapeHtml(restaurantName)}</div>
       ${signature ? `<div class="bill-signature">${escapeHtml(signature)}</div>` : ""}
       ${address ? `<div class="bill-meta-small">${escapeHtml(address)}</div>` : ""}
@@ -4993,15 +5086,8 @@ document.getElementById("printBillBtn")?.addEventListener("click", event => guar
   if (!win) return alert("Allow popup to print.");
   const order = currentBillOrder;
   if (!order) { win.close(); return alert("Bill order is unavailable."); }
-  const liveLogo = document.getElementById("billLogo");
-  if (liveLogo && liveLogo.style.display !== "none" && liveLogo.src) {
-    try {
-      await waitForLogoLoad(liveLogo);
-    } catch (error) {
-      liveLogo.style.display = "none";
-      liveLogo.removeAttribute("src");
-    }
-  }
+  const logoSrc = await resolveBillLogoSource().catch(() => "");
+  applyBillLogoSource(logoSrc);
   const needsQr = Boolean((upiFieldEl?.value.trim() || restaurantSettings.upiId || "").trim()) &&
     (String(order.paymentStatus || "unpaid").toLowerCase() !== "paid" || restaurantSettings.showQrOnPaidBills !== false);
   let qrDataUrl = "";
@@ -5015,11 +5101,11 @@ document.getElementById("printBillBtn")?.addEventListener("click", event => guar
       return;
     }
   }
-  win.document.write(buildThermalBillHtml(order, qrDataUrl));
+  win.document.write(buildThermalBillHtml(order, qrDataUrl, logoSrc));
   win.document.close();
   const images = [...win.document.images].filter(img => img.src);
   let imagesReady = true;
-  await Promise.all(images.map(img => waitForImageLoad(img, img.classList.contains("bill-logo") ? 2000 : 8000).catch(error => {
+  await Promise.all(images.map(img => waitForImageLoad(img, img.classList.contains("bill-logo") ? 3000 : 8000).catch(error => {
     if (img.classList.contains("bill-logo")) img.remove();
     else throw error;
   }))).catch(error => {

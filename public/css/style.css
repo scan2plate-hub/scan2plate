@@ -99,7 +99,7 @@ img{max-width:100%}
 .bill{max-width:820px;margin:20px auto}
 .bill-header{display:flex;justify-content:space-between;gap:20px;align-items:start;flex-wrap:wrap}
 .bill-brand{display:flex;gap:14px;align-items:flex-start}
-.bill-logo{width:72px;height:72px;border-radius:16px;object-fit:cover;border:1px solid var(--line)}
+.bill-logo{max-width:70px;max-height:70px;object-fit:contain;border:1px solid var(--line)}
 .bill-table{width:100%;border-collapse:collapse;margin-top:18px}
 .bill-table th,.bill-table td{border-bottom:1px solid var(--line);padding:12px;text-align:left}
 .notice{padding:12px 14px;background:#fff4e6;border:1px solid #ffe0b3;border-radius:14px;color:#8f5500}

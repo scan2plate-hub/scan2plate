@@ -42,6 +42,90 @@ function buildUpiLink(order, settings) {
   return `upi://pay?pa=${upi}&pn=${name}&am=${amount}&cu=INR&tn=${note}`;
 }
 
+function billLogoCacheKey(restaurantId = '') {
+  return `scan2plate_bill_logo_${restaurantId || 'restaurant'}`;
+}
+
+function configuredLogoUrl(settings = {}) {
+  return String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || settings.logoUrl || '').trim();
+}
+
+function readCachedLogo(restaurantId, sourceUrl) {
+  if (!sourceUrl) return '';
+  try {
+    const cached = JSON.parse(localStorage.getItem(billLogoCacheKey(restaurantId)) || '{}');
+    return cached.sourceUrl === sourceUrl && cached.dataUrl ? cached.dataUrl : '';
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedLogo(restaurantId, sourceUrl, dataUrl) {
+  if (!sourceUrl || !String(dataUrl || '').startsWith('data:image/')) return;
+  try {
+    localStorage.setItem(billLogoCacheKey(restaurantId), JSON.stringify({ sourceUrl, dataUrl, cachedAt: Date.now() }));
+  } catch (error) {
+    console.warn('Bill logo cache skipped', error);
+  }
+}
+
+async function imageUrlToDataUrl(url, timeoutMs = 3000) {
+  if (!url) return '';
+  if (String(url).startsWith('data:image/')) return url;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { mode: 'cors', cache: 'force-cache', signal: controller.signal });
+    if (!response.ok) throw new Error('Logo download failed');
+    const blob = await response.blob();
+    if (!String(blob.type || '').startsWith('image/')) throw new Error('Logo response is not an image');
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Logo conversion failed'));
+      reader.readAsDataURL(blob);
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveBillLogo(settings = {}, restaurantId = '') {
+  const sourceUrl = configuredLogoUrl(settings);
+  const cachedLogo = readCachedLogo(restaurantId, sourceUrl);
+  if (!sourceUrl) return '';
+  try {
+    const dataUrl = await imageUrlToDataUrl(sourceUrl, 3000);
+    if (dataUrl) {
+      writeCachedLogo(restaurantId, sourceUrl, dataUrl);
+      return dataUrl;
+    }
+  } catch (error) {
+    console.warn('Bill logo not ready; using cached/text fallback', error);
+  }
+  return cachedLogo || '';
+}
+
+function waitForImageLoad(image, timeoutMs = 3000) {
+  if (!image || !image.src) return Promise.resolve();
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Image load timed out')), timeoutMs);
+    image.addEventListener('load', () => { clearTimeout(timeout); resolve(); }, { once: true });
+    image.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('Image failed to load')); }, { once: true });
+  });
+}
+
+async function printLoadedBill() {
+  const logo = document.querySelector('.bill-logo');
+  try {
+    await waitForImageLoad(logo, 3000);
+  } catch {
+    logo?.remove();
+  }
+  window.print();
+}
+
 async function load() {
   try {
     billRoot.innerHTML = '<p class="notice">Loading bill...</p>';
@@ -89,6 +173,7 @@ async function load() {
     };
     const totals = calculateOrderTotals(order.items || [], settings, order);
     const billOrder = { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
+    const logoDataUrl = await resolveBillLogo(settings, order.restaurantId || '');
 
     const upiLink = buildUpiLink(billOrder, settings);
 
@@ -96,8 +181,8 @@ async function load() {
       <div class="bill-header">
         <div class="bill-brand">
           ${
-            settings.logoUrl
-              ? `<img src="${escapeHtml(settings.logoUrl)}" alt="logo" class="bill-logo" />`
+            logoDataUrl
+              ? `<img src="${escapeHtml(logoDataUrl)}" alt="logo" class="bill-logo" />`
               : ''
           }
           <div>
@@ -115,7 +200,7 @@ async function load() {
             ${escapeHtml(billOrder.paymentStatus || 'unpaid')}
           </div>
           <div style="margin-top:10px">
-            <button class="btn btn-dark" onclick="window.print()">Print Bill</button>
+            <button class="btn btn-dark" id="printLoadedBillBtn" type="button">Print Bill</button>
           </div>
         </div>
       </div>
@@ -173,6 +258,8 @@ async function load() {
         </div>
       </div>
     `;
+
+    document.getElementById('printLoadedBillBtn')?.addEventListener('click', printLoadedBill);
 
     const qrWrap = document.getElementById('qrcode');
     if (qrWrap) {
