@@ -49,7 +49,7 @@ function billLogoCacheKey(restaurantId = '') {
 }
 
 function configuredLogoUrl(settings = {}) {
-  return String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || settings.logoUrl || '').trim();
+  return String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || settings.logoUrl || settings.logo || '').trim();
 }
 
 function cleanSettingText(value = '') {
@@ -63,6 +63,17 @@ function normalizeLogoDataUrl(value = '') {
   if (raw.startsWith('data:image/')) return raw;
   if (/^[A-Za-z0-9+/=\s]+$/.test(raw) && raw.length > 80) return `data:image/png;base64,${raw.replace(/\s+/g, '')}`;
   return '';
+}
+
+function logoDebugFields(settings = {}, restaurantId = '') {
+  return {
+    logo: cleanSettingText(settings.logo),
+    logoUrl: cleanSettingText(settings.logoUrl),
+    uploadedLogoUrl: cleanSettingText(settings.uploadedLogoUrl || settings.restaurantLogoUrl),
+    logoBase64: Boolean(normalizeLogoDataUrl(settings.logoBase64)),
+    logoDataUrl: Boolean(normalizeLogoDataUrl(settings.logoDataUrl)),
+    cachedLogo: Boolean(readCachedLogo(restaurantId, configuredLogoUrl(settings)))
+  };
 }
 
 function readCachedLogo(restaurantId, sourceUrl) {
@@ -82,6 +93,13 @@ function writeCachedLogo(restaurantId, sourceUrl, dataUrl) {
   } catch (error) {
     console.warn('Bill logo cache skipped', error);
   }
+}
+
+function writeRemoteLogoFallback(restaurantId, sourceUrl) {
+  if (!sourceUrl) return;
+  try {
+    localStorage.setItem(billLogoCacheKey(restaurantId), JSON.stringify({ sourceUrl, remoteUrlFallback: true, cachedAt: Date.now() }));
+  } catch {}
 }
 
 async function imageUrlToDataUrl(url, timeoutMs = 3000) {
@@ -106,26 +124,44 @@ async function imageUrlToDataUrl(url, timeoutMs = 3000) {
 }
 
 async function resolveBillLogo(settings = {}, restaurantId = '') {
-  const savedLogo = normalizeLogoDataUrl(settings.logoDataUrl) || normalizeLogoDataUrl(settings.logoBase64);
+  const savedLogo = normalizeLogoDataUrl(settings.logoBase64) || normalizeLogoDataUrl(settings.logoDataUrl);
   const sourceUrl = configuredLogoUrl(settings);
   const cachedLogo = readCachedLogo(restaurantId, sourceUrl);
+  let cachedRemoteFallback = false;
+  try {
+    const cached = JSON.parse(localStorage.getItem(billLogoCacheKey(restaurantId)) || '{}');
+    cachedRemoteFallback = Boolean(sourceUrl && cached.sourceUrl === sourceUrl && cached.remoteUrlFallback);
+  } catch {}
+  devLog('Print bill logo fields', logoDebugFields(settings, restaurantId));
   if (savedLogo) {
-    devLog('Bill branding', { logoSource: 'settings.logoDataUrl/logoBase64', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
+    devLog('Bill logo source used', 'settings.logoBase64/logoDataUrl');
     return savedLogo;
   }
   if (!sourceUrl) return '';
+  if (cachedLogo) {
+    devLog('Bill logo source used', 'cachedLogo');
+    return cachedLogo;
+  }
+  if (cachedRemoteFallback) {
+    devLog('Bill logo source used', 'cachedRemoteUrlFallback');
+    return sourceUrl;
+  }
   try {
     const dataUrl = await imageUrlToDataUrl(sourceUrl, 3000);
     if (dataUrl) {
       writeCachedLogo(restaurantId, sourceUrl, dataUrl);
-      devLog('Bill branding', { logoSource: sourceUrl === String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || '').trim() ? 'settings.uploadedLogoUrl' : 'settings.logoUrl/restaurant.logoUrl', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
+      devLog('Bill logo source used', sourceUrl === String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || '').trim() ? 'settings.uploadedLogoUrl' : 'settings.logoUrl/settings.logo');
       return dataUrl;
     }
   } catch (error) {
     devLog('Bill logo not ready; using cached/text fallback', error);
   }
-  if (cachedLogo) devLog('Bill branding', { logoSource: 'cachedLogo', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
-  return cachedLogo || '';
+  if (sourceUrl) {
+    writeRemoteLogoFallback(restaurantId, sourceUrl);
+    devLog('Bill logo source used', 'remoteUrlFallback');
+    return sourceUrl;
+  }
+  return '';
 }
 
 function waitForImageLoad(image, timeoutMs = 3000) {
@@ -206,6 +242,7 @@ async function load() {
       ...(restaurantSnap && restaurantSnap.exists() ? restaurantSnap.data() : {}),
       ...(scoped && scoped.exists() ? scoped.data() : {})
     };
+    devLog('Restaurant settings logo fields', logoDebugFields(settings, order.restaurantId || ''));
     const totals = calculateOrderTotals(order.items || [], settings, order);
     const billOrder = { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
     const logoDataUrl = await resolveBillLogo(settings, order.restaurantId || '');
@@ -220,7 +257,7 @@ async function load() {
         <div class="bill-brand">
           ${
             logoDataUrl
-              ? `<img src="${escapeHtml(logoDataUrl)}" alt="logo" class="bill-logo logo" />`
+              ? `<img class="restaurant-logo bill-logo logo" src="${escapeHtml(logoDataUrl)}" alt="Restaurant Logo" />`
               : ''
           }
           <div>

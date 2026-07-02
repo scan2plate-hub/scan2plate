@@ -1226,6 +1226,13 @@ function writeCachedRestaurantLogo(sourceUrl, dataUrl) {
   }
 }
 
+function writeRemoteLogoFallback(sourceUrl) {
+  if (!sourceUrl) return;
+  try {
+    localStorage.setItem(logoCacheKey(), JSON.stringify({ sourceUrl, remoteUrlFallback: true, cachedAt: Date.now() }));
+  } catch {}
+}
+
 function clearCachedRestaurantLogo() {
   try {
     localStorage.removeItem(logoCacheKey());
@@ -1245,11 +1252,23 @@ function normalizeLogoDataUrl(value = "") {
   return "";
 }
 
+function logoDebugFields(settings = restaurantSettings) {
+  return {
+    logo: cleanSettingText(settings.logo),
+    logoUrl: cleanSettingText(settings.logoUrl),
+    uploadedLogoUrl: cleanSettingText(settings.uploadedLogoUrl || settings.restaurantLogoUrl),
+    logoBase64: Boolean(normalizeLogoDataUrl(settings.logoBase64)),
+    logoDataUrl: Boolean(normalizeLogoDataUrl(settings.logoDataUrl)),
+    cachedLogo: Boolean(cachedLogoForCurrentUrl())
+  };
+}
+
 function configuredRestaurantLogoUrl() {
   return String(
     restaurantSettings.uploadedLogoUrl ||
     restaurantSettings.restaurantLogoUrl ||
     restaurantSettings.logoUrl ||
+    restaurantSettings.logo ||
     ""
   ).trim();
 }
@@ -1262,7 +1281,7 @@ function cachedLogoForCurrentUrl() {
 }
 
 function configuredLogoDataUrl() {
-  return normalizeLogoDataUrl(restaurantSettings.logoDataUrl) || normalizeLogoDataUrl(restaurantSettings.logoBase64);
+  return normalizeLogoDataUrl(restaurantSettings.logoBase64) || normalizeLogoDataUrl(restaurantSettings.logoDataUrl);
 }
 
 async function imageUrlToDataUrl(url, timeoutMs = 3000) {
@@ -1309,30 +1328,45 @@ function preloadImageSource(src = "", timeoutMs = 3000) {
 async function resolveBillLogoSource({ allowRemote = true } = {}) {
   const savedLogo = configuredLogoDataUrl();
   const uploadedLogoUrl = String(restaurantSettings.uploadedLogoUrl || restaurantSettings.restaurantLogoUrl || "").trim();
-  const logoUrl = String(restaurantSettings.logoUrl || "").trim();
+  const logoUrl = String(restaurantSettings.logoUrl || restaurantSettings.logo || "").trim();
   const cachedLogo = cachedLogoForCurrentUrl();
   const sourceUrl = uploadedLogoUrl || logoUrl;
+  const cached = readCachedRestaurantLogo();
+  const cachedRemoteFallback = Boolean(sourceUrl && cached.sourceUrl === sourceUrl && cached.remoteUrlFallback);
+  devLog("Print bill logo fields", logoDebugFields());
 
   if (savedLogo) {
     writeCachedRestaurantLogo(sourceUrl || "saved-data-url", savedLogo);
-    devLog("Bill branding", { logoSource: "settings.logoDataUrl/logoBase64", signatureMessage: cleanSettingText(restaurantSettings.restaurantSignatureMessage), footerMessage: cleanSettingText(restaurantSettings.billFooterMessage) });
+    devLog("Bill logo source used", "settings.logoBase64/logoDataUrl");
     return savedLogo;
   }
   if (!allowRemote) return cachedLogo || "";
   if (!sourceUrl) return cachedLogo || "";
+  if (cachedLogo) {
+    devLog("Bill logo source used", "cachedLogo");
+    return cachedLogo;
+  }
+  if (cachedRemoteFallback) {
+    devLog("Bill logo source used", "cachedRemoteUrlFallback");
+    return sourceUrl;
+  }
 
   try {
     const dataUrl = await imageUrlToDataUrl(sourceUrl, 3000);
     if (dataUrl) {
       writeCachedRestaurantLogo(sourceUrl, dataUrl);
-      devLog("Bill branding", { logoSource: sourceUrl === uploadedLogoUrl ? "settings.uploadedLogoUrl" : "settings.logoUrl", signatureMessage: cleanSettingText(restaurantSettings.restaurantSignatureMessage), footerMessage: cleanSettingText(restaurantSettings.billFooterMessage) });
+      devLog("Bill logo source used", sourceUrl === uploadedLogoUrl ? "settings.uploadedLogoUrl" : "settings.logoUrl/settings.logo");
       return dataUrl;
     }
   } catch (error) {
     devLog("Restaurant logo not ready; using cached/text fallback", error);
   }
-  if (cachedLogo) devLog("Bill branding", { logoSource: "cachedLogo", signatureMessage: cleanSettingText(restaurantSettings.restaurantSignatureMessage), footerMessage: cleanSettingText(restaurantSettings.billFooterMessage) });
-  return cachedLogo || "";
+  if (sourceUrl) {
+    writeRemoteLogoFallback(sourceUrl);
+    devLog("Bill logo source used", "remoteUrlFallback");
+    return sourceUrl;
+  }
+  return "";
 }
 
 function applyBillLogoSource(src = "") {
@@ -1341,6 +1375,7 @@ function applyBillLogoSource(src = "") {
   billLogoEl.onerror = null;
   if (!src) {
     billLogoEl.classList.remove("logo");
+    billLogoEl.classList.remove("restaurant-logo");
     billLogoEl.style.display = "none";
     billLogoEl.removeAttribute("src");
     return;
@@ -1351,6 +1386,7 @@ function applyBillLogoSource(src = "") {
     billLogoEl.removeAttribute("src");
   };
   billLogoEl.classList.add("logo");
+  billLogoEl.classList.add("restaurant-logo");
   billLogoEl.src = src;
   billLogoEl.style.display = "block";
 }
@@ -1400,6 +1436,7 @@ function markRestaurantLogoRemoved() {
   restaurantSettings.uploadedLogoUrl = "";
   restaurantSettings.restaurantLogoStoragePath = "";
   restaurantSettings.logoUrl = "";
+  restaurantSettings.logo = "";
   restaurantSettings.logoDataUrl = "";
   restaurantSettings.logoBase64 = "";
   if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
@@ -1987,6 +2024,7 @@ async function loadSettings() {
     const restaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
     // Root fallback keeps legacy restaurants in Restaurant Mode and supports mode set by Super Admin.
     restaurantSettings = { ...(restaurantSnap.exists() ? restaurantSnap.data() : {}), ...(snap.exists() ? snap.data() : {}) };
+    devLog("Restaurant settings logo fields", logoDebugFields(restaurantSettings));
 
     if (restaurantFieldEl) restaurantFieldEl.value = restaurantSettings.restaurantName || "";
     if (businessModeFieldEl) businessModeFieldEl.value = restaurantSettings.businessMode === "vendor" ? "vendor" : "restaurant";
@@ -2074,7 +2112,7 @@ async function saveSettings() {
 
     const logoUrlValue = logoFieldEl?.value.trim() || "";
     const existingUploadedLogo = restaurantSettings.restaurantLogoUrl || "";
-    const existingLogoUrl = restaurantSettings.logoUrl || "";
+    const existingLogoUrl = restaurantSettings.logoUrl || restaurantSettings.logo || "";
     const previousLogoUrl = configuredRestaurantLogoUrl();
     const finalUploadedLogoUrl = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.url || existingUploadedLogo);
     const finalStoragePath = restaurantLogoMarkedForRemoval ? "" : (uploadedLogo?.path || restaurantSettings.restaurantLogoStoragePath || "");
@@ -2111,6 +2149,7 @@ async function saveSettings() {
       phone: phoneFieldEl?.value.trim() || "",
       address: addressFieldEl?.value.trim() || "",
       logoUrl: finalLogoUrl,
+      logo: finalLogoUrl,
       logoDataUrl: finalLogoDataUrl,
       logoBase64: finalLogoDataUrl,
       uploadedLogoUrl: finalUploadedLogoUrl,
@@ -2150,6 +2189,7 @@ async function saveSettings() {
           logoBase64: payload.logoBase64,
           restaurantLogoStoragePath: payload.restaurantLogoStoragePath,
           logoUrl: payload.logoUrl,
+          logo: payload.logo,
           updatedAt: serverTimestamp()
         }, { merge: true })
       ]),
@@ -3842,7 +3882,7 @@ function buildThermalBillHtml(order, qrDataUrl = "", logoSrc = "") {
 <body>
   <main class="thermal-bill">
     <header class="center">
-      ${logoSrc ? `<img src="${escapeHtml(logoSrc)}" class="bill-logo logo" alt="">` : ""}
+      ${logoSrc ? `<img class="restaurant-logo bill-logo logo" src="${escapeHtml(logoSrc)}" alt="Restaurant Logo">` : ""}
       <div class="bill-title">${escapeHtml(restaurantName)}</div>
       ${address ? `<div class="bill-meta-small">${escapeHtml(address)}</div>` : ""}
       ${gst ? `<div class="bill-meta-small"><span class="strong">GSTIN:</span> ${escapeHtml(gst)}</div>` : ""}
