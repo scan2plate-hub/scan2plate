@@ -17,6 +17,8 @@ import {
 const billRoot = qs('#billRoot');
 const orderId = getParam('orderId');
 const docId = getParam('docId');
+const isDevHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+const devLog = (...args) => { if (isDevHost) console.log('[Scan2Plate Bill]', ...args); };
 
 function itemDisplayName(item = {}) {
   const baseName = String(item.name || 'Item').trim() || 'Item';
@@ -48,6 +50,19 @@ function billLogoCacheKey(restaurantId = '') {
 
 function configuredLogoUrl(settings = {}) {
   return String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || settings.logoUrl || '').trim();
+}
+
+function cleanSettingText(value = '') {
+  const text = String(value ?? '').trim();
+  return /^(undefined|null)$/i.test(text) ? '' : text;
+}
+
+function normalizeLogoDataUrl(value = '') {
+  const raw = cleanSettingText(value);
+  if (!raw) return '';
+  if (raw.startsWith('data:image/')) return raw;
+  if (/^[A-Za-z0-9+/=\s]+$/.test(raw) && raw.length > 80) return `data:image/png;base64,${raw.replace(/\s+/g, '')}`;
+  return '';
 }
 
 function readCachedLogo(restaurantId, sourceUrl) {
@@ -91,18 +106,25 @@ async function imageUrlToDataUrl(url, timeoutMs = 3000) {
 }
 
 async function resolveBillLogo(settings = {}, restaurantId = '') {
+  const savedLogo = normalizeLogoDataUrl(settings.logoDataUrl) || normalizeLogoDataUrl(settings.logoBase64);
   const sourceUrl = configuredLogoUrl(settings);
   const cachedLogo = readCachedLogo(restaurantId, sourceUrl);
+  if (savedLogo) {
+    devLog('Bill branding', { logoSource: 'settings.logoDataUrl/logoBase64', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
+    return savedLogo;
+  }
   if (!sourceUrl) return '';
   try {
     const dataUrl = await imageUrlToDataUrl(sourceUrl, 3000);
     if (dataUrl) {
       writeCachedLogo(restaurantId, sourceUrl, dataUrl);
+      devLog('Bill branding', { logoSource: sourceUrl === String(settings.uploadedLogoUrl || settings.restaurantLogoUrl || '').trim() ? 'settings.uploadedLogoUrl' : 'settings.logoUrl/restaurant.logoUrl', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
       return dataUrl;
     }
   } catch (error) {
-    console.warn('Bill logo not ready; using cached/text fallback', error);
+    devLog('Bill logo not ready; using cached/text fallback', error);
   }
+  if (cachedLogo) devLog('Bill branding', { logoSource: 'cachedLogo', signatureMessage: cleanSettingText(settings.restaurantSignatureMessage), footerMessage: cleanSettingText(settings.billFooterMessage) });
   return cachedLogo || '';
 }
 
@@ -119,6 +141,15 @@ function waitForImageLoad(image, timeoutMs = 3000) {
 async function printLoadedBill() {
   const logo = document.querySelector('.bill-logo');
   try {
+    if (logo?.src) {
+      const image = new Image();
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Logo preload timed out')), 3000);
+        image.onload = () => { clearTimeout(timeout); resolve(); };
+        image.onerror = () => { clearTimeout(timeout); reject(new Error('Logo preload failed')); };
+        image.src = logo.src;
+      });
+    }
     await waitForImageLoad(logo, 3000);
   } catch {
     logo?.remove();
@@ -158,6 +189,9 @@ async function load() {
     const scoped = order.restaurantId
       ? await getDoc(doc(db, 'restaurants', order.restaurantId, 'settings', 'general'))
       : null;
+    const restaurantSnap = order.restaurantId
+      ? await getDoc(doc(db, 'restaurants', order.restaurantId))
+      : null;
 
     const root = await getDoc(doc(db, 'settings', 'general'));
 
@@ -169,11 +203,15 @@ async function load() {
       address: '',
       logoUrl: '',
       ...(root.exists() ? root.data() : {}),
+      ...(restaurantSnap && restaurantSnap.exists() ? restaurantSnap.data() : {}),
       ...(scoped && scoped.exists() ? scoped.data() : {})
     };
     const totals = calculateOrderTotals(order.items || [], settings, order);
     const billOrder = { ...order, ...totals, taxPercentSnapshot: order.taxPercentSnapshot ?? totals.taxPercent };
     const logoDataUrl = await resolveBillLogo(settings, order.restaurantId || '');
+    const gst = cleanSettingText(settings.gstNumber).toUpperCase();
+    const signature = cleanSettingText(settings.restaurantSignatureMessage);
+    const footer = cleanSettingText(settings.billFooterMessage);
 
     const upiLink = buildUpiLink(billOrder, settings);
 
@@ -182,13 +220,16 @@ async function load() {
         <div class="bill-brand">
           ${
             logoDataUrl
-              ? `<img src="${escapeHtml(logoDataUrl)}" alt="logo" class="bill-logo" />`
+              ? `<img src="${escapeHtml(logoDataUrl)}" alt="logo" class="bill-logo logo" />`
               : ''
           }
           <div>
             <h1 style="margin:0">${escapeHtml(settings.restaurantName || 'Restaurant')}</h1>
-            <div class="muted">${escapeHtml(settings.address || 'Add address in settings')}</div>
-            <div class="muted">Phone: ${escapeHtml(settings.phone || '-')}</div>
+            ${settings.address ? `<div class="muted">${escapeHtml(settings.address)}</div>` : ''}
+            ${gst ? `<div class="muted"><strong>GSTIN:</strong> ${escapeHtml(gst)}</div>` : ''}
+            ${settings.phone ? `<div class="muted">Phone: ${escapeHtml(settings.phone)}</div>` : ''}
+            ${signature ? `<div class="muted"><strong>${escapeHtml(signature)}</strong></div>` : ''}
+            <div class="muted"><strong>TAX INVOICE</strong></div>
             <div class="muted">Order No: ${escapeHtml(billOrder.displayOrderNo || billOrder.dailyOrderNo || '-')}</div>
             <div class="muted">Order ID: ${escapeHtml(billOrder.orderId || '-')}</div>
             <div class="muted">Date: ${nowStr(billOrder.createdAt)}</div>
@@ -257,6 +298,7 @@ async function load() {
           <div class="row"><span>Grand Total</span><strong>${fmtCurrency(billOrder.grandTotal || 0)}</strong></div>
         </div>
       </div>
+      ${footer ? `<div class="notice" style="margin-top:16px;text-align:center">${escapeHtml(footer)}</div>` : ''}
     `;
 
     document.getElementById('printLoadedBillBtn')?.addEventListener('click', printLoadedBill);
