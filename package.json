@@ -1,0 +1,9 @@
+{
+  "name": "scan2plate-static-seo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:seo": "node scripts/generate-seo.mjs"
+  }
+}
