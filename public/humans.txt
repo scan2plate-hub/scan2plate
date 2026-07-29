@@ -1,0 +1,7 @@
+Scan2Plate
+Site: https://scan2plate.com
+Purpose: Restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and restaurant management software.
+Country: India
+Contact: +91 9142579601
+Email: support@scan2plate.com
+Generated: 2026-07-21

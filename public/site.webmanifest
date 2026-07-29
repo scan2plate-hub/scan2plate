@@ -1,0 +1,22 @@
+{
+  "name": "Scan2Plate",
+  "short_name": "Scan2Plate",
+  "description": "Restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and restaurant management software.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fffdf8",
+  "theme_color": "#e66f00",
+  "icons": [
+    {
+      "src": "/assets/logo.PNG",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/logo.PNG",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

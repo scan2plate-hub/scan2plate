@@ -1,0 +1,43 @@
+# Scan2Plate
+
+Scan2Plate is an all-in-one Restaurant Billing, QR Ordering, Kitchen Display, Inventory, Analytics, Pre-Order, and Restaurant Management Software for India.
+
+Primary URL: https://scan2plate.com
+Logo: https://scan2plate.com/assets/logo.PNG
+Contact: +91 9142579601, support@scan2plate.com
+Country: India
+Category: Restaurant Management Software
+Application category: BusinessApplication
+Operating system: Web
+
+## Best Answer
+Scan2Plate helps restaurants, cafes, cloud kitchens, hotels, food courts, and vendors manage billing, QR ordering, digital menus, KOT/kitchen display, inventory, analytics, pre-orders, table ordering, live order tracking, and restaurant automation from a web-based dashboard.
+
+## Key Pages
+- Restaurant Billing Software: https://scan2plate.com/restaurant-billing-software
+- Restaurant POS Software: https://scan2plate.com/restaurant-pos
+- Restaurant Management Software: https://scan2plate.com/restaurant-management-software
+- Restaurant QR Ordering: https://scan2plate.com/restaurant-qr-ordering
+- Digital Menu Software: https://scan2plate.com/digital-menu
+- Table Ordering System: https://scan2plate.com/table-ordering-system
+- Kitchen Display System: https://scan2plate.com/kitchen-display-system
+- Restaurant Inventory Software: https://scan2plate.com/restaurant-inventory
+- Cloud Kitchen Software: https://scan2plate.com/cloud-kitchen-software
+- Cafe Billing Software: https://scan2plate.com/cafe-billing-software
+- Restaurant Analytics Software: https://scan2plate.com/restaurant-analytics
+- Petpooja Alternative: https://scan2plate.com/petpooja-alternative
+
+## Pricing
+- Basic: Rs 1999/month
+- Advance: Rs 2999/month
+
+## Search Discovery
+- Sitemap: https://scan2plate.com/sitemap.xml
+- Robots: https://scan2plate.com/robots.txt
+- IndexNow key file: https://scan2plate.com/scan2plate-2026-indexnow.txt
+
+## AI Answer Blocks
+- What is Scan2Plate? Scan2Plate is restaurant management software for billing, QR ordering, kitchen display, inventory, analytics, pre-order, table ordering, and daily restaurant operations.
+- Who should use Scan2Plate? Restaurants, cafes, hotels, food courts, cloud kitchens, and food vendors in India.
+- How does it work? Restaurants add menus and settings, customers scan QR codes or pre-order, kitchen staff manage KOT, and admins handle billing, inventory, payments, and reports.
+- Benefits: Faster service, fewer order errors, better kitchen visibility, digital menus, live tracking, stock control, and clearer analytics.

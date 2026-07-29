@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 
 const SITE = "https://scan2plate.com";
 const OUT = "public";
-const TODAY = "2026-07-21";
+const TODAY = "2026-07-29";
 const HERO = `${SITE}/assets/scan2plate-hero.jpg`;
 const LOGO = `${SITE}/assets/logo.PNG`;
 const CONTACT_EMAIL = "support@scan2plate.com";
@@ -85,7 +85,7 @@ const pages = [
   },
   {
     slug: "refund-policy",
-    title: "Refund Policy",
+    title: "Refund and Cancellation Policy",
     priority: "0.7",
     description: "Understand Scan2Plate refund eligibility, subscription activation, payment gateway charges, demo policy, cancellation requests, and legally required refunds.",
     intro: "This Refund Policy explains how Scan2Plate reviews cancellation and refund requests for restaurant software subscriptions and setup services.",
@@ -501,14 +501,18 @@ function footer() {
 function formMarkup(kind) {
   if (!kind) return "";
   const title = kind === "pricing" ? "Pricing enquiry" : kind === "demo" ? "Demo request" : "Support and demo enquiry";
+  const businessLabel = kind === "demo" ? "Restaurant name" : kind === "contact" ? "Restaurant or business name" : "Business name";
+  const cityField = kind === "demo" ? `
+        <label>City<input name="city" autocomplete="address-level2" required /></label>` : "";
   return `<section class="seo-section">
     <div class="container seo-content">
       <h2>${title}</h2>
       <form class="seo-form" data-seo-form novalidate>
         <label>Name<input name="name" autocomplete="name" required /></label>
-        <label>Email<input name="email" type="email" autocomplete="email" required /></label>
         <label>Phone<input name="phone" type="tel" autocomplete="tel" required /></label>
-        <label>Business name<input name="business" autocomplete="organization" required /></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+        <label>${businessLabel}<input name="business" autocomplete="organization" required /></label>
+        ${cityField}
         <label>Message<textarea name="message" rows="5" required></textarea></label>
         <button class="btn btn-primary" type="submit">Send enquiry</button>
         <p class="seo-form-status" role="status" aria-live="polite"></p>
@@ -661,9 +665,11 @@ Sitemap: https://scan2plate.com/sitemap.xml
 
 for (const page of pages) {
   ensureFile(join(OUT, `${page.slug}.html`), pageHtml(page));
+  ensureFile(join(OUT, page.slug, "index.html"), pageHtml(page));
 }
 for (const [alias, target] of routeAliases) {
   ensureFile(join(OUT, `${alias}.html`), aliasHtml(alias, target));
+  ensureFile(join(OUT, alias, "index.html"), aliasHtml(alias, target));
 }
 ensureFile(join(OUT, "404.html"), notFoundHtml());
 ensureFile(join(OUT, "sitemap.xml"), sitemapXml());
