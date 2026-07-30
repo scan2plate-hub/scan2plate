@@ -989,6 +989,7 @@
       .browser-steps{grid-template-columns:repeat(3,1fr);padding:12px}.browser-step{font-size:9px}.table-confirm{right:16px;bottom:16px}.step-card::after{display:none}
     }
   </style>
+  <link rel="stylesheet" href="./css/landing-redesign.css?v=restaurant-os-redesign" />
 </head>
 <body>
   <header class="topbar">
@@ -997,14 +998,19 @@
         <img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo" />
         <div class="logo-text">
           <strong>Scan2Plate</strong>
-          <span>Scan, Order & Relax</span>
+          <span>Restaurant OS</span>
         </div>
       </div>
 
+      <input class="nav-toggle" id="navToggle" type="checkbox" aria-label="Toggle navigation menu" />
+      <label class="nav-toggle-label" for="navToggle"><span></span></label>
+
       <nav class="landing-nav-links" aria-label="Main navigation">
-        <a href="/">Home</a>
-        <a href="/features">Features</a>
-        <a href="/pricing">Pricing</a>
+        <a href="#product">Product</a>
+        <a href="#solutions">Solutions</a>
+        <a href="#features">Features</a>
+        <a href="#preorder">Pre-Order</a>
+        <a href="#pricing">Pricing</a>
         <a href="/about">About</a>
         <a href="/contact">Contact</a>
         <a href="/demo">Demo</a>
@@ -1012,216 +1018,283 @@
 
       <div class="nav-actions">
         <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-outline">Admin Login</a>
-        <a href="#preorder" class="btn btn-primary">Start Pre-Order</a>
+        <a href="/contact" class="btn btn-primary">Book a Demo</a>
       </div>
     </div>
   </header>
 
   <!-- LANDING PAGE -->
   <main id="landingPage">
-    <section class="landing-hero" id="preorder">
-      <div class="container preorder-hero-grid">
-        <div class="preorder-copy">
-          <span class="preorder-label">Pre-Order System</span>
-          <h1>Pre-order food before you <span>arrive.</span></h1>
-          <p>
-            Choose your location, restaurant, menu, payment type and table before reaching the venue.
-            Pay 25% advance or full amount, then arrive with your order ready.
-          </p>
+    <section class="landing-hero" id="product">
+      <div class="container hero-layout">
+        <div class="hero-copy reveal">
+          <span class="section-kicker">Complete restaurant management and billing software</span>
+          <h1>Run your restaurant from one smart <span>platform.</span></h1>
+          <p>Manage QR ordering, billing, kitchen operations, tables, payments, reports and customer pre-orders without changing how your restaurant already works.</p>
           <div class="hero-cta">
-            <a href="#preorder-demo" class="btn btn-primary">Start Pre-Order</a>
-            <a href="#restaurants" class="btn btn-outline">Explore Restaurants</a>
+            <a href="/contact" class="btn btn-primary">Book a Free Demo</a>
+            <a href="/demo" class="btn btn-outline">Explore Live Demo</a>
+            <a href="#preorder" class="text-link">Start Pre-Order</a>
           </div>
-          <div class="preorder-chips">
-            <div class="preorder-chip"><span class="chip-icon">T</span><div><strong>Save Time</strong><span>Pre-order in advance</span></div></div>
-            <div class="preorder-chip"><span class="chip-icon">S</span><div><strong>Secure Payments</strong><span>Advance or full</span></div></div>
-            <div class="preorder-chip"><span class="chip-icon">R</span><div><strong>Order Ready</strong><span>When you arrive</span></div></div>
-            <div class="preorder-chip"><span class="chip-icon">U</span><div><strong>Real-time Updates</strong><span>Live order tracking</span></div></div>
+          <div class="hero-proof" aria-label="Scan2Plate core capabilities">
+            <div class="proof-card"><strong>QR table ordering</strong><span>Guests scan, browse the menu and send orders directly from the table.</span></div>
+            <div class="proof-card"><strong>Billing and KOT</strong><span>Staff can generate kitchen tickets, bills and printable invoices.</span></div>
+            <div class="proof-card"><strong>Kitchen to reports</strong><span>Orders, payment status and daily performance stay connected.</span></div>
           </div>
         </div>
 
-        <div class="preorder-product" aria-label="Pre-order product preview">
-          <div class="browser-mock">
-            <div class="browser-head">
-              <div class="browser-brand"><span class="browser-logo">S2</span>Scan2Plate</div>
-              <span class="preorder-label" style="padding:6px 10px;font-size:10px;">Live Demo</span>
+        <div class="workflow-visual reveal" aria-label="Animated Scan2Plate product workflow">
+          <div class="workflow-board">
+            <div class="workflow-top">
+              <div class="window-dots"><span></span><span></span><span></span></div>
+              <strong>Live order flow</strong>
+              <span class="live-pill">Payment confirmed</span>
             </div>
-            <div class="browser-steps">
-              <div class="browser-step active"><span>1</span>Choose Location</div>
-              <div class="browser-step"><span>2</span>Browse Menu</div>
-              <div class="browser-step"><span>3</span>Select Table</div>
-              <div class="browser-step"><span>4</span>Payment</div>
-              <div class="browser-step"><span>5</span>Confirm Order</div>
-            </div>
-            <div class="browser-body">
-              <div class="summary-card">
-                <h3>Pre-Order Summary</h3>
-                <div class="summary-restaurant">
-                  <span class="food-dot"></span>
-                  <div><strong>The Grand Bites Restaurant</strong><br><small>City Center, Pune</small></div>
+            <div class="workflow-body">
+              <div class="scan-card">
+                <div class="qr-box" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
                 </div>
-                <div class="summary-line"><span>Chicken Biryani x1</span><strong>₹250</strong></div>
-                <div class="summary-line"><span>Paneer Butter Masala x1</span><strong>₹220</strong></div>
-                <div class="summary-line"><span>Masala Roti x2</span><strong>₹60</strong></div>
-                <div class="summary-line"><span>Subtotal</span><strong>₹530</strong></div>
-                <div class="summary-line"><span>Advance (25%)</span><strong>₹133</strong></div>
-                <div class="ready-note">Order ready when you arrive</div>
-              </div>
-              <div class="restaurant-photo-card">
-                <img src="./assets/scan2plate-hero.jpg" alt="Premium restaurant dining preview">
-                <div class="table-confirm">
-                  <div class="ok">OK</div>
-                  <small>Your Table</small>
-                  <strong>A12</strong>
-                  <small>Confirmed</small>
+                <div>
+                  <h3>Table A4 scanned QR</h3>
+                  <p>Customer opens the live menu, adds items and places an order from their phone.</p>
                 </div>
               </div>
-            </div>
-          </div>
-          <div class="phone-mock">
-            <div class="phone-screen">
-              <div class="phone-top"><span>My Pre-Order</span><span>9:41</span></div>
-              <div class="phone-bill">
-                <strong>Order #SP2567</strong>
-                <div class="line"><span>Items</span><strong>4</strong></div>
-                <div class="line"><span>Total</span><strong>₹530</strong></div>
-                <div class="line"><span>Pay now</span><strong>₹133</strong></div>
+              <div class="kitchen-card">
+                <h3>Kitchen dashboard</h3>
+                <div class="status-lane">
+                  <div class="status-card">New<span>Paneer Tikka x2</span></div>
+                  <div class="status-card">Preparing<span>Masala Dosa x1</span></div>
+                  <div class="status-card ready">Ready<span>Bill and KOT synced</span></div>
+                </div>
               </div>
-              <div class="phone-btn">Track Order</div>
+              <div class="bill-card">
+                <h3>Bill printing</h3>
+                <div class="bill-paper">
+                  <div class="bill-row"><span>Subtotal</span><strong>₹860</strong></div>
+                  <div class="bill-row"><span>Tax</span><strong>₹43</strong></div>
+                  <div class="bill-row"><span>UPI</span><strong>Paid</strong></div>
+                </div>
+              </div>
+              <div class="analytics-card">
+                <h3>Owner reports</h3>
+                <div class="mini-bars"><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="step-strip" id="how-it-works">
+    <section class="trust-section" aria-labelledby="trust-title">
       <div class="container">
-        <h2 class="step-title">How Pre-Order Works - 8 Simple Steps</h2>
-        <div class="steps-row">
-          <div class="step-card"><span class="step-icon">1</span><div><strong>Choose Country</strong><span>Start location</span></div></div>
-          <div class="step-card"><span class="step-icon">2</span><div><strong>Select State</strong><span>Pick region</span></div></div>
-          <div class="step-card"><span class="step-icon">3</span><div><strong>Select District / City</strong><span>Find area</span></div></div>
-          <div class="step-card"><span class="step-icon">4</span><div><strong>Browse Restaurants</strong><span>Choose venue</span></div></div>
-          <div class="step-card"><span class="step-icon">5</span><div><strong>Open Menu</strong><span>Add food</span></div></div>
-          <div class="step-card"><span class="step-icon">6</span><div><strong>Choose Payment</strong><span>25% or full</span></div></div>
-          <div class="step-card"><span class="step-icon">7</span><div><strong>Select Table</strong><span>Book table</span></div></div>
-          <div class="step-card"><span class="step-icon">8</span><div><strong>Confirm Pre-Order</strong><span>Arrive ready</span></div></div>
+        <div class="trust-bar">
+          <div class="trust-main" id="trust-title">Built with real restaurant operations in mind.</div>
+          <div class="trust-item"><strong>Live restaurant deployment</strong><span>Tested in an operating cafe environment.</span></div>
+          <div class="trust-item"><strong>QR-based ordering</strong><span>Table and counter ordering flows.</span></div>
+          <div class="trust-item"><strong>Real-time kitchen updates</strong><span>New, Preparing and Ready states.</span></div>
+          <div class="trust-item"><strong>Secure payment workflow</strong><span>UPI, online and payment status tracking.</span></div>
+          <div class="trust-item"><strong>Mobile-first experience</strong><span>Works across guest and staff devices.</span></div>
         </div>
       </div>
     </section>
 
-    <section class="preorder-panel-section" id="preorder-demo">
-      <div class="container journey-board">
-        <div class="journey-card">
-          <h3>1. Choose Location</h3>
-          <div class="demo-field"><label>Country</label><select class="demo-select"><option>India</option></select></div>
-          <div class="demo-field"><label>State</label><select class="demo-select"><option>Maharashtra</option></select></div>
-          <div class="demo-field"><label>District / City</label><select class="demo-select"><option>Pune</option></select></div>
-          <div class="demo-field"><label>Restaurant</label><select class="demo-select"><option>The Grand Bites</option></select></div>
-          <button class="demo-btn" type="button">Find Restaurants</button>
-        </div>
-
-        <div class="journey-card" id="restaurants">
-          <h3>2. Select Restaurant</h3>
-          <div class="restaurant-list">
-            <div class="restaurant-row"><img src="./assets/placeholder-food.jpg" alt="The Grand Bites restaurant listing preview"><div><strong>The Grand Bites</strong><span>City Center, Pune</span><em>4.6</em></div><span>25 min</span></div>
-            <div class="restaurant-row"><img src="./assets/scan2plate-hero.jpg" alt="Spice Hub restaurant listing preview"><div><strong>Spice Hub</strong><span>Koregaon Park</span><em>4.4</em></div><span>35 min</span></div>
-            <div class="restaurant-row"><img src="./assets/placeholder-food.jpg" alt="Royal Treat restaurant listing preview"><div><strong>Royal Treat</strong><span>Baner, Pune</span><em>4.5</em></div><span>20 min</span></div>
-            <button class="demo-btn" type="button" style="background:#fff;color:#3a2112;border:1px solid #ead9c6;">View More Restaurants</button>
-          </div>
-        </div>
-
-        <div class="journey-card">
-          <h3>3. Open Menu</h3>
-          <div class="menu-tabs"><span class="active">Biryani</span><span>Starters</span><span>Main Course</span><span>Beverages</span></div>
-          <div class="demo-menu-row"><span>Chicken Biryani</span><strong>₹250</strong><span class="demo-stepper">- 1 +</span></div>
-          <div class="demo-menu-row"><span>Paneer Butter Masala</span><strong>₹220</strong><span class="demo-stepper">- 1 +</span></div>
-          <div class="demo-menu-row"><span>Masala Roti</span><strong>₹30</strong><span class="demo-stepper">- 2 +</span></div>
-          <div class="demo-menu-row"><span>Fresh Lime Soda</span><strong>₹60</strong><span class="demo-stepper">- 1 +</span></div>
-          <div class="cart-summary"><span>View Cart (4 items)</span><strong>₹560</strong></div>
-        </div>
-
-        <div class="journey-card">
-          <h3>4. Payment Option</h3>
-          <div class="payment-choice active"><strong>Pay 25% Advance <small>Recommended</small></strong><span>Minimum advance supported</span></div>
-          <div class="payment-choice"><strong>Pay Full Amount</strong><span>Pay the complete bill now</span></div>
-          <div class="pay-total">
-            <div><span>Order Total</span><strong>₹560</strong></div>
-            <div><span>Advance (25%)</span><strong>₹140</strong></div>
-            <div class="pay-now"><span>Pay Now</span><strong>₹140</strong></div>
-            <small>Secure and encrypted payments</small>
-          </div>
-        </div>
-
-        <div class="journey-card">
-          <h3>5. Select Table</h3>
-          <div style="display:flex;gap:14px;margin-bottom:9px;font-size:10px;"><span style="color:#d9431f;">Booked / Unpaid</span><span style="color:#287b24;">Available / Empty</span></div>
-          <div class="table-grid">
-            <div class="table-cell booked">A1<br>Booked</div><div class="table-cell">A2<br>Empty</div><div class="table-cell">A3<br>Empty</div><div class="table-cell">A4<br>Empty</div>
-            <div class="table-cell">A5<br>Empty</div><div class="table-cell booked">A6<br>Booked</div><div class="table-cell">A7<br>Empty</div><div class="table-cell">A8<br>Empty</div>
-            <div class="table-cell">A9<br>Empty</div><div class="table-cell">A10<br>Empty</div><div class="table-cell">A11<br>Empty</div><div class="table-cell selected">A12<br>Empty</div>
-          </div>
-        </div>
-
-        <div class="journey-card">
-          <h3>6. Confirm Pre-Order</h3>
-          <div class="confirm-summary">
-            <h4>The Grand Bites</h4>
-            <small>City Center, Pune</small>
-            <div class="row"><span>Table</span><strong>A12</strong></div>
-            <div class="row"><span>Order Items</span><strong>4 items</strong></div>
-            <div class="row"><span>Payment</span><strong>Advance (25%)</strong></div>
-            <div class="row"><span>Pay Now</span><strong>₹140</strong></div>
-          </div>
-          <div class="confirm-note">Your order is confirmed</div>
-          <button class="demo-btn" type="button">Confirm Pre-Order</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="platform-section" id="features">
-      <div class="container platform-grid">
-        <div class="platform-card">
-          <h2>Everything You Need, All in One Platform</h2>
-          <div class="feature-mini-grid">
-            <div class="platform-feature"><span class="platform-icon">QR</span><div><strong>QR-Based Ordering</strong><span>Scan QR, order instantly</span></div></div>
-            <div class="platform-feature"><span class="platform-icon">BI</span><div><strong>Billing System</strong><span>Fast billing and invoices</span></div></div>
-            <div class="platform-feature"><span class="platform-icon">KO</span><div><strong>Kitchen/KOT</strong><span>Manage orders easily</span></div></div>
-            <div class="platform-feature"><span class="platform-icon">LI</span><div><strong>Live Order Tracking</strong><span>Track in real-time</span></div></div>
-            <div class="platform-feature"><span class="platform-icon">TA</span><div><strong>Table Management</strong><span>Smart table control</span></div></div>
-            <div class="platform-feature"><span class="platform-icon">PO</span><div><strong>Pre-Order System</strong><span>Advance booking and pay</span></div></div>
-          </div>
-        </div>
-
-        <div class="platform-card">
-          <div class="restaurant-story">
-            <div>
-              <h2>How Scan2Plate Works for Restaurants</h2>
-              <p style="color:#6f6256;line-height:1.65;margin:0;">
-                Scan2Plate is a complete billing and QR-based food ordering system for restaurants, cafes, hotels and vendors.
-                It helps you streamline orders, manage tables, accept pre-orders with advance payment, print KOTs and deliver a better dining experience.
-              </p>
-              <div class="restaurant-benefits">
-                <div class="benefit-chip"><span class="benefit-icon">IE</span><div><strong>Increase Efficiency</strong><span>Automate order flow</span></div></div>
-                <div class="benefit-chip"><span class="benefit-icon">RW</span><div><strong>Reduce Wait Time</strong><span>Faster service</span></div></div>
-                <div class="benefit-chip"><span class="benefit-icon">HC</span><div><strong>Happy Customers</strong><span>Better experience</span></div></div>
-                <div class="benefit-chip"><span class="benefit-icon">GY</span><div><strong>Grow Your Business</strong><span>More orders, more repeat</span></div></div>
-              </div>
-            </div>
-            <div class="story-image"><img src="./assets/scan2plate-hero.jpg" alt="Restaurant using Scan2Plate"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="plans">
+    <section class="landing-section" id="workflow">
       <div class="container">
         <div class="section-head">
-          <span class="badge">Plans</span>
-          <h2>Simple plans for restaurants</h2>
-          <p>Choose a plan based on restaurant size and required features.</p>
+          <span class="section-kicker">Complete product workflow</span>
+          <h2>One connected flow from scan to report.</h2>
+          <p>Each order moves through the same operational path your restaurant already follows, only with better visibility across customer, kitchen, billing and owner views.</p>
         </div>
+        <div class="workflow-steps">
+          <div class="step-card"><span class="step-num">1</span><strong>Customer scans QR</strong><span>Table, counter or vendor mode starts the order.</span></div>
+          <div class="step-card"><span class="step-num">2</span><strong>Opens restaurant menu</strong><span>Categories, items, portions and availability load.</span></div>
+          <div class="step-card"><span class="step-num">3</span><strong>Places order</strong><span>Customer details, cart and table stay connected.</span></div>
+          <div class="step-card"><span class="step-num">4</span><strong>Kitchen receives order</strong><span>New orders appear for preparation.</span></div>
+          <div class="step-card"><span class="step-num">5</span><strong>Staff prepares order</strong><span>Status moves from New to Preparing to Ready.</span></div>
+          <div class="step-card"><span class="step-num">6</span><strong>Bill and KOT generate</strong><span>Kitchen tickets and invoices support service.</span></div>
+          <div class="step-card"><span class="step-num">7</span><strong>Customer pays</strong><span>UPI, online, cash and status are tracked.</span></div>
+          <div class="step-card"><span class="step-num">8</span><strong>Owner views reports</strong><span>Sales, items and payments become visible.</span></div>
+        </div>
+      </div>
+    </section>
 
+    <section class="landing-section" id="features">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Core product modules</span>
+          <h2>Everything your restaurant needs in one place.</h2>
+          <p>Use only the modules you need today, then expand into billing, inventory, analytics and pre-order as your restaurant workflow grows.</p>
+        </div>
+        <div class="modules-grid">
+          <article class="module-card"><span class="module-icon">QR</span><h3>QR Ordering</h3><p>Let customers scan, browse and order directly from their table.</p><div class="module-ui"><span class="ui-line"><span style="width:72%"></span></span><span class="ui-line"><span style="width:48%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">BI</span><h3>Billing & Invoicing</h3><p>Create accurate bills, apply taxes and discounts, and print professional invoices.</p><div class="module-ui"><span class="ui-line"><span style="width:88%"></span></span><span class="ui-line"><span style="width:62%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">KO</span><h3>Kitchen Operations</h3><p>Send orders directly to the kitchen with real-time New, Preparing and Ready statuses.</p><div class="module-ui"><span class="ui-line"><span style="width:55%"></span></span><span class="ui-line"><span style="width:76%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">TB</span><h3>Table Management</h3><p>Track table occupancy, active orders, unpaid bills and availability.</p><div class="module-ui"><span class="ui-line"><span style="width:44%"></span></span><span class="ui-line"><span style="width:80%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">ME</span><h3>Menu Management</h3><p>Update categories, prices, availability, half/full portions and item images.</p><div class="module-ui"><span class="ui-line"><span style="width:70%"></span></span><span class="ui-line"><span style="width:50%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">AN</span><h3>Reports & Analytics</h3><p>Monitor daily sales, popular dishes, payment status and restaurant performance.</p><div class="module-ui"><span class="ui-line"><span style="width:91%"></span></span><span class="ui-line"><span style="width:68%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">IN</span><h3>Inventory & Expenses</h3><p>Track stock, purchases, operational expenses and low-inventory items.</p><div class="module-ui"><span class="ui-line"><span style="width:53%"></span></span><span class="ui-line"><span style="width:83%"></span></span></div></article>
+          <article class="module-card"><span class="module-icon">ST</span><h3>Staff Management</h3><p>Manage staff access, attendance, payroll and role-based permissions.</p><div class="module-ui"><span class="ui-line"><span style="width:64%"></span></span><span class="ui-line"><span style="width:46%"></span></span></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section preorder-section" id="preorder">
+      <div class="container">
+        <div class="split-layout">
+          <div class="section-copy">
+            <span class="section-kicker">Customer pre-order</span>
+            <h2>Let customers order before they arrive.</h2>
+            <p>Pre-order stays available as a dedicated customer workflow while the homepage now explains the full restaurant operating system.</p>
+            <ul class="preorder-list">
+              <li>Choose location and restaurant</li>
+              <li>Browse menu and select table</li>
+              <li>Pay 25% advance or full amount</li>
+              <li>Restaurant confirms and prepares before arrival</li>
+            </ul>
+            <div class="hero-cta">
+              <a href="/restaurant-list.html" class="btn btn-primary">Start Pre-Order</a>
+              <a href="/demo" class="btn btn-outline">View How It Works</a>
+            </div>
+          </div>
+          <div class="preorder-demo-card" aria-label="Pre-order workflow preview">
+            <div class="preorder-phone">
+              <div class="preorder-screen">
+                <div class="app-head"><span>Pre-Order</span><span>A12</span></div>
+                <div class="order-progress">
+                  <div class="progress-row"><span class="progress-dot">1</span><div><strong>Location selected</strong><span>Darbhanga, Bihar</span></div></div>
+                  <div class="progress-row"><span class="progress-dot">2</span><div><strong>Menu added</strong><span>4 items in cart</span></div></div>
+                  <div class="progress-row"><span class="progress-dot">3</span><div><strong>Advance paid</strong><span>25% payment received</span></div></div>
+                  <div class="progress-row"><span class="progress-dot">4</span><div><strong>Restaurant confirms</strong><span>Food prepared before arrival</span></div></div>
+                </div>
+                <div class="pay-box"><div><span>Total</span><strong>₹560</strong></div><div><span>Pay now</span><strong>₹140</strong></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section" id="solutions">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Solutions by business type</span>
+          <h2>Built for every food business.</h2>
+          <p>Scan2Plate supports service styles from table dining to quick counter operations and room-service workflows.</p>
+        </div>
+        <div class="solutions-grid">
+          <article class="solution-card"><h3>Restaurants</h3><p>Manage table ordering, bills, KOT, payments and owner reporting.</p></article>
+          <article class="solution-card"><h3>Cafes</h3><p>Run fast QR orders, token workflows and counter payments.</p></article>
+          <article class="solution-card"><h3>Dhabas</h3><p>Keep menu, tables, staff and kitchen orders clear during busy service.</p></article>
+          <article class="solution-card"><h3>Cloud kitchens</h3><p>Track orders, kitchen status, menu availability and reports.</p></article>
+          <article class="solution-card"><h3>Food courts</h3><p>Support multi-counter food service with order tracking and billing.</p></article>
+          <article class="solution-card"><h3>Bakeries and sweet shops</h3><p>Handle item availability, quick billing and customer pickup flow.</p></article>
+          <article class="solution-card"><h3>Fast-food outlets</h3><p>Use QR or token modes for faster order intake and preparation.</p></article>
+          <article class="solution-card"><h3>Street vendors</h3><p>Run lightweight digital ordering with mobile-first controls.</p></article>
+          <article class="solution-card"><h3>Hotel room service</h3><p>Connect guest ordering with kitchen preparation and bill status.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section" id="preview">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Live product preview</span>
+          <h2>See the product surfaces that run service.</h2>
+          <p>These previews use product-aligned mockups because no separate screenshot set is currently available in project assets.</p>
+        </div>
+        <div class="preview-shell">
+          <div class="preview-tabs" role="tablist" aria-label="Product preview tabs">
+            <button class="active" type="button" data-preview-tab="Customer Ordering">Customer Ordering</button>
+            <button type="button" data-preview-tab="Restaurant Admin">Restaurant Admin</button>
+            <button type="button" data-preview-tab="Kitchen Panel">Kitchen Panel</button>
+            <button type="button" data-preview-tab="Billing">Billing</button>
+            <button type="button" data-preview-tab="Analytics">Analytics</button>
+            <button type="button" data-preview-tab="Pre-Order">Pre-Order</button>
+          </div>
+          <div class="preview-panel" id="previewPanel">
+            <div class="preview-copy">
+              <h3>Customer Ordering</h3>
+              <p>Mobile menu, cart, table details and order placement stay focused for dine-in guests.</p>
+            </div>
+            <div class="mock-window">
+              <div class="mock-head"><strong>Scan2Plate</strong><span class="live-pill">Table A4</span></div>
+              <div class="mock-grid">
+                <div class="mock-tile"><strong>Menu</strong><span>Categories, portions and item images</span></div>
+                <div class="mock-tile"><strong>Cart</strong><span>Items, tax and grand total</span></div>
+                <div class="mock-tile"><strong>Order</strong><span>Name, phone and note capture</span></div>
+                <div class="mock-tile"><strong>Track</strong><span>Live status after order</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Business benefits</span>
+          <h2>Practical outcomes for daily restaurant work.</h2>
+        </div>
+        <div class="benefit-grid">
+          <div class="benefit-card"><strong>Reduce manual order errors</strong><span>Customer carts and kitchen tickets keep item details clearer.</span></div>
+          <div class="benefit-card"><strong>Speed up table service</strong><span>Guests can order without waiting for a paper menu.</span></div>
+          <div class="benefit-card"><strong>Keep staff synchronized</strong><span>Kitchen status and active orders are easier to follow.</span></div>
+          <div class="benefit-card"><strong>Simplify billing</strong><span>Orders, taxes, discounts and payment status stay in one flow.</span></div>
+          <div class="benefit-card"><strong>Reduce paper menu dependency</strong><span>Menu changes can be reflected digitally.</span></div>
+          <div class="benefit-card"><strong>Improve order visibility</strong><span>Owners and staff can see what is active and unpaid.</span></div>
+          <div class="benefit-card"><strong>Access sales reports</strong><span>Daily performance and popular items are easier to review.</span></div>
+          <div class="benefit-card"><strong>Offer pre-order</strong><span>Advance ordering works without a separate platform.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section setup-band">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">How it works for restaurants</span>
+          <h2>Set up once, then run service from connected dashboards.</h2>
+        </div>
+        <div class="setup-steps">
+          <div class="setup-card"><strong>1. Register your restaurant</strong><span>Create the restaurant profile and admin access.</span></div>
+          <div class="setup-card"><strong>2. Add your menu and tables</strong><span>Configure items, prices, portions and table numbers.</span></div>
+          <div class="setup-card"><strong>3. Place Scan2Plate QR codes</strong><span>Put QR codes on tables, counters or service points.</span></div>
+          <div class="setup-card"><strong>4. Start receiving orders</strong><span>Manage orders, kitchen status, billing and reports.</span></div>
+        </div>
+        <div class="setup-action"><a href="/restaurant-onboarding.html" class="btn btn-primary">Set Up Your Restaurant</a></div>
+      </div>
+    </section>
+
+    <section class="landing-section">
+      <div class="container deployment-card">
+        <div class="deployment-image">
+          <img src="./assets/scan2plate-hero.jpg" alt="Old Monk Cafe Darbhanga live Scan2Plate deployment" loading="lazy">
+        </div>
+        <div class="deployment-copy">
+          <span class="section-kicker">Live deployment</span>
+          <h2>Tested in a live restaurant environment.</h2>
+          <p>Scan2Plate has been used in real operations at Old Monk Cafe, Darbhanga. The product is shaped around QR ordering, table service, kitchen coordination and feedback-driven improvements.</p>
+          <div class="deployment-points">
+            <span>QR displayed on tables</span>
+            <span>Product running in real operations</span>
+            <span>Improvements guided by restaurant workflow feedback</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section pricing-preview" id="pricing">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Pricing preview</span>
+          <h2>Simple plans for restaurants.</h2>
+          <p>Existing pricing is preserved here while keeping detailed pricing and subscriptions on the current routes.</p>
+        </div>
         <div class="plans">
           <div class="plan-card">
             <h3>Basic</h3>
@@ -1232,9 +1305,8 @@
               <li>Order tracking</li>
               <li>Basic billing</li>
             </ul>
-            <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-outline">Get Started</a>
+            <a href="/pricing" class="btn btn-outline">View Pricing</a>
           </div>
-
           <div class="plan-card featured">
             <div class="plan-tag">Popular</div>
             <h3>Advance</h3>
@@ -1246,8 +1318,25 @@
               <li>Manual order billing</li>
               <li>Reports and payment updates</li>
             </ul>
-            <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-dark">Choose Advance</a>
+            <a href="/contact" class="btn btn-dark">Book a Demo</a>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Security and reliability</span>
+          <h2>Built for authenticated restaurant operations.</h2>
+          <p>Scan2Plate keeps operational access, order data and payment status inside connected web dashboards.</p>
+        </div>
+        <div class="security-grid">
+          <div class="security-card"><strong>Secure restaurant authentication</strong><span>Admin access remains routed through the existing login.</span></div>
+          <div class="security-card"><strong>Role-based access</strong><span>Staff and dashboard permissions are supported in the product flow.</span></div>
+          <div class="security-card"><strong>Cloud data synchronization</strong><span>Restaurant orders and settings stay connected through Firebase.</span></div>
+          <div class="security-card"><strong>Payment verification</strong><span>Payment status is tracked through existing order workflows.</span></div>
+          <div class="security-card"><strong>Responsive dashboards</strong><span>Customer, kitchen and admin surfaces work across device sizes.</span></div>
         </div>
       </div>
     </section>
@@ -1304,15 +1393,100 @@
       </div>
     </section>
 
-    <section class="trust-strip">
-      <div class="container trust-bar">
-        <div class="trust-main"><span class="mark">S2</span>Scan2Plate is a billing and QR-based food ordering system with pre-order support.</div>
-        <div class="trust-item">Payment Tracking<span>UPI, cash, and status flow</span></div>
-        <div class="trust-item">Restaurant Workflows<span>Dine-in, QR, token, and pre-order</span></div>
-        <div class="trust-item">Support Channel<span>Demo and onboarding help</span></div>
+    <section class="final-cta">
+      <div class="container">
+        <h2>Ready to simplify your restaurant operations?</h2>
+        <p>Manage ordering, billing, kitchen operations and pre-orders from one connected platform.</p>
+        <div class="hero-cta" style="justify-content:center">
+          <a href="/contact" class="btn btn-primary">Book a Free Demo</a>
+          <a href="./admin-login.html?v=latest-business-login-fix" class="btn btn-outline">Admin Login</a>
+        </div>
       </div>
     </section>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <strong>Scan2Plate</strong>
+            <p>Restaurant QR ordering, billing, kitchen order management, table management, analytics and pre-order SaaS for India.</p>
+          </div>
+          <div class="footer-col"><h3>Product</h3><a href="#product">Overview</a><a href="/features">Features</a><a href="/demo">Demo</a><a href="/pricing">Pricing</a></div>
+          <div class="footer-col"><h3>Features</h3><a href="/restaurant-billing-software">Billing</a><a href="/restaurant-qr-ordering">QR Ordering</a><a href="/kitchen-display-system">Kitchen Display</a><a href="/restaurant-inventory">Inventory</a></div>
+          <div class="footer-col"><h3>Solutions</h3><a href="/cafe-billing-software">Cafes</a><a href="/cloud-kitchen-software">Cloud Kitchens</a><a href="/restaurant-pos">Restaurant POS</a><a href="/petpooja-alternative">POS Alternative</a></div>
+          <div class="footer-col"><h3>Company</h3><a href="/about">About</a><a href="/contact">Contact</a><a href="/privacy-policy">Privacy Policy</a><a href="/terms-of-service">Terms</a><a href="/refund-policy">Refund Policy</a></div>
+        </div>
+        <div class="footer-bottom">
+          <span>Scan2Plate. Restaurant operating software by Scan2Plate.</span>
+          <span>Sales and support: +91 9142579601</span>
+        </div>
+      </div>
+    </footer>
   </main>
+
+  <script>
+    (() => {
+      const previewData = {
+        "Customer Ordering": {
+          title: "Customer Ordering",
+          copy: "Mobile menu, cart, table details and order placement stay focused for dine-in guests.",
+          tiles: ["Menu|Categories, portions and item images", "Cart|Items, tax and grand total", "Order|Name, phone and note capture", "Track|Live status after order"]
+        },
+        "Restaurant Admin": {
+          title: "Restaurant Admin",
+          copy: "Restaurant teams manage orders, menu, billing, tables and restaurant settings from the admin dashboard.",
+          tiles: ["Orders|Active and completed tickets", "Tables|Occupancy and unpaid bills", "Menu|Items, categories and availability", "Staff|Access and operating controls"]
+        },
+        "Kitchen Panel": {
+          title: "Kitchen Panel",
+          copy: "Kitchen staff can see new orders, move items into preparation and mark food ready for service.",
+          tiles: ["New|Fresh customer orders", "Preparing|Kitchen work in progress", "Ready|Orders waiting for pickup", "KOT|Kitchen order ticket flow"]
+        },
+        "Billing": {
+          title: "Billing",
+          copy: "Billing keeps taxes, discounts, payment status and printable invoice workflows connected with orders.",
+          tiles: ["Invoice|Customer bill details", "Tax|Applied at billing", "Discount|Manual adjustment support", "Print|Receipt and KOT output"]
+        },
+        "Analytics": {
+          title: "Analytics",
+          copy: "Owners can review daily sales, payment status, order activity and popular items from reports.",
+          tiles: ["Sales|Daily restaurant revenue", "Payments|Paid and unpaid status", "Items|Popular dishes", "Reports|Performance view"]
+        },
+        "Pre-Order": {
+          title: "Pre-Order",
+          copy: "Customers choose a restaurant, menu, table and payment option before arriving at the venue.",
+          tiles: ["Location|Restaurant discovery", "Advance|25% or full payment", "Table|Selection before arrival", "Confirm|Restaurant preparation flow"]
+        }
+      };
+
+      const panel = document.getElementById("previewPanel");
+      const buttons = document.querySelectorAll("[data-preview-tab]");
+      if (!panel || !buttons.length) return;
+
+      buttons.forEach(button => {
+        button.addEventListener("click", () => {
+          const data = previewData[button.dataset.previewTab];
+          if (!data) return;
+          buttons.forEach(item => item.classList.toggle("active", item === button));
+          panel.innerHTML = `
+            <div class="preview-copy">
+              <h3>${data.title}</h3>
+              <p>${data.copy}</p>
+            </div>
+            <div class="mock-window">
+              <div class="mock-head"><strong>Scan2Plate</strong><span class="live-pill">${data.title}</span></div>
+              <div class="mock-grid">
+                ${data.tiles.map(tile => {
+                  const [title, copy] = tile.split("|");
+                  return `<div class="mock-tile"><strong>${title}</strong><span>${copy}</span></div>`;
+                }).join("")}
+              </div>
+            </div>
+          `;
+        });
+      });
+    })();
+  </script>
 
   <!-- CUSTOMER ORDER PAGE -->
   <main id="customerPage" class="order-shell hidden">
