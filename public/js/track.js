@@ -67,6 +67,15 @@ function normalStatus(value) {
 
 function statusLabel(order) {
   const status = normalStatus(order.status);
+  const confirmation = String(order.restaurantConfirmationStatus || "").toLowerCase();
+  if (confirmation === "pending_confirmation") return "Pending restaurant confirmation";
+  if (status === "confirmed") return "Order confirmed";
+  if (status === "scheduled") return "Scheduled for preparation";
+  if (status === "ready_for_pickup") return "Ready for pickup";
+  if (status === "ready_for_dispatch") return "Ready for dispatch";
+  if (status === "out_for_delivery") return "Out for delivery";
+  if (status === "delivered") return "Delivered";
+  if (status === "customer_arrived") return "Customer arrived";
   const labels = {
     pending: "Order placed",
     accepted: "Order accepted",
@@ -92,8 +101,24 @@ function etaMessage(order) {
 }
 
 function timelineHtml(order) {
-  const steps = ["pending", "accepted", "preparing", "ready", "completed"];
-  const labels = ["Order Placed", "Accepted", "Preparing", "Ready", "Completed"];
+  const type = String(order.orderType || order.orderMode || "").toLowerCase();
+  const delivery = type === "delivery";
+  const takeaway = type === "takeaway";
+  const scheduled = ["preorder_dine_in", "preorder", "scheduled"].includes(type);
+  const steps = delivery
+    ? ["pending", "confirmed", "preparing", "ready_for_dispatch", "out_for_delivery", "delivered"]
+    : takeaway
+      ? ["pending", "confirmed", "preparing", "ready_for_pickup", "completed"]
+      : scheduled
+        ? ["pending", "confirmed", "scheduled", "preparing", "ready", "completed"]
+        : ["pending", "accepted", "preparing", "ready", "completed"];
+  const labels = delivery
+    ? ["Pending", "Confirmed", "Preparing", "Dispatch", "On the way", "Delivered"]
+    : takeaway
+      ? ["Pending", "Confirmed", "Preparing", "Ready", "Picked Up"]
+      : scheduled
+        ? ["Pending", "Confirmed", "Scheduled", "Preparing", "Ready", "Completed"]
+        : ["Order Placed", "Accepted", "Preparing", "Ready", "Completed"];
   const current = normalStatus(order.status);
   const currentIndex = steps.indexOf(current);
   const isException = current === "cancelled" || current === "rejected";
@@ -173,6 +198,10 @@ function render(order) {
           <h2>Order Summary</h2>
           <dl class="summary-list">
             <div><dt>Customer</dt><dd>${escapeHtml(order.customerName || "-")}</dd></div>
+            <div><dt>Order type</dt><dd>${escapeHtml(String(order.orderType || order.orderMode || "dine_in").replaceAll("_", " "))}</dd></div>
+            <div><dt>Confirmation</dt><dd>${escapeHtml(String(order.restaurantConfirmationStatus || "pending").replaceAll("_", " "))}</dd></div>
+            ${order.expectedArrivalTime ? `<div><dt>Expected time</dt><dd>${escapeHtml(order.expectedArrivalTime)}</dd></div>` : ""}
+            ${order.tableNumber || order.tableNo ? `<div><dt>Table</dt><dd>${escapeHtml(order.tableNumber || order.tableNo)}</dd></div>` : ""}
             <div><dt>Order placed</dt><dd>${escapeHtml(formatDate(order.createdAt))}</dd></div>
             <div><dt>Last updated</dt><dd>${escapeHtml(formatDate(order.updatedAt))}</dd></div>
           </dl>
@@ -192,6 +221,9 @@ function render(order) {
           <dl class="summary-list bill-list">
             <div><dt>Items total</dt><dd>${money(order.itemsTotal)}</dd></div>
             <div><dt>Tax</dt><dd>${money(order.tax)}</dd></div>
+            ${Number(order.deliveryFee || 0) ? `<div><dt>Delivery fee</dt><dd>${money(order.deliveryFee)}</dd></div>` : ""}
+            <div><dt>Amount paid</dt><dd>${money(order.amountPaid || order.paidAmount || 0)}</dd></div>
+            <div><dt>Remaining</dt><dd>${money(order.remainingAmount || 0)}</dd></div>
             <div class="grand-total"><dt>Grand total</dt><dd>${money(order.grandTotal)}</dd></div>
           </dl>
         </section>

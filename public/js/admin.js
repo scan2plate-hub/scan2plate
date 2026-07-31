@@ -569,6 +569,136 @@ function ensureStaffManagementUi() {
   loadStaffUsers();
 }
 
+function ensureOnlineOrdersUi() {
+  if (!document.querySelector('.nav-item[data-section="online-orders"]')) {
+    document.querySelector('.nav-item[data-section="billing"]')?.insertAdjacentHTML("afterend", `<a class="nav-item" data-section="online-orders"><span class="nav-icon"><i class="fas fa-globe"></i></span><span>Online Orders</span></a>`);
+  }
+  document.querySelector('.nav-item[data-section="online-orders"]')?.addEventListener("click", event => {
+    event.preventDefault();
+    if (typeof window.switchSection === "function") window.switchSection("online-orders");
+    document.getElementById("pageTitle").textContent = "Online Orders";
+    document.getElementById("pageSubtitle").textContent = "Pre-orders, delivery and takeaway";
+    renderOnlineOrders();
+  });
+  if (!document.getElementById("section-online-orders")) {
+    document.querySelector("main.main-content")?.insertAdjacentHTML("beforeend", `
+      <section class="content-section" id="section-online-orders">
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;">
+            <h3 class="card-title"><i class="fas fa-globe"></i> Online Orders</h3>
+            <div class="order-filters">
+              <button class="filter-btn active" data-online-tab="dine_in" type="button">Dine-in Orders</button>
+              <button class="filter-btn" data-online-tab="preorder" type="button">Pre-Orders</button>
+              <button class="filter-btn" data-online-tab="delivery" type="button">Delivery Orders</button>
+              <button class="filter-btn" data-online-tab="takeaway" type="button">Takeaway Orders</button>
+            </div>
+          </div>
+          <div class="card-body"><div id="onlineOrdersList"></div></div>
+        </div>
+      </section>
+    `);
+  }
+  document.querySelectorAll("[data-online-tab]").forEach(button => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-online-tab]").forEach(item => item.classList.remove("active"));
+      button.classList.add("active");
+      renderOnlineOrders();
+    });
+  });
+}
+
+function ensureOnlineOrderSettingsUi() {
+  if (document.getElementById("onlineOrderSettingsCard")) return;
+  document.getElementById("section-settings")?.querySelector(".settings-grid")?.insertAdjacentHTML("beforeend", `
+    <div class="card" id="onlineOrderSettingsCard">
+      <div class="card-header"><h3 class="card-title"><i class="fas fa-calendar-check"></i> Pre-Order Settings</h3></div>
+      <div class="card-body">
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:12px;"><input id="preorderEnabledField" type="checkbox" /> Enable pre-order</label>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Minimum advance %</label><input class="form-input" id="preorderAdvancePercentageField" type="number" min="0" max="100" value="25" /></div>
+          <div class="form-group"><label class="form-label">Max booking days</label><input class="form-input" id="maxAdvanceBookingDaysField" type="number" min="0" value="7" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Minimum lead time minutes</label><input class="form-input" id="minimumPreparationLeadTimeField" type="number" min="0" value="30" /></div>
+          <div class="form-group"><label class="form-label">Cancellation window minutes</label><input class="form-input" id="cancellationWindowMinutesField" type="number" min="0" value="30" /></div>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:10px;"><input id="allowFullPaymentField" type="checkbox" checked /> Allow full payment</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:10px;"><input id="allowPayAtRestaurantField" type="checkbox" /> Allow pay-at-restaurant</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:10px;"><input id="enableTableReservationField" type="checkbox" checked /> Enable table reservation</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;"><input id="automaticAcceptanceField" type="checkbox" /> Automatic acceptance</label>
+      </div>
+    </div>
+    <div class="card" id="deliverySettingsCard">
+      <div class="card-header"><h3 class="card-title"><i class="fas fa-motorcycle"></i> Delivery Settings</h3></div>
+      <div class="card-body">
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:12px;"><input id="deliveryEnabledField" type="checkbox" /> Enable delivery</label>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Delivery radius km</label><input class="form-input" id="deliveryRadiusKmField" type="number" min="0" step="0.1" value="3" /></div>
+          <div class="form-group"><label class="form-label">Minimum order value</label><input class="form-input" id="minimumOrderValueField" type="number" min="0" value="0" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Delivery fee</label><input class="form-input" id="deliveryFeeField" type="number" min="0" value="0" /></div>
+          <div class="form-group"><label class="form-label">Free delivery threshold</label><input class="form-input" id="freeDeliveryThresholdField" type="number" min="0" value="0" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Delivery time estimate minutes</label><input class="form-input" id="estimatedDeliveryTimeField" type="number" min="0" value="45" /></div>
+          <div class="form-group"><label class="form-label">Delivery hours</label><input class="form-input" id="deliveryOperatingHoursField" placeholder="10:00-22:00" /></div>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;margin-bottom:10px;"><input id="onlinePaymentEnabledField" type="checkbox" checked /> Enable online payment</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;"><input id="cashOnDeliveryEnabledField" type="checkbox" /> Enable cash on delivery</label>
+      </div>
+    </div>
+  `);
+}
+
+function onlineOrderTab() {
+  return document.querySelector("[data-online-tab].active")?.dataset.onlineTab || "dine_in";
+}
+
+function orderTypeGroup(order = {}) {
+  const type = String(order.orderType || order.orderMode || "").toLowerCase();
+  if (type === "delivery") return "delivery";
+  if (type === "takeaway") return "takeaway";
+  if (type === "preorder_dine_in") return "preorder";
+  return "dine_in";
+}
+
+function renderOnlineOrders() {
+  const list = document.getElementById("onlineOrdersList");
+  if (!list) return;
+  const tab = onlineOrderTab();
+  const rows = allOrders.filter(order => orderTypeGroup(order) === tab);
+  list.innerHTML = rows.length ? rows.map(order => {
+    const effective = withEffectiveOrderTotals(order);
+    return `<div class="order-card">
+      <div class="order-header">
+        <div><div class="order-id">${escapeHtml(order.orderId || order.id)}</div><div class="order-time">${escapeHtml(formatDateTime(order.createdAt))}</div></div>
+        <div class="order-status ${getStatusClass(order.status)}">${escapeHtml(String(order.restaurantConfirmationStatus || order.status || "pending").replaceAll("_", " "))}</div>
+      </div>
+      <div class="order-customer">
+        <div class="customer-avatar">${escapeHtml(String(displayCustomerName(order) || "C").charAt(0).toUpperCase())}</div>
+        <div class="customer-details"><h4>${escapeHtml(displayCustomerName(order))}</h4><span>${escapeHtml(displayCustomerPhone(order) || "-")}</span></div>
+        <div class="table-badge">${escapeHtml(order.orderType || order.orderMode || "dine_in")}${order.tableNumber || order.tableNo ? ` · Table ${escapeHtml(order.tableNumber || order.tableNo)}` : ""}</div>
+      </div>
+      ${order.deliveryAddress ? `<div style="margin:10px 0;font-size:13px;color:#555;"><strong>Address:</strong> ${escapeHtml(order.deliveryAddress)} ${order.landmark ? `· ${escapeHtml(order.landmark)}` : ""}</div>` : ""}
+      ${order.expectedArrivalTime ? `<div style="margin:10px 0;font-size:13px;color:#555;"><strong>Expected:</strong> ${escapeHtml(order.expectedArrivalTime)}</div>` : ""}
+      <div class="order-items">${(order.items || []).map(item => `<div class="order-item"><span><span class="qty">${Number(item.qty || item.quantity || 0)}</span>${escapeHtml(itemDisplayName(item))}</span><span>${money(Number(item.price || 0) * Number(item.qty || item.quantity || 0))}</span></div>`).join("")}</div>
+      <div class="order-total"><span>${getPaymentMethodPill(order)}</span><span>${money(effective.grandTotal + Number(order.deliveryFee || 0))}</span></div>
+      <div style="font-size:13px;color:#555;margin-top:8px;">Paid: <strong>${money(order.amountPaid || order.paidAmount || 0)}</strong> · Remaining: <strong>${money(order.remainingAmount || 0)}</strong> · Payment: <strong>${escapeHtml(order.paymentStatus || "unpaid")}</strong></div>
+      <div class="order-actions">
+        <button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="accept">Accept</button>
+        <button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="suggesttime">Suggest New Time</button>
+        <button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="preparing">Preparing</button>
+        ${tab === "delivery" ? `<button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="dispatch">Out for Delivery</button><button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="delivered">Delivered</button>` : ""}
+        ${tab === "takeaway" ? `<button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="readyforpickup">Ready for Pickup</button>` : ""}
+        <button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="add10">+10 min</button>
+        <button class="btn btn-danger admin-order-action" data-id="${order.id}" data-action="reject">Reject</button>
+      </div>
+    </div>`;
+  }).join("") : `<div class="empty-state"><i class="fas fa-inbox"></i><h4>No ${escapeHtml(tab.replace("_", " "))} orders</h4><p>Orders appear here when customers use public workflows.</p></div>`;
+  list.querySelectorAll(".admin-order-action").forEach(btn => btn.addEventListener("click", () => handleAdminOrderAction(btn.dataset.id || "", btn.dataset.action || "")));
+}
+
 function setStaffMessage(message = "", type = "info") {
   const el = document.getElementById("staffMessage");
   if (!el) return;
@@ -2054,6 +2184,27 @@ async function loadSettings() {
     ensureLocationProtectionControl();
     const locationToggle = document.getElementById("locationProtectionEnabled");
     if (locationToggle) locationToggle.checked = restaurantSettings.locationProtectionEnabled === true || restaurantSettings.enableLocationProtection === true;
+    ensureOnlineOrderSettingsUi();
+    const setChecked = (id, value, fallback = false) => { const el = document.getElementById(id); if (el) el.checked = value === undefined ? fallback : value === true; };
+    const setValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value ?? ""; };
+    setChecked("preorderEnabledField", restaurantSettings.preorderEnabled, false);
+    setValue("preorderAdvancePercentageField", restaurantSettings.preorderAdvancePercentage ?? restaurantSettings.minimumAdvancePercentage ?? 25);
+    setValue("maxAdvanceBookingDaysField", restaurantSettings.maxAdvanceBookingDays ?? 7);
+    setValue("minimumPreparationLeadTimeField", restaurantSettings.minimumPreparationLeadTime ?? 30);
+    setValue("cancellationWindowMinutesField", restaurantSettings.cancellationWindowMinutes ?? 30);
+    setChecked("allowFullPaymentField", restaurantSettings.allowFullPayment, true);
+    setChecked("allowPayAtRestaurantField", restaurantSettings.allowPayAtRestaurant, false);
+    setChecked("enableTableReservationField", restaurantSettings.enableTableReservation, true);
+    setChecked("automaticAcceptanceField", restaurantSettings.automaticAcceptance, false);
+    setChecked("deliveryEnabledField", restaurantSettings.deliveryEnabled, false);
+    setValue("deliveryRadiusKmField", restaurantSettings.deliveryRadiusKm ?? restaurantSettings.deliveryRadius ?? 3);
+    setValue("minimumOrderValueField", restaurantSettings.minimumOrderValue ?? 0);
+    setValue("deliveryFeeField", restaurantSettings.deliveryFee ?? 0);
+    setValue("freeDeliveryThresholdField", restaurantSettings.freeDeliveryThreshold ?? 0);
+    setValue("estimatedDeliveryTimeField", restaurantSettings.estimatedDeliveryTime ?? 45);
+    setValue("deliveryOperatingHoursField", restaurantSettings.deliveryOperatingHours ?? "");
+    setChecked("onlinePaymentEnabledField", restaurantSettings.onlinePaymentEnabled, true);
+    setChecked("cashOnDeliveryEnabledField", restaurantSettings.cashOnDeliveryEnabled, false);
   } catch (err) {
     console.error("loadSettings error", err);
   }
@@ -2170,6 +2321,27 @@ async function saveSettings() {
       autoClosePrintWindow: autoClosePrintWindowFieldEl?.checked !== false,
       locationProtectionEnabled: document.getElementById("locationProtectionEnabled")?.checked === true,
       tableCount: Math.max(1, Number(document.getElementById("tableCountField")?.value || restaurantSettings.tableCount || 20)),
+      preorderEnabled: document.getElementById("preorderEnabledField")?.checked === true,
+      preOrderEnabled: document.getElementById("preorderEnabledField")?.checked === true,
+      minimumAdvancePercentage: Math.min(100, Math.max(0, Number(document.getElementById("preorderAdvancePercentageField")?.value || 25))),
+      preorderAdvancePercentage: Math.min(100, Math.max(0, Number(document.getElementById("preorderAdvancePercentageField")?.value || 25))),
+      allowFullPayment: document.getElementById("allowFullPaymentField")?.checked !== false,
+      allowPayAtRestaurant: document.getElementById("allowPayAtRestaurantField")?.checked === true,
+      maxAdvanceBookingDays: Math.max(0, Number(document.getElementById("maxAdvanceBookingDaysField")?.value || 7)),
+      minimumPreparationLeadTime: Math.max(0, Number(document.getElementById("minimumPreparationLeadTimeField")?.value || 30)),
+      enableTableReservation: document.getElementById("enableTableReservationField")?.checked !== false,
+      automaticAcceptance: document.getElementById("automaticAcceptanceField")?.checked === true,
+      cancellationWindowMinutes: Math.max(0, Number(document.getElementById("cancellationWindowMinutesField")?.value || 30)),
+      deliveryEnabled: document.getElementById("deliveryEnabledField")?.checked === true,
+      enableDelivery: document.getElementById("deliveryEnabledField")?.checked === true,
+      deliveryRadiusKm: Math.max(0, Number(document.getElementById("deliveryRadiusKmField")?.value || 3)),
+      minimumOrderValue: Math.max(0, Number(document.getElementById("minimumOrderValueField")?.value || 0)),
+      deliveryFee: Math.max(0, Number(document.getElementById("deliveryFeeField")?.value || 0)),
+      freeDeliveryThreshold: Math.max(0, Number(document.getElementById("freeDeliveryThresholdField")?.value || 0)),
+      estimatedDeliveryTime: Math.max(0, Number(document.getElementById("estimatedDeliveryTimeField")?.value || 45)),
+      onlinePaymentEnabled: document.getElementById("onlinePaymentEnabledField")?.checked !== false,
+      cashOnDeliveryEnabled: document.getElementById("cashOnDeliveryEnabledField")?.checked === true,
+      deliveryOperatingHours: document.getElementById("deliveryOperatingHoursField")?.value.trim() || "",
       updatedAt: serverTimestamp()
     };
 
@@ -2182,6 +2354,19 @@ async function saveSettings() {
           businessMode: payload.businessMode,
           orderMode: payload.orderMode,
           tableCount: payload.tableCount,
+          preorderEnabled: payload.preorderEnabled,
+          preOrderEnabled: payload.preOrderEnabled,
+          deliveryEnabled: payload.deliveryEnabled,
+          enableDelivery: payload.enableDelivery,
+          minimumAdvancePercentage: payload.minimumAdvancePercentage,
+          preorderAdvancePercentage: payload.preorderAdvancePercentage,
+          deliveryRadiusKm: payload.deliveryRadiusKm,
+          minimumOrderValue: payload.minimumOrderValue,
+          deliveryFee: payload.deliveryFee,
+          freeDeliveryThreshold: payload.freeDeliveryThreshold,
+          estimatedDeliveryTime: payload.estimatedDeliveryTime,
+          onlinePaymentEnabled: payload.onlinePaymentEnabled,
+          cashOnDeliveryEnabled: payload.cashOnDeliveryEnabled,
           dailyOrderResetTime: payload.dailyOrderResetTime,
           restaurantLogoUrl: payload.restaurantLogoUrl,
           uploadedLogoUrl: payload.uploadedLogoUrl,
@@ -4104,15 +4289,19 @@ async function handleAdminOrderAction(orderDocId, action) {
     const currentItems = order.items || [];
 
     if (action === "accept") {
+      const onlineType = String(order.orderType || "").toLowerCase();
+      const isScheduledOnline = ["preorder_dine_in", "takeaway", "delivery"].includes(onlineType);
       const payload = {
-        status: "accepted",
+        status: isScheduledOnline ? "confirmed" : "accepted",
+        restaurantConfirmationStatus: "confirmed",
+        confirmedAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
 
-      if (!order.etaStartedAt) payload.etaStartedAt = serverTimestamp();
+      if (!order.etaStartedAt && !isScheduledOnline) payload.etaStartedAt = serverTimestamp();
 
       await updateDoc(orderRef, payload);
-      printKOTFromOrder(order, currentItems);
+      if (!isScheduledOnline) printKOTFromOrder(order, currentItems);
       adminAcceptedSnapshots.set(orderDocId, buildOrderItemSnapshot(currentItems));
       seenSnapshotMap.set(orderDocId, buildOrderItemSnapshot(currentItems));
       return;
@@ -4121,6 +4310,9 @@ async function handleAdminOrderAction(orderDocId, action) {
     if (action === "preparing") {
       await updateDoc(orderRef, {
         status: "preparing",
+        restaurantConfirmationStatus: order.restaurantConfirmationStatus || "confirmed",
+        scheduledPreparationTime: order.scheduledPreparationTime || order.expectedArrivalTime || null,
+        etaStartedAt: order.etaStartedAt || serverTimestamp(),
         updatedAt: serverTimestamp()
       });
       return;
@@ -4128,7 +4320,7 @@ async function handleAdminOrderAction(orderDocId, action) {
 
     if (action === "ready") {
       await updateDoc(orderRef, {
-        status: "ready",
+        status: String(order.orderType || "").toLowerCase() === "delivery" ? "ready_for_dispatch" : String(order.orderType || "").toLowerCase() === "takeaway" ? "ready_for_pickup" : "ready",
         updatedAt: serverTimestamp()
       });
       return;
@@ -4137,7 +4329,11 @@ async function handleAdminOrderAction(orderDocId, action) {
     if (action === "reject") {
       await updateDoc(orderRef, {
         status: "rejected",
+        restaurantConfirmationStatus: "rejected",
+        rejectedAt: serverTimestamp(),
         billClosed: true,
+        tableHoldExpiresAt: null,
+        refundStatus: Number(order.amountPaid || order.paidAmount || 0) > 0 ? "refund_required" : "not_applicable",
         updatedAt: serverTimestamp()
       });
       return;
@@ -4146,8 +4342,35 @@ async function handleAdminOrderAction(orderDocId, action) {
     if (action === "add10") {
       await updateDoc(orderRef, {
         etaMinutes: currentEta + 10,
+        preparationEstimateMinutes: currentEta + 10,
         updatedAt: serverTimestamp()
       });
+      return;
+    }
+
+    if (action === "suggesttime") {
+      const value = prompt("Suggest new expected time (YYYY-MM-DDTHH:mm):", order.expectedArrivalTime || "");
+      if (!value) return;
+      await updateDoc(orderRef, {
+        suggestedArrivalTime: value,
+        restaurantConfirmationStatus: "time_suggested",
+        updatedAt: serverTimestamp()
+      });
+      return;
+    }
+
+    if (action === "readyforpickup") {
+      await updateDoc(orderRef, { status: "ready_for_pickup", updatedAt: serverTimestamp() });
+      return;
+    }
+
+    if (action === "dispatch") {
+      await updateDoc(orderRef, { status: "out_for_delivery", updatedAt: serverTimestamp() });
+      return;
+    }
+
+    if (action === "delivered") {
+      await updateDoc(orderRef, { status: "delivered", billClosed: true, updatedAt: serverTimestamp() });
       return;
     }
 
@@ -4933,6 +5156,7 @@ function processOrdersSnapshot(snap) {
   renderReportRows();
   renderKotSections();
   renderTablesSection();
+  renderOnlineOrders();
   markInitialLoadDone();
   devLog("orders snapshot loaded", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
 
@@ -5491,6 +5715,7 @@ function mountAiHelpAssistant() {
 updateUserCard();
 ensureManualDiscountUi();
 ensureStaffManagementUi();
+ensureOnlineOrdersUi();
 applyStaffPermissions();
 mountAiHelpAssistant();
 renderTableNumberOptions("01");
@@ -5506,6 +5731,7 @@ try {
 
   if (!subscriptionBlocked) {
     await withTimeout(loadSettings(), 20000, "Settings load timed out");
+    ensureOnlineOrderSettingsUi();
     mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
     if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
       const quickActions = document.querySelector(".quick-actions");

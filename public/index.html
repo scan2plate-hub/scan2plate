@@ -1029,12 +1029,13 @@
       <div class="container hero-layout">
         <div class="hero-copy reveal">
           <span class="section-kicker">Complete restaurant management and billing software</span>
-          <h1>Run your restaurant from one smart <span>platform.</span></h1>
-          <p>Manage QR ordering, billing, kitchen operations, tables, payments, reports and customer pre-orders without changing how your restaurant already works.</p>
+          <h1>Order at the table, before arrival, or from <span>home.</span></h1>
+          <p>Scan2Plate connects restaurant ordering, billing, kitchen operations, pre-orders and food delivery in one platform.</p>
           <div class="hero-cta">
-            <a href="/contact" class="btn btn-primary">Book a Free Demo</a>
-            <a href="/demo" class="btn btn-outline">Explore Live Demo</a>
-            <a href="#preorder" class="text-link">Start Pre-Order</a>
+            <a href="#customer-actions" class="btn btn-primary">Scan & Order</a>
+            <a href="./customer-order.html?mode=preorder" class="btn btn-outline">Start Pre-Order</a>
+            <a href="./customer-order.html?mode=delivery" class="btn btn-outline">Order for Delivery</a>
+            <a href="./admin-login.html?v=latest-business-login-fix" class="text-link">Restaurant Admin</a>
           </div>
           <div class="hero-proof" aria-label="Scan2Plate core capabilities">
             <div class="proof-card"><strong>QR table ordering</strong><span>Guests scan, browse the menu and send orders directly from the table.</span></div>
@@ -1086,6 +1087,40 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section customer-actions-section" id="customer-actions">
+      <div class="container">
+        <div class="section-head">
+          <span class="section-kicker">Choose how you want to order</span>
+          <h2>Three customer paths. One restaurant platform.</h2>
+          <p>Customers can order from the table QR, schedule food before arriving, or place delivery orders from restaurants that enable delivery.</p>
+        </div>
+        <div class="customer-action-grid">
+          <article class="customer-action-card">
+            <span class="customer-action-icon">QR</span>
+            <h3>Order at Restaurant</h3>
+            <p>Scan the QR code at your table, browse the menu, place an order and track it in real time.</p>
+            <a href="#qr-ordering-note" class="btn btn-dark">Scan & Order</a>
+          </article>
+          <article class="customer-action-card">
+            <span class="customer-action-icon">PO</span>
+            <h3>Pre-Order Before Arrival</h3>
+            <p>Choose a restaurant, order food in advance, reserve a table and arrive when your meal is ready.</p>
+            <a href="./customer-order.html?mode=preorder" class="btn btn-primary">Start Pre-Order</a>
+          </article>
+          <article class="customer-action-card">
+            <span class="customer-action-icon">DL</span>
+            <h3>Food Delivery</h3>
+            <p>Choose a nearby restaurant, order food and get it delivered to your address.</p>
+            <a href="./customer-order.html?mode=delivery" class="btn btn-outline">Order for Delivery</a>
+          </article>
+        </div>
+        <div class="qr-ordering-note" id="qr-ordering-note">
+          <strong>Dine-in QR ordering uses the existing live table-ordering route.</strong>
+          <span>Open Scan2Plate from the QR code placed on your restaurant table so the current customer menu receives the correct restaurant and table details.</span>
         </div>
       </div>
     </section>
@@ -1157,7 +1192,7 @@
               <li>Restaurant confirms and prepares before arrival</li>
             </ul>
             <div class="hero-cta">
-              <a href="/restaurant-list.html" class="btn btn-primary">Start Pre-Order</a>
+              <a href="./customer-order.html?mode=preorder" class="btn btn-primary">Start Pre-Order</a>
               <a href="/demo" class="btn btn-outline">View How It Works</a>
             </div>
           </div>

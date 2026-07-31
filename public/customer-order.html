@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pre-Order & Delivery - Scan2Plate</title>
+  <meta name="description" content="Order food before arrival or for delivery from Scan2Plate restaurants that support online ordering." />
+  <link rel="icon" href="./assets/logo.PNG" />
+  <link rel="stylesheet" href="./css/customer-order.css" />
+</head>
+<body>
+  <header class="customer-topbar">
+    <a class="brand" href="./index.html">
+      <img src="./assets/logo.PNG" alt="Scan2Plate" />
+      <span><strong>Scan2Plate</strong><small>Pre-order and delivery</small></span>
+    </a>
+    <nav>
+      <a href="./track.html">Track Order</a>
+      <a href="./admin-login.html?v=latest-business-login-fix">Restaurant Admin</a>
+    </nav>
+  </header>
+
+  <main class="customer-shell">
+    <section class="customer-hero">
+      <div>
+        <span class="kicker">Customer ordering</span>
+        <h1 id="pageTitle">Choose food before you arrive.</h1>
+        <p id="pageCopy">Select your location, choose a restaurant, add menu items, reserve a table or request takeaway, then track confirmation from the restaurant.</p>
+      </div>
+      <div class="mode-switch" role="tablist" aria-label="Order mode">
+        <button class="active" id="preorderModeBtn" type="button" data-mode="preorder">Pre-Order</button>
+        <button id="deliveryModeBtn" type="button" data-mode="delivery">Delivery</button>
+      </div>
+    </section>
+
+    <section class="workflow-card">
+      <ol class="stepper" aria-label="Order steps">
+        <li class="active" data-step-dot="1">Location</li>
+        <li data-step-dot="2">Restaurant</li>
+        <li data-step-dot="3">Menu</li>
+        <li data-step-dot="4">Details</li>
+        <li data-step-dot="5">Payment</li>
+      </ol>
+
+      <div id="statusMessage" class="status-message hidden"></div>
+
+      <section class="panel active" id="locationPanel">
+        <div class="panel-head">
+          <div><span class="kicker">Step 1</span><h2>Choose location</h2></div>
+          <button class="ghost-btn" id="useGeoBtn" type="button">Use current location</button>
+        </div>
+        <div class="form-grid">
+          <label>Country<select id="countryField"></select></label>
+          <label>State<select id="stateField"></select></label>
+          <label>District / City<select id="cityField"></select></label>
+          <label class="delivery-only">Area / locality<input id="areaField" placeholder="Area or locality" /></label>
+        </div>
+        <div class="actions"><button class="primary-btn" id="findRestaurantsBtn" type="button">Show Restaurants</button></div>
+      </section>
+
+      <section class="panel" id="restaurantsPanel">
+        <div class="panel-head">
+          <div><span class="kicker">Step 2</span><h2>Select restaurant</h2></div>
+          <input id="restaurantSearch" placeholder="Search restaurant or cuisine" />
+        </div>
+        <div class="filter-row">
+          <label><input id="openOnlyFilter" type="checkbox" /> Accepting orders</label>
+          <label class="delivery-only"><input id="deliveryOnlyFilter" type="checkbox" checked /> Delivery enabled</label>
+        </div>
+        <div id="restaurantResults" class="restaurant-grid"></div>
+      </section>
+
+      <section class="panel" id="menuPanel">
+        <div class="panel-head">
+          <div><span class="kicker">Step 3</span><h2 id="menuRestaurantTitle">Restaurant menu</h2></div>
+          <button class="ghost-btn" id="backToRestaurantsBtn" type="button">Change restaurant</button>
+        </div>
+        <div id="categoryTabs" class="category-tabs"></div>
+        <div class="order-layout">
+          <div id="menuGrid" class="menu-grid"></div>
+          <aside class="cart-card">
+            <h3>Cart</h3>
+            <div id="cartItems"></div>
+            <label>Customer note<textarea id="customerNote" rows="3" placeholder="Less spicy, allergies, packing request..."></textarea></label>
+            <div id="cartSummary" class="cart-summary"></div>
+            <button class="primary-btn" id="continueDetailsBtn" type="button">Continue</button>
+          </aside>
+        </div>
+      </section>
+
+      <section class="panel" id="detailsPanel">
+        <div class="panel-head"><div><span class="kicker">Step 4</span><h2>Dining and customer details</h2></div></div>
+        <div class="type-grid" id="diningTypeGroup">
+          <label><input type="radio" name="diningType" value="preorder_dine_in" checked /> Dine-in Pre-Order<span>Reserve a table for arrival.</span></label>
+          <label><input type="radio" name="diningType" value="takeaway" /> Takeaway<span>No table required.</span></label>
+          <label><input type="radio" name="diningType" value="delivery" /> Delivery<span>Deliver to your address.</span></label>
+        </div>
+        <div class="form-grid">
+          <label>Full name<input id="customerName" autocomplete="name" /></label>
+          <label>Mobile number<input id="customerPhone" inputmode="numeric" autocomplete="tel" /></label>
+          <label>Email optional<input id="customerEmail" type="email" autocomplete="email" /></label>
+          <label>Expected arrival / delivery time<input id="arrivalTime" type="datetime-local" /></label>
+        </div>
+        <div id="tableSection">
+          <h3>Available tables</h3>
+          <div id="tableGrid" class="table-grid"></div>
+        </div>
+        <div id="deliveryAddressSection" class="hidden">
+          <h3>Delivery address</h3>
+          <div class="form-grid">
+            <label class="wide">Full delivery address<textarea id="deliveryAddress" rows="3"></textarea></label>
+            <label>Landmark<input id="landmarkField" /></label>
+            <label>Postal code<input id="postalCodeField" inputmode="numeric" /></label>
+          </div>
+        </div>
+        <div class="actions"><button class="ghost-btn" id="backToMenuBtn" type="button">Back</button><button class="primary-btn" id="continuePaymentBtn" type="button">Continue to Payment</button></div>
+      </section>
+
+      <section class="panel" id="paymentPanel">
+        <div class="panel-head"><div><span class="kicker">Step 5</span><h2>Confirm and pay</h2></div></div>
+        <div class="payment-layout">
+          <div>
+            <div id="paymentOptions" class="payment-options"></div>
+            <p class="muted">Online payment gateway is not duplicated here. Orders are created using existing payment status fields and can be collected through the restaurant’s enabled payment method.</p>
+          </div>
+          <aside id="finalSummary" class="final-summary"></aside>
+        </div>
+        <div class="actions"><button class="ghost-btn" id="backToDetailsBtn" type="button">Back</button><button class="primary-btn" id="confirmOrderBtn" type="button">Confirm Order</button></div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="./js/customer-order.js"></script>
+</body>
+</html>
