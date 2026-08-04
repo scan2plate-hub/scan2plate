@@ -4193,7 +4193,7 @@ async function createManualBill() {
         discountAt: manualDiscount.discountAt || null,
         paidAmount: paymentStatus === "paid" ? grandTotal : 0,
         remainingAmount: paymentStatus === "paid" ? 0 : grandTotal,
-        billClosed: paymentStatus === "paid" && ["ready", "served", "completed"].includes(oldStatus),
+        billClosed: paymentStatus === "paid",
         status: oldData.status || "pending",
         etaMinutes: Number(oldData.etaMinutes || 10),
         etaStartedAt: oldData.etaStartedAt || null,
@@ -5141,29 +5141,44 @@ function processOrdersSnapshot(snap) {
   if (todayRazorpayCollectionEl) todayRazorpayCollectionEl.textContent = money(todayRazorpayCollection);
   if (pendingOrdersBadgeEl) pendingOrdersBadgeEl.textContent = String(activeOrders.length);
 
-  renderOrdersList(orderListEl, dashboardOrders);
-  if (!dashboardOrders.length && orderListEl) {
-    orderListEl.innerHTML = `
-      <div class="empty-state">
-        <i class="fas fa-inbox"></i>
-        <h4>No orders today yet</h4>
-        <p>New orders appear here automatically</p>
-      </div>
-    `;
-  }
-  renderOrdersList(allOrdersListEl, getFilteredActiveOrders());
-  renderBestSelling(todayOrders);
-  renderReportRows();
-  renderKotSections();
-  renderTablesSection();
-  renderOnlineOrders();
+  // Each render step runs in isolation: a bad/legacy record in one section
+  // (e.g. an old order missing a newer field) must not stop the other
+  // sections — including the live orders/tables views — from updating.
+  const safeRender = (label, fn) => {
+    try {
+      fn();
+    } catch (error) {
+      console.error(`processOrdersSnapshot: ${label} failed`, error);
+    }
+  };
+
+  safeRender("renderOrdersList(dashboard)", () => {
+    renderOrdersList(orderListEl, dashboardOrders);
+    if (!dashboardOrders.length && orderListEl) {
+      orderListEl.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-inbox"></i>
+          <h4>No orders today yet</h4>
+          <p>New orders appear here automatically</p>
+        </div>
+      `;
+    }
+  });
+  safeRender("renderOrdersList(all)", () => renderOrdersList(allOrdersListEl, getFilteredActiveOrders()));
+  safeRender("renderBestSelling", () => renderBestSelling(todayOrders));
+  safeRender("renderReportRows", () => renderReportRows());
+  safeRender("renderKotSections", () => renderKotSections());
+  safeRender("renderTablesSection", () => renderTablesSection());
+  safeRender("renderOnlineOrders", () => renderOnlineOrders());
   markInitialLoadDone();
   devLog("orders snapshot loaded", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
 
-  allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
-    .forEach(order => deductInventoryForCompletedOrder(order.id));
+  safeRender("deductInventoryForCompletedOrder", () => {
+    allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
+      .forEach(order => deductInventoryForCompletedOrder(order.id));
+  });
 
-  handleRealtimeAdminAlerts(activeOrders);
+  safeRender("handleRealtimeAdminAlerts", () => handleRealtimeAdminAlerts(activeOrders));
 }
 
 /* =========================================================

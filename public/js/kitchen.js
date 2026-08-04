@@ -591,50 +591,60 @@ await withTimeout(loadSettings(), 15000, "Kitchen settings load timed out.");
 registerCleanup(onSnapshot(
   collection(db, "orders"),
   snap => {
-    const activeDocs = snap.docs.filter(d => {
-      const x = d.data();
-      return (
-        String(x.restaurantId || "") === restaurantId &&
-        !["delivered","cancelled","rejected"].includes(String(x.status || "pending").toLowerCase())
-      );
-    });
+    // Alert bookkeeping and the actual board render are kept independent:
+    // a bad/legacy record must not stop the live order board from updating.
+    try {
+      const activeDocs = snap.docs.filter(d => {
+        const x = d.data();
+        return (
+          String(x.restaurantId || "") === restaurantId &&
+          !["delivered","cancelled","rejected"].includes(String(x.status || "pending").toLowerCase())
+        );
+      });
 
-    let shouldAlert = false;
-    let alertType   = "new_order";
+      let shouldAlert = false;
+      let alertType   = "new_order";
 
-    activeDocs.forEach(d => {
-      const x          = d.data();
-      const currentKey = getAlertKey(x);
-      const oldKey     = orderAlertMap.get(d.id);
+      activeDocs.forEach(d => {
+        const x          = d.data();
+        const currentKey = getAlertKey(x);
+        const oldKey     = orderAlertMap.get(d.id);
 
-      if (firstLoadDone) {
-        if (!oldKey) {
-          shouldAlert = true;
-          alertType   = "new_order";
-        } else if (oldKey !== currentKey) {
-          if (x.hasNewItems === true) {
-            shouldAlert = true;
-            alertType   = "new_items";
-          } else if (String(x.status || "").toLowerCase() === "pending") {
+        if (firstLoadDone) {
+          if (!oldKey) {
             shouldAlert = true;
             alertType   = "new_order";
+          } else if (oldKey !== currentKey) {
+            if (x.hasNewItems === true) {
+              shouldAlert = true;
+              alertType   = "new_items";
+            } else if (String(x.status || "").toLowerCase() === "pending") {
+              shouldAlert = true;
+              alertType   = "new_order";
+            }
           }
         }
-      }
 
-      orderAlertMap.set(d.id, currentKey);
-    });
+        orderAlertMap.set(d.id, currentKey);
+      });
 
-    // Prune stale entries
-    const liveIds = new Set(activeDocs.map(d => d.id));
-    [...orderAlertMap.keys()].forEach(id => {
-      if (!liveIds.has(id)) orderAlertMap.delete(id);
-    });
+      // Prune stale entries
+      const liveIds = new Set(activeDocs.map(d => d.id));
+      [...orderAlertMap.keys()].forEach(id => {
+        if (!liveIds.has(id)) orderAlertMap.delete(id);
+      });
 
-    if (shouldAlert) startAlert(alertType);
+      if (shouldAlert) startAlert(alertType);
+    } catch (error) {
+      console.error("kitchen order alert processing failed", error);
+    }
 
     firstLoadDone = true;
-    renderOrders(snap.docs);
+    try {
+      renderOrders(snap.docs);
+    } catch (error) {
+      console.error("kitchen renderOrders failed", error);
+    }
   },
   err => {
     console.error(err);
