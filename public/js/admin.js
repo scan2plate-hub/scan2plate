@@ -70,7 +70,30 @@ function ensureLoadingNotice() {
   notice.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:99999;display:none;max-width:min(92vw,520px);padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;box-shadow:0 14px 45px rgba(0,0,0,.12);font-size:13px;font-weight:700;";
   notice.innerHTML = `<div id="adminLoadingNoticeText">Taking longer than expected. Please check internet and retry.</div><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;"><button id="adminRetryLoadBtn" class="btn btn-sm btn-primary" type="button">Retry</button><button id="adminLoginAgainBtn" class="btn btn-sm btn-outline" type="button">Logout/Login Again</button></div><details style="margin-top:8px;font-weight:500;"><summary>Debug</summary><pre id="adminLoadingDebug" style="white-space:pre-wrap;font-size:11px;margin:6px 0 0;"></pre></details>`;
   document.body.appendChild(notice);
-  document.getElementById("adminRetryLoadBtn")?.addEventListener("click", () => location.reload());
+  document.getElementById("adminRetryLoadBtn")?.addEventListener("click", async event => {
+    const button = event.currentTarget;
+    if (button.dataset.busy === "true") return; // prevent duplicate retry clicks
+    button.dataset.busy = "true";
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "Retrying...";
+    try {
+      // Refresh the ID token first: a stale/expired token is a common cause of
+      // permission-denied that a page reload would also fix, but this is faster
+      // and re-runs only the failed data load instead of the whole app.
+      if (auth.currentUser) {
+        try { await auth.currentUser.getIdToken(true); } catch (refreshErr) { console.error("Retry token refresh failed", refreshErr); }
+      }
+      await withTimeout(loadOrders(), 20000, "Retry timed out. Please refresh the page.");
+    } catch (retryErr) {
+      console.error("Manual retry failed", retryErr);
+      markInitialLoadFailed("Retry failed. Please refresh the page.", retryErr);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+      button.dataset.busy = "false";
+    }
+  });
   document.getElementById("adminLoginAgainBtn")?.addEventListener("click", () => {
     localStorage.removeItem("scan2plate_user");
     localStorage.removeItem("scan2serve_user");
@@ -106,6 +129,17 @@ function markInitialLoadDone() {
   clearTimeout(adminLoadTimeout);
   safeSetLoading(false);
   hideLoadingNotice();
+}
+
+// A failed load must still clear the loading state (so installAppSafety's
+// generic stuck-page fallback doesn't ALSO pop up a second, redundant
+// "still loading" box on top of this one) while keeping the specific
+// error + Retry panel visible.
+function markInitialLoadFailed(message, error = null) {
+  adminInitialLoadDone = true;
+  clearTimeout(adminLoadTimeout);
+  safeSetLoading(false);
+  showLoadingNotice(message, error);
 }
 
 function safeSetLoading(isLoading, target = document.body) {
@@ -4193,7 +4227,7 @@ async function createManualBill() {
         discountAt: manualDiscount.discountAt || null,
         paidAmount: paymentStatus === "paid" ? grandTotal : 0,
         remainingAmount: paymentStatus === "paid" ? 0 : grandTotal,
-        billClosed: paymentStatus === "paid" && ["ready", "served", "completed"].includes(oldStatus),
+        billClosed: paymentStatus === "paid",
         status: oldData.status || "pending",
         etaMinutes: Number(oldData.etaMinutes || 10),
         etaStartedAt: oldData.etaStartedAt || null,
@@ -4938,7 +4972,10 @@ function filterOrdersByReportType(type, date, month, year, startDate, endDate) {
 }
 
 function getFilteredReportOrders() {
-  return filterOrdersByReportType(selectedReportType, reportDateEl?.value, reportMonthEl?.value, reportYearEl?.value, reportStartDateEl?.value, reportEndDateEl?.value);
+  const filters = { type: selectedReportType, date: reportDateEl?.value, month: reportMonthEl?.value, year: reportYearEl?.value, startDate: reportStartDateEl?.value, endDate: reportEndDateEl?.value };
+  const result = filterOrdersByReportType(filters.type, filters.date, filters.month, filters.year, filters.startDate, filters.endDate);
+  devLog("report filter applied", { ...filters, restaurantId, totalOrdersInMemory: allOrders.length, matchedCount: result.length });
+  return result;
 }
 
 function renderReportSummary(filteredOrders) {
@@ -5141,51 +5178,92 @@ function processOrdersSnapshot(snap) {
   if (todayRazorpayCollectionEl) todayRazorpayCollectionEl.textContent = money(todayRazorpayCollection);
   if (pendingOrdersBadgeEl) pendingOrdersBadgeEl.textContent = String(activeOrders.length);
 
-  renderOrdersList(orderListEl, dashboardOrders);
-  if (!dashboardOrders.length && orderListEl) {
-    orderListEl.innerHTML = `
-      <div class="empty-state">
-        <i class="fas fa-inbox"></i>
-        <h4>No orders today yet</h4>
-        <p>New orders appear here automatically</p>
-      </div>
-    `;
-  }
-  renderOrdersList(allOrdersListEl, getFilteredActiveOrders());
-  renderBestSelling(todayOrders);
-  renderReportRows();
-  renderKotSections();
-  renderTablesSection();
-  renderOnlineOrders();
+  // Each render step runs in isolation: a bad/legacy record in one section
+  // (e.g. an old order missing a newer field) must not stop the other
+  // sections — including the live orders/tables views — from updating.
+  const safeRender = (label, fn) => {
+    try {
+      fn();
+    } catch (error) {
+      console.error(`processOrdersSnapshot: ${label} failed`, error);
+    }
+  };
+
+  safeRender("renderOrdersList(dashboard)", () => {
+    renderOrdersList(orderListEl, dashboardOrders);
+    if (!dashboardOrders.length && orderListEl) {
+      orderListEl.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-inbox"></i>
+          <h4>No orders today yet</h4>
+          <p>New orders appear here automatically</p>
+        </div>
+      `;
+    }
+  });
+  safeRender("renderOrdersList(all)", () => renderOrdersList(allOrdersListEl, getFilteredActiveOrders()));
+  safeRender("renderBestSelling", () => renderBestSelling(todayOrders));
+  safeRender("renderReportRows", () => renderReportRows());
+  safeRender("renderKotSections", () => renderKotSections());
+  safeRender("renderTablesSection", () => renderTablesSection());
+  safeRender("renderOnlineOrders", () => renderOnlineOrders());
   markInitialLoadDone();
   devLog("orders snapshot loaded", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
 
-  allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
-    .forEach(order => deductInventoryForCompletedOrder(order.id));
+  safeRender("deductInventoryForCompletedOrder", () => {
+    allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
+      .forEach(order => deductInventoryForCompletedOrder(order.id));
+  });
 
-  handleRealtimeAdminAlerts(activeOrders);
+  safeRender("handleRealtimeAdminAlerts", () => handleRealtimeAdminAlerts(activeOrders));
 }
 
 /* =========================================================
    REALTIME LOADER
 ========================================================= */
+let ordersTokenRefreshRetried = false;
+
 async function loadOrders() {
   try {
     cleanupFirestoreListeners(ordersUnsubscribe);
     ordersUnsubscribe = null;
 
-    devLog("orders query started", { restaurantId });
+    devLog("orders query started", {
+      uid: auth.currentUser?.uid || null,
+      role: currentUser?.role || null,
+      restaurantId,
+      collectionPath: "orders",
+      whereClause: `restaurantId == ${restaurantId}`
+    });
     ordersUnsubscribe = registerCleanup(onSnapshot(
       query(collection(db, "orders"), where("restaurantId", "==", restaurantId)),
-      snap => processOrdersSnapshot(snap),
-      err => {
-        console.error("orders listener error", err);
-        showLoadingNotice("Unable to load data. Please retry.", err);
+      snap => {
+        ordersTokenRefreshRetried = false;
+        devLog("orders query result", { restaurantId, resultCount: snap.docs.length });
+        processOrdersSnapshot(snap);
+      },
+      async err => {
+        console.error("orders listener error", { code: err?.code, message: err?.message, restaurantId });
+        // A stale/expired ID token on cold load can surface as permission-denied
+        // even for a legitimately authorized user. Force one token refresh and
+        // resubscribe before surfacing an error — this is transparent to the
+        // user and does not loop (guarded by ordersTokenRefreshRetried).
+        if (err?.code === "permission-denied" && auth.currentUser && !ordersTokenRefreshRetried) {
+          ordersTokenRefreshRetried = true;
+          devLog("orders listener permission-denied, refreshing ID token and retrying once", { restaurantId });
+          try {
+            await auth.currentUser.getIdToken(true);
+            return loadOrders();
+          } catch (refreshErr) {
+            console.error("Token refresh retry failed", refreshErr);
+          }
+        }
+        markInitialLoadFailed("Unable to load data. Please retry.", err);
       }
     ));
   } catch (err) {
     console.error("loadOrders error", err);
-    showLoadingNotice("Unable to load data. Please retry.", err);
+    markInitialLoadFailed("Unable to load data. Please retry.", err);
   }
 }
 
@@ -5725,6 +5803,22 @@ if (reportMonthEl && !reportMonthEl.value) reportMonthEl.value = todayDateStr().
 if (reportYearEl && !reportYearEl.value) reportYearEl.value = todayDateStr().slice(0, 4);
 
 startInitialLoadTimeout("Admin Dashboard");
+
+// Wait for Firebase Auth to finish restoring its persisted session before
+// issuing any Firestore query. Without this, the very first request (on a
+// cold load / slow network) can race ahead of the ID token and come back
+// permission-denied even for a valid, logged-in user.
+await auth.authStateReady();
+devLog("Firebase Auth session restored", { uid: auth.currentUser?.uid || null, restaurantId });
+if (!auth.currentUser) {
+  console.error("Admin Dashboard: no Firebase Auth session after restore; treating login as stale.");
+  localStorage.removeItem("scan2plate_user");
+  localStorage.removeItem("scan2serve_user");
+  alert("Your session has expired. Please login again.");
+  window.location.href = "./admin-login.html";
+  throw new Error("Firebase Auth session missing");
+}
+
 try {
   const subscriptionBlocked = await withTimeout(checkRestaurantSubscription(), 15000, "Subscription check timed out");
   setInterval(checkRestaurantSubscription, 5 * 60 * 1000);
@@ -5747,7 +5841,7 @@ try {
         renderTablesSection();
       },
       error => {
-        console.error("tables listener error", error);
+        console.error("tables listener error", { code: error?.code, message: error?.message, restaurantId });
         showLoadingNotice("Unable to load data. Please retry.", error);
       }
     ));
@@ -5759,6 +5853,6 @@ try {
     markInitialLoadDone();
   }
 } catch (error) {
-  console.error("Admin startup failed", error);
-  showLoadingNotice("Unable to load data. Please retry.", error);
+  console.error("Admin startup failed", { code: error?.code, message: error?.message, restaurantId });
+  markInitialLoadFailed("Unable to load data. Please retry.", error);
 }
