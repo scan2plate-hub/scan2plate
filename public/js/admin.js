@@ -59,6 +59,7 @@ localStorage.setItem("scan2plate_last_restaurant_id", restaurantId);
 
 const isDevHost = ["localhost", "127.0.0.1"].includes(location.hostname);
 const devLog = (...args) => { if (isDevHost) console.log("[Scan2Plate Admin]", ...args); };
+const devError = (...args) => console.error("[Scan2Plate Admin]", ...args);
 let adminInitialLoadDone = false;
 let adminLoadTimeout = null;
 
@@ -1145,8 +1146,25 @@ function getTaxPercent() {
   return Number(restaurantSettings.taxPercent || 0);
 }
 
+function orderItemsArray(order = {}) {
+  return Array.isArray(order.items) ? order.items : [];
+}
+
 function effectiveOrderTotals(order = {}) {
-  return calculateOrderTotals(order.items || [], restaurantSettings, order);
+  if (!Array.isArray(order.items) && order.grandTotal != null) {
+    // Legacy/malformed record with no usable items array: keep its own stored totals
+    // instead of recomputing from an empty item list (which would report it as ₹0).
+    return {
+      itemsTotal: Number(order.itemsTotal ?? order.subtotal ?? order.grandTotal ?? 0),
+      subtotal: Number(order.subtotal ?? order.itemsTotal ?? order.grandTotal ?? 0),
+      discountAmount: Number(order.discountAmount || 0),
+      taxableAmount: Number(order.taxableAmount ?? order.grandTotal ?? 0),
+      tax: Number(order.tax || 0),
+      grandTotal: Number(order.grandTotal || 0),
+      taxPercent: Number(order.taxPercent ?? order.taxPercentSnapshot ?? 0)
+    };
+  }
+  return calculateOrderTotals(orderItemsArray(order), restaurantSettings, order);
 }
 
 function withEffectiveOrderTotals(order = {}) {
@@ -5008,11 +5026,11 @@ function renderPaymentBreakdown(filteredOrders) {
 
 function renderBestSellingReport(filteredOrders) {
   const items = new Map();
-  filteredOrders.forEach(order => (order.items || []).forEach(item => {
-    const name = itemDisplayName(item);
+  filteredOrders.forEach(order => orderItemsArray(order).forEach(item => {
+    const name = itemDisplayName(item || {});
     const current = items.get(name) || { quantity: 0, revenue: 0 };
-    current.quantity += Number(item.qty || 0);
-    current.revenue += Number(item.price || 0) * Number(item.qty || 0);
+    current.quantity += Number(item?.qty || 0);
+    current.revenue += Number(item?.price || 0) * Number(item?.qty || 0);
     items.set(name, current);
   }));
   const rows = [...items.entries()].sort((a, b) => b[1].quantity - a[1].quantity).slice(0, 8);
@@ -5030,14 +5048,25 @@ function renderTableWiseReport(filteredOrders) {
   reportTableWiseEl.innerHTML = tables.size ? [...tables.entries()].sort((a,b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true })).map(([table, values]) => `<tr><td>${escapeHtml(table)}</td><td>${values.count}</td><td>${money(values.sales)}</td></tr>`).join("") : `<tr><td colspan="3" class="muted">No table orders found for this period.</td></tr>`;
 }
 
+function renderReportRowsError(error) {
+  devError("report render failed", error);
+  if (!reportRowsEl) return;
+  reportRowsEl.innerHTML = `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-triangle-exclamation"></i><h4>Could not load this report period.</h4><p class="muted">Try again, or pick a different period.</p><button type="button" class="btn btn-sm btn-outline" id="reportRetryBtn">Retry</button></div></td></tr>`;
+  document.getElementById("reportRetryBtn")?.addEventListener("click", () => renderReportRows());
+}
+
 function renderReportRows(filteredOrders = getFilteredReportOrders()) {
   if (!reportRowsEl || !reportSummaryEl) return;
-  renderReportSummary(filteredOrders);
-  renderPaymentBreakdown(filteredOrders);
-  renderBestSellingReport(filteredOrders);
-  renderTableWiseReport(filteredOrders);
-  reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml((order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`; }).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
-  reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
+  try {
+    renderReportSummary(filteredOrders);
+    renderPaymentBreakdown(filteredOrders);
+    renderBestSellingReport(filteredOrders);
+    renderTableWiseReport(filteredOrders);
+    reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml(orderItemsArray(order).map(item => `${itemDisplayName(item || {})} x${item?.qty ?? 0}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`; }).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+    reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
+  } catch (error) {
+    renderReportRowsError(error);
+  }
 }
 
 function reportLabel() {
@@ -5048,7 +5077,7 @@ function reportLabel() {
 }
 
 function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
-  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", (order.items || []).map(item => `${itemDisplayName(item)} x${item.qty}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)]; })];
+  const rows = [["Order No", "Order ID", "Business Date", "Date", "Customer", "Table", "Items", "Status", "Payment", "Method", "Total"], ...filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return [billDisplayOrderNo(order), order.orderId || order.id, order.businessDate || order.dailyOrderDate || "", formatDateOnly(order.createdAt), order.customerName || "", order.tableNo || "", orderItemsArray(order).map(item => `${itemDisplayName(item || {})} x${item?.qty ?? 0}`).join("; "), order.status || "pending", order.paymentStatus || "unpaid", order.paymentMethod || "", Number(order.grandTotal || 0)]; })];
   const csv = rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
