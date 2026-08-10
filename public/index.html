@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Scan2Plate - Restaurant Billing, QR Ordering & Management Software India</title>
-  <meta name="description" content="Scan2Plate is an all-in-one restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and restaurant management software for India." />
+  <title>Scan2Plate — Restaurant Billing, POS & QR Ordering Software</title>
+  <meta name="description" content="Scan2Plate is restaurant billing and management software with QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery tools." />
   <meta name="keywords" content="restaurant billing software, restaurant POS software, restaurant management software, restaurant software India, restaurant QR ordering, QR menu software, restaurant ordering software, restaurant inventory software, restaurant analytics, restaurant billing app, digital menu software, table ordering system, kitchen display system, restaurant automation, restaurant SaaS, cloud kitchen software, cafe billing software, restaurant POS India, petpooja alternative" />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="theme-color" content="#e66f00" />
@@ -14,13 +14,13 @@
   <link rel="manifest" href="/site.webmanifest" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Scan2Plate" />
-  <meta property="og:title" content="Scan2Plate - Restaurant Billing, QR Ordering & Management Software India" />
-  <meta property="og:description" content="All-in-one restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and management software for India." />
+  <meta property="og:title" content="Scan2Plate — Restaurant Billing, POS & QR Ordering Software" />
+  <meta property="og:description" content="Scan2Plate is restaurant billing and management software with QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery tools." />
   <meta property="og:url" content="https://scan2plate.com/" />
   <meta property="og:image" content="https://scan2plate.com/assets/scan2plate-hero.jpg" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Scan2Plate - Restaurant Billing, QR Ordering & Management Software India" />
-  <meta name="twitter:description" content="Restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and management software." />
+  <meta name="twitter:title" content="Scan2Plate — Restaurant Billing, POS & QR Ordering Software" />
+  <meta name="twitter:description" content="Scan2Plate is restaurant billing and management software with QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery tools." />
   <meta name="twitter:image" content="https://scan2plate.com/assets/scan2plate-hero.jpg" />
   <link rel="preload" as="image" href="/assets/scan2plate-hero.jpg" />
   <link rel="stylesheet" href="./css/style.css?v=latest-business-login-fix" />
@@ -66,14 +66,24 @@
         "countryOfOrigin": { "@type": "Country", "name": "India" },
         "url": "https://scan2plate.com/",
         "image": "https://scan2plate.com/assets/scan2plate-hero.jpg",
-        "description": "Restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and management software."
+        "description": "Restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and management software.",
+        "offers": {
+          "@type": "Offer",
+          "@id": "https://scan2plate.com/#offer",
+          "name": "Scan2Plate Complete",
+          "price": "499",
+          "priceCurrency": "INR",
+          "availability": "https://schema.org/InStock",
+          "url": "https://scan2plate.com/pricing",
+          "priceSpecification": { "@type": "UnitPriceSpecification", "price": "499", "priceCurrency": "INR", "billingDuration": "P1M", "unitText": "MONTH" }
+        }
       },
       {
         "@type": "WebPage",
         "@id": "https://scan2plate.com/#webpage",
         "url": "https://scan2plate.com/",
-        "name": "Scan2Plate - Restaurant Billing, QR Ordering & Management Software India",
-        "description": "All-in-one restaurant billing, QR ordering, kitchen display, inventory, analytics, pre-order, and restaurant management software for India.",
+        "name": "Scan2Plate — Restaurant Billing, POS & QR Ordering Software",
+        "description": "Scan2Plate is restaurant billing and management software with QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery tools.",
         "isPartOf": { "@id": "https://scan2plate.com/#website" },
         "about": { "@id": "https://scan2plate.com/#software" },
         "inLanguage": "en-IN"
@@ -96,7 +106,7 @@
           { "@type": "Question", "name": "What is QR ordering?", "acceptedAnswer": { "@type": "Answer", "text": "QR ordering lets customers scan a table or counter QR code, open a digital menu, add items, and place orders from their phone." } },
           { "@type": "Question", "name": "How is Scan2Plate different from traditional POS?", "acceptedAnswer": { "@type": "Answer", "text": "Scan2Plate combines POS billing with QR ordering, digital menu, table ordering, kitchen display, inventory, analytics, pre-order, and restaurant automation workflows." } },
           { "@type": "Question", "name": "What are Scan2Plate benefits?", "acceptedAnswer": { "@type": "Answer", "text": "Scan2Plate reduces manual order errors, improves kitchen visibility, speeds up billing, supports digital menus, tracks inventory, and gives owners clearer sales analytics." } },
-          { "@type": "Question", "name": "What is Scan2Plate pricing?", "acceptedAnswer": { "@type": "Answer", "text": "Scan2Plate pricing should be confirmed through a demo or enquiry so the plan can match restaurant workflow, service format, and support needs." } }
+          { "@type": "Question", "name": "What is Scan2Plate pricing?", "acceptedAnswer": { "@type": "Answer", "text": "Scan2Plate Complete costs ₹499 per month per restaurant and includes every feature — billing, QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery. Taxes, if applicable, are shown at checkout." } }
         ]
       }
     ]
@@ -412,6 +422,72 @@
       line-height:1.9;
     }
 
+    .plans.plans-single{
+      grid-template-columns:1fr;
+      max-width:600px;
+    }
+
+    .plan-card.complete{
+      padding:44px 40px;
+      text-align:center;
+    }
+
+    .plan-everything-badge{
+      display:inline-block;
+      background:#fff1db;
+      color:#b96f09;
+      padding:6px 14px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:800;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      margin-bottom:16px;
+    }
+
+    .plan-checklist{
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:9px 18px;
+      text-align:left;
+      list-style:none;
+      padding:0;
+      margin:0 0 26px;
+      color:#444;
+      font-size:14px;
+    }
+
+    .plan-checklist li{
+      display:flex;
+      align-items:flex-start;
+      gap:8px;
+    }
+
+    .plan-checklist li::before{
+      content:"✓";
+      color:var(--lp-orange, var(--brand));
+      font-weight:900;
+      flex:none;
+    }
+
+    .plan-cta-group{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      align-items:center;
+    }
+
+    .plan-cta-group .btn{
+      width:100%;
+      max-width:360px;
+    }
+
+    .plan-note{
+      margin-top:16px;
+      font-size:13px;
+      color:#777;
+    }
+
     .footer{
       border-top:1px solid var(--line);
       padding:22px 0;
@@ -721,6 +797,7 @@
       #landingPage .section{padding:58px 0;} #landingPage .section-head{margin-bottom:27px;} #landingPage .section-head h2{font-size:31px;}
       #landingPage .features,#landingPage .plans{grid-template-columns:1fr;} #landingPage .feature-box{padding:22px;}
       #landingPage .plan-card{padding:28px 23px;} #landingPage .plan-card.featured{transform:none;}
+      #landingPage .plan-card.complete{padding:30px 20px;} #landingPage .plan-checklist{grid-template-columns:1fr;}
       #landingPage .footer-row{justify-content:center;text-align:center;font-size:12px;}
     }
 
@@ -1028,15 +1105,16 @@
     <section class="landing-hero" id="product">
       <div class="container hero-layout">
         <div class="hero-copy reveal">
-          <span class="section-kicker">Complete restaurant management and billing software</span>
-          <h1>Order at the table, before arrival, or from <span>home.</span></h1>
-          <p>Scan2Plate connects restaurant ordering, billing, kitchen operations, pre-orders and food delivery in one platform.</p>
+          <span class="section-kicker">Restaurant Billing &amp; Ordering Software</span>
+          <h1>Run Your Restaurant<br>From One Simple Platform.</h1>
+          <p class="hero-highlight"><span>Billing. QR Ordering. Kitchen. Pre-Orders.</span></p>
+          <p>Scan2Plate connects restaurant billing, QR table ordering, KOT, kitchen operations, inventory, payments, reports, pre-orders and delivery in one easy-to-use platform.</p>
           <div class="hero-cta">
-            <a href="#customer-actions" class="btn btn-primary">Scan & Order</a>
-            <a href="./customer-order.html?mode=preorder" class="btn btn-outline">Start Pre-Order</a>
-            <a href="./customer-order.html?mode=delivery" class="btn btn-outline">Order for Delivery</a>
+            <button type="button" class="btn btn-primary" data-open-checkout>Start for ₹499/month</button>
+            <a href="/contact" class="btn btn-outline">Book Free Demo</a>
             <a href="./admin-login.html?v=latest-business-login-fix" class="text-link">Restaurant Admin</a>
           </div>
+          <p class="hero-reassurance">Everything included • No feature-based plans</p>
           <div class="hero-proof" aria-label="Scan2Plate core capabilities">
             <div class="proof-card"><strong>QR table ordering</strong><span>Guests scan, browse the menu and send orders directly from the table.</span></div>
             <div class="proof-card"><strong>Billing and KOT</strong><span>Staff can generate kitchen tickets, bills and printable invoices.</span></div>
@@ -1326,34 +1404,38 @@
     <section class="landing-section pricing-preview" id="pricing">
       <div class="container">
         <div class="section-head">
-          <span class="section-kicker">Pricing preview</span>
-          <h2>Simple plans for restaurants.</h2>
-          <p>Existing pricing is preserved here while keeping detailed pricing and subscriptions on the current routes.</p>
+          <span class="section-kicker">Pricing</span>
+          <h2>One plan. Everything included.</h2>
+          <p>No feature-based tiers, no add-on pricing. Every Scan2Plate restaurant gets the full platform for one simple monthly price.</p>
         </div>
-        <div class="plans">
-          <div class="plan-card">
-            <h3>Basic</h3>
-            <div class="price">₹1999 <span>/ month</span></div>
-            <ul>
-              <li>QR menu ordering</li>
-              <li>Kitchen dashboard</li>
-              <li>Order tracking</li>
-              <li>Basic billing</li>
+        <div class="plans plans-single">
+          <div class="plan-card featured complete">
+            <div class="plan-tag">Scan2Plate Complete</div>
+            <span class="plan-everything-badge">Everything included</span>
+            <div class="price">₹499 <span>/ month, per restaurant</span></div>
+            <ul class="plan-checklist">
+              <li>Restaurant Billing</li>
+              <li>QR Ordering</li>
+              <li>Digital Menu</li>
+              <li>KOT</li>
+              <li>Kitchen Display</li>
+              <li>Table Management</li>
+              <li>Inventory</li>
+              <li>Reports &amp; Analytics</li>
+              <li>Staff Management</li>
+              <li>Attendance</li>
+              <li>Payroll</li>
+              <li>Pre-Orders</li>
+              <li>Delivery Orders</li>
+              <li>Payment Tracking</li>
+              <li>Customer Order Tracking</li>
+              <li>Updates</li>
             </ul>
-            <a href="/pricing" class="btn btn-outline">View Pricing</a>
-          </div>
-          <div class="plan-card featured">
-            <div class="plan-tag">Popular</div>
-            <h3>Advance</h3>
-            <div class="price">₹2999 <span>/ month</span></div>
-            <ul>
-              <li>Everything in Basic</li>
-              <li>WhatsApp alerts</li>
-              <li>Super admin support</li>
-              <li>Manual order billing</li>
-              <li>Reports and payment updates</li>
-            </ul>
-            <a href="/contact" class="btn btn-dark">Book a Demo</a>
+            <div class="plan-cta-group">
+              <button type="button" class="btn btn-dark" data-open-checkout>Get Scan2Plate — ₹499/month</button>
+              <a href="/contact" class="btn btn-outline">Book Free Demo</a>
+            </div>
+            <p class="plan-note">Taxes, if applicable, are shown at checkout.</p>
           </div>
         </div>
       </div>
@@ -1400,7 +1482,7 @@
         </ul>
 
         <h2>Pricing</h2>
-        <p>Scan2Plate pricing should be confirmed through a demo or enquiry so restaurants can choose based on order volume, billing needs, QR ordering, kitchen display, reports, and support requirements.</p>
+        <p>Scan2Plate Complete is ₹499 per month per restaurant with every feature included — billing, QR ordering, kitchen display, inventory, reports, pre-orders, delivery, and staff tools. Taxes, if applicable, are shown at checkout.</p>
 
         <h2>Explore Scan2Plate Use Cases</h2>
         <div class="seo-link-grid">
@@ -2533,5 +2615,45 @@ import {
     }
   }
 </script>
+
+<div class="checkout-modal" id="checkoutModal" role="dialog" aria-modal="true" aria-labelledby="checkoutModalTitle">
+  <div class="checkout-modal-panel">
+    <button type="button" class="checkout-modal-close" data-close-checkout aria-label="Close">&times;</button>
+
+    <div data-checkout-form-step>
+      <h3 id="checkoutModalTitle">Scan2Plate Complete — ₹499/month</h3>
+      <p class="checkout-modal-sub">Tell us about your restaurant to continue to payment.</p>
+      <form data-checkout-form novalidate>
+        <label>Restaurant Name<input name="restaurantName" autocomplete="organization" required /></label>
+        <label>Owner Name<input name="ownerName" autocomplete="name" required /></label>
+        <label>Phone<input name="phone" type="tel" autocomplete="tel" required /></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+        <label>City<input name="city" autocomplete="address-level2" required /></label>
+        <p class="checkout-error hidden" data-checkout-error></p>
+        <button type="submit" class="btn btn-dark">Continue to Payment — ₹499</button>
+      </form>
+    </div>
+
+    <div class="hidden checkout-status" data-checkout-paying-step>
+      <p>Opening secure Razorpay checkout…</p>
+    </div>
+
+    <div class="hidden checkout-status" data-checkout-success-step>
+      <h3>Payment verified</h3>
+      <p>Payment verified. Our team will activate your Scan2Plate account within 24 hours.</p>
+      <button type="button" class="btn btn-outline" data-close-checkout>Close</button>
+    </div>
+
+    <div class="hidden checkout-status" data-checkout-failed-step>
+      <h3>Payment wasn't completed</h3>
+      <p>Payment wasn't completed. Your account has not been charged by Scan2Plate.</p>
+      <div class="checkout-status-actions">
+        <button type="button" class="btn btn-dark" data-checkout-retry>Try Again</button>
+        <a href="/contact" class="btn btn-outline">Contact Support</a>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/checkout.js" defer></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import twilio from "twilio";
 import multer from "multer";
 import crypto from "crypto";
+import Razorpay from "razorpay";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -35,6 +36,22 @@ const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || "";
 const storageBucketName = rawBucket.replace(/^gs:\/\//, "").trim();
 console.log("Firebase Storage bucket:", storageBucketName);
 const aiHelpDailyUsage = new Map();
+
+const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
+const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+const razorpayReady = Boolean(razorpayKeyId && razorpayKeySecret);
+const razorpayClient = razorpayReady ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret }) : null;
+if (!razorpayReady) console.warn("Razorpay not configured: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing. Payment routes will return 503.");
+// Trusted server-side plan catalog. Never accept an amount from the client.
+const SUBSCRIPTION_PLANS = {
+  "scan2plate-complete": { monthlyAmountPaise: 49900 }
+};
+function subscriptionAmountPaise(planId, billingCycle) {
+  const plan = SUBSCRIPTION_PLANS[planId];
+  if (!plan) return null;
+  if (billingCycle === "yearly" && plan.yearlyAmountPaise) return plan.yearlyAmountPaise;
+  return plan.monthlyAmountPaise;
+}
 
 let adminReady = false;
 let firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
@@ -634,6 +651,105 @@ app.delete("/api/restaurants/:restaurantId/staff/:uid", verifyAdmin, async (req,
     res.json({ ok: true, success: true });
   } catch (error) {
     res.status(error.status || 400).json({ ok: false, error: error.message || "Could not delete staff." });
+  }
+});
+
+/* =========================================================
+   RAZORPAY — SUBSCRIPTION CHECKOUT
+   Frontend only ever sees the public key ID. Amount is always
+   recomputed server-side from SUBSCRIPTION_PLANS, never trusted
+   from the client. Payment success is decided by server-side
+   signature verification, not the Razorpay checkout callback alone.
+========================================================= */
+app.post("/api/subscriptions/create-order", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable. Please try again shortly." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+
+    const { restaurantName = "", ownerName = "", phone = "", email = "", city = "", planId = "scan2plate-complete", billingCycle = "monthly" } = req.body || {};
+    const cleanEmail = lowerEmail(email);
+    const cleanPhone = String(phone || "").replace(/\D/g, "");
+    if (!String(restaurantName).trim() || !String(ownerName).trim() || !cleanEmail || cleanPhone.length < 10 || !String(city).trim()) {
+      return res.status(400).json({ success: false, error: "Please fill in every field with a valid phone number and email address." });
+    }
+    const amount = subscriptionAmountPaise(planId, billingCycle);
+    if (!amount) return res.status(400).json({ success: false, error: "Invalid plan selected." });
+
+    const db = getFirestore();
+    const signupRef = db.collection("subscriptionSignups").doc();
+    const razorpayOrder = await razorpayClient.orders.create({
+      amount,
+      currency: "INR",
+      receipt: signupRef.id,
+      notes: { restaurantName: safeString(restaurantName, 120), city: safeString(city, 80), planId, billingCycle }
+    });
+
+    await signupRef.set({
+      restaurantName: safeString(restaurantName, 120),
+      ownerName: safeString(ownerName, 120),
+      phone: cleanPhone,
+      email: cleanEmail,
+      city: safeString(city, 80),
+      planId,
+      billingCycle,
+      orderSource: "subscription",
+      amount,
+      currency: "INR",
+      razorpayOrderId: razorpayOrder.id,
+      razorpayPaymentId: null,
+      status: "pending_payment",
+      signatureVerified: false,
+      createdAt: FieldValue.serverTimestamp(),
+      paidAt: null,
+      failedAt: null
+    });
+
+    res.json({ success: true, publicKeyId: razorpayKeyId, amount, currency: "INR", razorpayOrderId: razorpayOrder.id });
+  } catch (error) {
+    console.error("subscriptions/create-order failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not start checkout. Please try again." });
+  }
+});
+
+app.post("/api/subscriptions/verify-payment", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+
+    const { razorpay_order_id = "", razorpay_payment_id = "", razorpay_signature = "" } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: "Missing payment verification fields." });
+    }
+
+    const db = getFirestore();
+    const signupSnap = await db.collection("subscriptionSignups").where("razorpayOrderId", "==", razorpay_order_id).limit(1).get();
+    if (signupSnap.empty) return res.status(404).json({ success: false, error: "Order not found." });
+    const signupDoc = signupSnap.docs[0];
+    const signup = signupDoc.data();
+
+    // Idempotency: a repeated/duplicate callback for an already-verified payment is a no-op.
+    if (signup.status === "paid" && signup.razorpayPaymentId === razorpay_payment_id) {
+      return res.json({ success: true, alreadyProcessed: true });
+    }
+
+    const expectedSignature = crypto.createHmac("sha256", razorpayKeySecret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+    const signatureValid = expectedSignature === razorpay_signature;
+    if (!signatureValid) {
+      await signupDoc.ref.set({ status: "payment_failed", signatureVerified: false, failedAt: FieldValue.serverTimestamp() }, { merge: true });
+      return res.status(400).json({ success: false, error: "Payment verification failed." });
+    }
+
+    await signupDoc.ref.set({
+      status: "paid",
+      signatureVerified: true,
+      razorpayPaymentId: razorpay_payment_id,
+      paidAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("subscriptions/verify-payment failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not verify payment." });
   }
 });
 
