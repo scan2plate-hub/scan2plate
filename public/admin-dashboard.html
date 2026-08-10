@@ -541,6 +541,7 @@
     .notice-box.info   {background:var(--info-light);color:var(--info)}
     .notice-box.warning{background:var(--warning-light);color:var(--warning)}
     .notice-box.success{background:var(--success-light);color:var(--success)}
+    .notice-box.danger {background:var(--danger-light);color:var(--danger)}
 
     /* ── RESPONSIVE ── */
     @media(max-width:1280px){
@@ -1376,6 +1377,31 @@
       <div class="modal-footer">
         <button class="btn btn-outline" id="closeBillModalBtn">Cancel</button>
         <button class="btn btn-primary" id="printBillBtn"><i class="fas fa-print"></i> Print Bill</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAFF PERMANENT DELETE CONFIRMATION -->
+  <div class="modal-overlay" id="staffDeleteModal">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <h3><i class="fas fa-triangle-exclamation" style="color:#c0392b;margin-right:6px;"></i>Permanently Delete Staff</h3>
+        <button class="modal-close" id="closeStaffDeleteModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="staffDeleteStepPassword">
+          <p class="muted" style="margin-bottom:10px;">Enter your account password to confirm it's really you before continuing.</p>
+          <div class="form-group"><label class="form-label">Your Password</label><input class="form-input" type="password" id="staffDeletePasswordField" autocomplete="current-password" /></div>
+        </div>
+        <div id="staffDeleteStepConfirm" class="hidden">
+          <div class="notice-box danger"><i class="fas fa-triangle-exclamation"></i><span>This will permanently delete <strong id="staffDeleteTargetName"></strong>. This cannot be undone.</span></div>
+          <p class="muted" style="margin-top:10px;">Click the button below one more time to confirm permanent deletion.</p>
+        </div>
+        <div id="staffDeleteError" class="notice-box danger hidden" style="margin-top:10px;"><i class="fas fa-circle-exclamation"></i><span></span></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="staffDeleteCancelBtn">Cancel</button>
+        <button class="btn btn-danger" id="staffDeleteActionBtn">Verify Password</button>
       </div>
     </div>
   </div>
