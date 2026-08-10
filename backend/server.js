@@ -484,6 +484,159 @@ app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) =
     res.status(error.status || 400).json({ ok: false, error: error.message || "Could not create staff." });
   }
 });
+
+// Only restaurant owner/admin may deactivate, reactivate or delete staff (stricter than
+// assertRestaurantAccess, which also allows "manager" for read/operational routes).
+async function assertOwnerOrAdminAccess(uid, restaurantId, user = {}) {
+  const restaurant = await assertRestaurantAccess(uid, restaurantId, user);
+  const data = restaurant.data() || {};
+  const ownerUid = data.ownerUid || data.adminUid || data.uid || "";
+  const uidFields = [ownerUid, data.createdByUid, data.adminUserId, data.userId].map(value => String(value || ""));
+  if (uid && uidFields.includes(String(uid))) return restaurant;
+
+  const loggedInEmail = lowerEmail(user.email);
+  const directEmails = [data.ownerEmail, data.adminEmail, data.email, data.createdByEmail].map(lowerEmail).filter(Boolean);
+  if (loggedInEmail && directEmails.includes(loggedInEmail)) return restaurant;
+  if (emailListIncludes(data.adminEmails, loggedInEmail)) return restaurant;
+
+  const db = getFirestore();
+  const docIdsToCheck = [...new Set([String(restaurantId || "").trim(), restaurant.id].filter(Boolean))];
+  for (const docId of docIdsToCheck) {
+    const memberships = await db.collection(`restaurants/${docId}/users`).where("uid", "==", uid).limit(1).get();
+    const role = String(memberships.docs[0]?.data()?.role || "").toLowerCase();
+    if (["admin", "owner"].includes(role)) return restaurant;
+  }
+  throw accessDeniedError({ reason: "owner_or_admin_required" });
+}
+async function findStaffDoc(db, restaurantId, uid) {
+  const snap = await db.collection(`restaurants/${restaurantId}/users`).where("uid", "==", uid).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+app.post("/api/restaurants/:restaurantId/staff/:uid/deactivate", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+    if (targetUid === req.user.uid) return res.status(400).json({ ok: false, error: "You cannot deactivate your own account." });
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+    if (["owner", "admin"].includes(String(staffData.role || "").toLowerCase())) {
+      return res.status(400).json({ ok: false, error: "Owner/admin accounts cannot be deactivated here." });
+    }
+
+    await getAuth().updateUser(targetUid, { disabled: true });
+    const update = {
+      status: "inactive",
+      isActive: false,
+      deactivatedAt: FieldValue.serverTimestamp(),
+      deactivatedBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    await staffDoc.ref.set(update, { merge: true });
+    await db.doc(`restaurantStaff/${targetUid}`).set(update, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_deactivated",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: staffData.email || "" },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not deactivate staff." });
+  }
+});
+
+app.post("/api/restaurants/:restaurantId/staff/:uid/reactivate", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+
+    await getAuth().updateUser(targetUid, { disabled: false });
+    const update = {
+      status: "active",
+      isActive: true,
+      reactivatedAt: FieldValue.serverTimestamp(),
+      reactivatedBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    await staffDoc.ref.set(update, { merge: true });
+    await db.doc(`restaurantStaff/${targetUid}`).set(update, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_reactivated",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: staffData.email || "" },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not reactivate staff." });
+  }
+});
+
+app.delete("/api/restaurants/:restaurantId/staff/:uid", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+    if (targetUid === req.user.uid) return res.status(400).json({ ok: false, error: "You cannot delete your own account." });
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+    if (String(staffData.status || "").toLowerCase() !== "inactive") {
+      return res.status(400).json({ ok: false, error: "Deactivate this staff member first, then permanently delete." });
+    }
+    const cleanEmail = lowerEmail(staffData.email);
+
+    // Attendance/payroll are tracked in a separate Staff Master collection (name/phone based,
+    // not linked to this login account by uid/email), so the one reliable operational-history
+    // signal available here is whether this account billed/created any order.
+    const ordersSnap = cleanEmail
+      ? await db.collection("orders").where("createdBy", "==", cleanEmail).limit(1).get()
+      : { empty: true };
+    if (!ordersSnap.empty) {
+      return res.status(400).json({
+        ok: false,
+        error: "This staff member has attendance, payroll or operational history and cannot be permanently deleted. You can deactivate the staff account instead."
+      });
+    }
+
+    await staffDoc.ref.delete();
+    await db.doc(`restaurantStaff/${targetUid}`).delete();
+    try {
+      await getAuth().deleteUser(targetUid);
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") throw error;
+    }
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_deleted_permanently",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: cleanEmail },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not delete staff." });
+  }
+});
+
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;

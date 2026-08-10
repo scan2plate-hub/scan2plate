@@ -772,15 +772,57 @@ async function createStaffUser() {
   }
 }
 
+function isStaffInactive(user = {}) {
+  return String(user.status || "").toLowerCase() === "inactive" || user.isActive === false;
+}
+
 async function loadStaffUsers() {
   const list = document.getElementById("staffList");
   if (!list || !isOwnerLike()) return;
   try {
     const snap = await getDocs(collection(db, "restaurants", restaurantId, "users"));
     const staff = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(user => !["owner", "admin"].includes(String(user.role || "").toLowerCase()));
-    list.innerHTML = staff.length ? staff.map(user => `<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);"><span><strong>${escapeHtml(user.name || user.email)}</strong><br><small class="muted">${escapeHtml(user.email || "")}</small></span><span class="status-badge info">${escapeHtml(user.role || "staff")}</span></div>`).join("") : `<div class="empty-state"><i class="fas fa-users"></i><h4>No staff accounts yet</h4></div>`;
+    list.innerHTML = staff.length ? staff.map(user => {
+      const inactive = isStaffInactive(user);
+      const label = escapeHtml(user.name || user.email || "");
+      const uid = escapeHtml(user.uid || "");
+      const actions = inactive
+        ? `<button class="btn btn-sm btn-outline staff-action" data-uid="${uid}" data-name="${label}" data-action="reactivate">Reactivate</button>
+           <button class="btn btn-sm btn-danger staff-action" data-uid="${uid}" data-name="${label}" data-action="delete">Delete Permanently</button>`
+        : `<button class="btn btn-sm btn-outline staff-action" data-uid="${uid}" data-name="${label}" data-action="deactivate">Deactivate</button>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+        <span><strong>${label}</strong><br><small class="muted">${escapeHtml(user.email || "")}</small></span>
+        <span class="status-badge info">${escapeHtml(user.role || "staff")}</span>
+        <span class="status-badge ${inactive ? "warning" : "success"}">${inactive ? "Inactive" : "Active"}</span>
+        <span class="btn-group">${actions}</span>
+      </div>`;
+    }).join("") : `<div class="empty-state"><i class="fas fa-users"></i><h4>No staff accounts yet</h4></div>`;
+    list.querySelectorAll(".staff-action").forEach(btn => btn.addEventListener("click", () => handleStaffAction(btn.dataset.uid || "", btn.dataset.action || "", btn.dataset.name || "")));
   } catch (error) {
     list.innerHTML = `<div class="notice-box danger">Unable to load staff: ${escapeHtml(error.message || error)}</div>`;
+  }
+}
+
+async function handleStaffAction(uid, action, name) {
+  if (!isOwnerLike()) return alert("Owner access required. Please login with owner account.");
+  if (!uid || !action) return;
+  const confirmMessages = {
+    deactivate: `Deactivate ${name}? They will not be able to log in, but their attendance and payroll history stays intact. You can reactivate them anytime.`,
+    reactivate: `Reactivate ${name}? Their login access will be restored.`,
+    delete: `Permanently delete ${name}? This cannot be undone, and only succeeds if the account has no attendance, payroll or order history.`
+  };
+  if (!confirm(confirmMessages[action] || `${action} ${name}?`)) return;
+  try {
+    const base = `${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff/${encodeURIComponent(uid)}`;
+    const response = await fetch(action === "delete" ? base : `${base}/${action}`, {
+      method: action === "delete" ? "DELETE" : "POST",
+      headers: await purchaseAuthHeaders()
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false) throw new Error(result.error || `Could not ${action} staff.`);
+    await loadStaffUsers();
+  } catch (error) {
+    alert(error.message || `Could not ${action} staff.`);
   }
 }
 
