@@ -5552,10 +5552,13 @@ document.querySelectorAll("[data-report-type]").forEach(button => button.addEven
   document.querySelectorAll("[data-report-input]").forEach(input => input.classList.toggle("hidden", input.dataset.reportInput !== selectedReportType));
   renderReportRows();
 }));
-reportDateEl?.addEventListener("change", renderReportRows);
-reportMonthEl?.addEventListener("change", renderReportRows);
-reportYearEl?.addEventListener("change", renderReportRows);
-applyReportRangeBtn?.addEventListener("click", renderReportRows);
+// Wrapped in arrow functions so the browser's Event object (passed automatically by
+// addEventListener) never lands in renderReportRows' filteredOrders parameter and
+// suppresses its "recompute from current filters" default.
+reportDateEl?.addEventListener("change", () => renderReportRows());
+reportMonthEl?.addEventListener("change", () => renderReportRows());
+reportYearEl?.addEventListener("change", () => renderReportRows());
+applyReportRangeBtn?.addEventListener("click", () => renderReportRows());
 exportReportBtn?.addEventListener("click", () => exportReportCSV());
 printReportBtn?.addEventListener("click", printReport);
 kotHistoryDateEl?.addEventListener("change", renderKotSections);
