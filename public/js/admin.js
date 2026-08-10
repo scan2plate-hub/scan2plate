@@ -14,7 +14,7 @@ import {
   onSnapshot,
   runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
@@ -449,6 +449,13 @@ const menuCategoryTabsEl = document.getElementById("menuCategoryTabs");
 const printAllKotBtn = document.getElementById("printAllKotBtn");
 const kotModal = document.getElementById("kotModal");
 const billModal = document.getElementById("billModal");
+const staffDeleteModal = document.getElementById("staffDeleteModal");
+const staffDeleteStepPasswordEl = document.getElementById("staffDeleteStepPassword");
+const staffDeleteStepConfirmEl = document.getElementById("staffDeleteStepConfirm");
+const staffDeletePasswordField = document.getElementById("staffDeletePasswordField");
+const staffDeleteTargetNameEl = document.getElementById("staffDeleteTargetName");
+const staffDeleteErrorEl = document.getElementById("staffDeleteError");
+const staffDeleteActionBtn = document.getElementById("staffDeleteActionBtn");
 
 const kotRestaurantNameEl = document.getElementById("kotRestaurantName");
 const kotNumberEl = document.getElementById("kotNumber");
@@ -806,16 +813,15 @@ async function loadStaffUsers() {
 async function handleStaffAction(uid, action, name) {
   if (!isOwnerLike()) return alert("Owner access required. Please login with owner account.");
   if (!uid || !action) return;
+  if (action === "delete") return openStaffDeleteModal(uid, name);
   const confirmMessages = {
     deactivate: `Deactivate ${name}? They will not be able to log in, but their attendance and payroll history stays intact. You can reactivate them anytime.`,
-    reactivate: `Reactivate ${name}? Their login access will be restored.`,
-    delete: `Permanently delete ${name}? This cannot be undone, and only succeeds if the account has no attendance, payroll or order history.`
+    reactivate: `Reactivate ${name}? Their login access will be restored.`
   };
   if (!confirm(confirmMessages[action] || `${action} ${name}?`)) return;
   try {
-    const base = `${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff/${encodeURIComponent(uid)}`;
-    const response = await fetch(action === "delete" ? base : `${base}/${action}`, {
-      method: action === "delete" ? "DELETE" : "POST",
+    const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff/${encodeURIComponent(uid)}/${action}`, {
+      method: "POST",
       headers: await purchaseAuthHeaders()
     });
     const result = await response.json().catch(() => ({}));
@@ -825,6 +831,84 @@ async function handleStaffAction(uid, action, name) {
     alert(error.message || `Could not ${action} staff.`);
   }
 }
+
+/* =========================================================
+   STAFF PERMANENT DELETE — password re-auth + a second explicit
+   confirmation before the irreversible backend call runs.
+========================================================= */
+let staffDeletePending = null; // { uid, name, step: "password" | "confirm" }
+
+function setStaffDeleteError(message = "") {
+  if (!staffDeleteErrorEl) return;
+  staffDeleteErrorEl.classList.toggle("hidden", !message);
+  const span = staffDeleteErrorEl.querySelector("span");
+  if (span) span.textContent = message;
+}
+
+function openStaffDeleteModal(uid, name) {
+  staffDeletePending = { uid, name, step: "password" };
+  if (staffDeletePasswordField) staffDeletePasswordField.value = "";
+  if (staffDeleteTargetNameEl) staffDeleteTargetNameEl.textContent = name;
+  setStaffDeleteError("");
+  staffDeleteStepPasswordEl?.classList.remove("hidden");
+  staffDeleteStepConfirmEl?.classList.add("hidden");
+  if (staffDeleteActionBtn) { staffDeleteActionBtn.textContent = "Verify Password"; staffDeleteActionBtn.disabled = false; }
+  staffDeleteModal?.classList.add("active");
+  staffDeletePasswordField?.focus();
+}
+
+function closeStaffDeleteModal() {
+  staffDeletePending = null;
+  staffDeleteModal?.classList.remove("active");
+  if (staffDeletePasswordField) staffDeletePasswordField.value = "";
+  setStaffDeleteError("");
+}
+
+async function handleStaffDeletePrimaryAction() {
+  if (!staffDeletePending) return;
+  if (staffDeletePending.step === "password") {
+    const password = staffDeletePasswordField?.value || "";
+    if (!password) return setStaffDeleteError("Enter your password to continue.");
+    if (!auth.currentUser?.email) return setStaffDeleteError("Your session has expired. Please log in again.");
+    setStaffDeleteError("");
+    if (staffDeleteActionBtn) { staffDeleteActionBtn.disabled = true; staffDeleteActionBtn.textContent = "Verifying…"; }
+    try {
+      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, password));
+      staffDeletePending.step = "confirm";
+      staffDeleteStepPasswordEl?.classList.add("hidden");
+      staffDeleteStepConfirmEl?.classList.remove("hidden");
+      if (staffDeleteActionBtn) { staffDeleteActionBtn.textContent = "Yes, Permanently Delete"; staffDeleteActionBtn.disabled = false; }
+    } catch (error) {
+      setStaffDeleteError(error?.code === "auth/wrong-password" || error?.code === "auth/invalid-credential" ? "Incorrect password." : "Could not verify your password. Please try again.");
+      if (staffDeleteActionBtn) { staffDeleteActionBtn.disabled = false; staffDeleteActionBtn.textContent = "Verify Password"; }
+    }
+    return;
+  }
+
+  // step === "confirm": password already verified, this is the final explicit confirmation.
+  const { uid, name } = staffDeletePending;
+  if (staffDeleteActionBtn) { staffDeleteActionBtn.disabled = true; staffDeleteActionBtn.textContent = "Deleting…"; }
+  try {
+    const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff/${encodeURIComponent(uid)}`, {
+      method: "DELETE",
+      headers: await purchaseAuthHeaders()
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false) throw new Error(result.error || `Could not delete ${name}.`);
+    closeStaffDeleteModal();
+    await loadStaffUsers();
+  } catch (error) {
+    setStaffDeleteError(error.message || `Could not delete ${name}.`);
+    if (staffDeleteActionBtn) { staffDeleteActionBtn.disabled = false; staffDeleteActionBtn.textContent = "Yes, Permanently Delete"; }
+  }
+}
+
+staffDeleteActionBtn?.addEventListener("click", handleStaffDeletePrimaryAction);
+document.getElementById("staffDeleteCancelBtn")?.addEventListener("click", closeStaffDeleteModal);
+document.getElementById("closeStaffDeleteModal")?.addEventListener("click", closeStaffDeleteModal);
+staffDeletePasswordField?.addEventListener("keydown", event => {
+  if (event.key === "Enter") { event.preventDefault(); handleStaffDeletePrimaryAction(); }
+});
 
 /* =========================================================
    UTILS
