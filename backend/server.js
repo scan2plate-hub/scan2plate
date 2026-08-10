@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import twilio from "twilio";
 import multer from "multer";
 import crypto from "crypto";
+import Razorpay from "razorpay";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -35,6 +36,22 @@ const rawBucket = process.env.FIREBASE_STORAGE_BUCKET || "";
 const storageBucketName = rawBucket.replace(/^gs:\/\//, "").trim();
 console.log("Firebase Storage bucket:", storageBucketName);
 const aiHelpDailyUsage = new Map();
+
+const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
+const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+const razorpayReady = Boolean(razorpayKeyId && razorpayKeySecret);
+const razorpayClient = razorpayReady ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret }) : null;
+if (!razorpayReady) console.warn("Razorpay not configured: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing. Payment routes will return 503.");
+// Trusted server-side plan catalog. Never accept an amount from the client.
+const SUBSCRIPTION_PLANS = {
+  "scan2plate-complete": { monthlyAmountPaise: 49900 }
+};
+function subscriptionAmountPaise(planId, billingCycle) {
+  const plan = SUBSCRIPTION_PLANS[planId];
+  if (!plan) return null;
+  if (billingCycle === "yearly" && plan.yearlyAmountPaise) return plan.yearlyAmountPaise;
+  return plan.monthlyAmountPaise;
+}
 
 let adminReady = false;
 let firebaseAdminError = "FIREBASE_SERVICE_ACCOUNT missing.";
@@ -484,6 +501,258 @@ app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) =
     res.status(error.status || 400).json({ ok: false, error: error.message || "Could not create staff." });
   }
 });
+
+// Only restaurant owner/admin may deactivate, reactivate or delete staff (stricter than
+// assertRestaurantAccess, which also allows "manager" for read/operational routes).
+async function assertOwnerOrAdminAccess(uid, restaurantId, user = {}) {
+  const restaurant = await assertRestaurantAccess(uid, restaurantId, user);
+  const data = restaurant.data() || {};
+  const ownerUid = data.ownerUid || data.adminUid || data.uid || "";
+  const uidFields = [ownerUid, data.createdByUid, data.adminUserId, data.userId].map(value => String(value || ""));
+  if (uid && uidFields.includes(String(uid))) return restaurant;
+
+  const loggedInEmail = lowerEmail(user.email);
+  const directEmails = [data.ownerEmail, data.adminEmail, data.email, data.createdByEmail].map(lowerEmail).filter(Boolean);
+  if (loggedInEmail && directEmails.includes(loggedInEmail)) return restaurant;
+  if (emailListIncludes(data.adminEmails, loggedInEmail)) return restaurant;
+
+  const db = getFirestore();
+  const docIdsToCheck = [...new Set([String(restaurantId || "").trim(), restaurant.id].filter(Boolean))];
+  for (const docId of docIdsToCheck) {
+    const memberships = await db.collection(`restaurants/${docId}/users`).where("uid", "==", uid).limit(1).get();
+    const role = String(memberships.docs[0]?.data()?.role || "").toLowerCase();
+    if (["admin", "owner"].includes(role)) return restaurant;
+  }
+  throw accessDeniedError({ reason: "owner_or_admin_required" });
+}
+async function findStaffDoc(db, restaurantId, uid) {
+  const snap = await db.collection(`restaurants/${restaurantId}/users`).where("uid", "==", uid).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+app.post("/api/restaurants/:restaurantId/staff/:uid/deactivate", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+    if (targetUid === req.user.uid) return res.status(400).json({ ok: false, error: "You cannot deactivate your own account." });
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+    if (["owner", "admin"].includes(String(staffData.role || "").toLowerCase())) {
+      return res.status(400).json({ ok: false, error: "Owner/admin accounts cannot be deactivated here." });
+    }
+
+    await getAuth().updateUser(targetUid, { disabled: true });
+    const update = {
+      status: "inactive",
+      isActive: false,
+      deactivatedAt: FieldValue.serverTimestamp(),
+      deactivatedBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    await staffDoc.ref.set(update, { merge: true });
+    await db.doc(`restaurantStaff/${targetUid}`).set(update, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_deactivated",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: staffData.email || "" },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not deactivate staff." });
+  }
+});
+
+app.post("/api/restaurants/:restaurantId/staff/:uid/reactivate", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+
+    await getAuth().updateUser(targetUid, { disabled: false });
+    const update = {
+      status: "active",
+      isActive: true,
+      reactivatedAt: FieldValue.serverTimestamp(),
+      reactivatedBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    await staffDoc.ref.set(update, { merge: true });
+    await db.doc(`restaurantStaff/${targetUid}`).set(update, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_reactivated",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: staffData.email || "" },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not reactivate staff." });
+  }
+});
+
+app.delete("/api/restaurants/:restaurantId/staff/:uid", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+    if (targetUid === req.user.uid) return res.status(400).json({ ok: false, error: "You cannot delete your own account." });
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data();
+    if (String(staffData.status || "").toLowerCase() !== "inactive") {
+      return res.status(400).json({ ok: false, error: "Deactivate this staff member first, then permanently delete." });
+    }
+    const cleanEmail = lowerEmail(staffData.email);
+
+    // Attendance/payroll are tracked in a separate Staff Master collection (name/phone based,
+    // not linked to this login account by uid/email), so the one reliable operational-history
+    // signal available here is whether this account billed/created any order.
+    const ordersSnap = cleanEmail
+      ? await db.collection("orders").where("createdBy", "==", cleanEmail).limit(1).get()
+      : { empty: true };
+    if (!ordersSnap.empty) {
+      return res.status(400).json({
+        ok: false,
+        error: "This staff member has attendance, payroll or operational history and cannot be permanently deleted. You can deactivate the staff account instead."
+      });
+    }
+
+    await staffDoc.ref.delete();
+    await db.doc(`restaurantStaff/${targetUid}`).delete();
+    try {
+      await getAuth().deleteUser(targetUid);
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") throw error;
+    }
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_deleted_permanently",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: cleanEmail },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not delete staff." });
+  }
+});
+
+/* =========================================================
+   RAZORPAY — SUBSCRIPTION CHECKOUT
+   Frontend only ever sees the public key ID. Amount is always
+   recomputed server-side from SUBSCRIPTION_PLANS, never trusted
+   from the client. Payment success is decided by server-side
+   signature verification, not the Razorpay checkout callback alone.
+========================================================= */
+app.post("/api/subscriptions/create-order", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable. Please try again shortly." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+
+    const { restaurantName = "", ownerName = "", phone = "", email = "", city = "", planId = "scan2plate-complete", billingCycle = "monthly" } = req.body || {};
+    const cleanEmail = lowerEmail(email);
+    const cleanPhone = String(phone || "").replace(/\D/g, "");
+    if (!String(restaurantName).trim() || !String(ownerName).trim() || !cleanEmail || cleanPhone.length < 10 || !String(city).trim()) {
+      return res.status(400).json({ success: false, error: "Please fill in every field with a valid phone number and email address." });
+    }
+    const amount = subscriptionAmountPaise(planId, billingCycle);
+    if (!amount) return res.status(400).json({ success: false, error: "Invalid plan selected." });
+
+    const db = getFirestore();
+    const signupRef = db.collection("subscriptionSignups").doc();
+    const razorpayOrder = await razorpayClient.orders.create({
+      amount,
+      currency: "INR",
+      receipt: signupRef.id,
+      notes: { restaurantName: safeString(restaurantName, 120), city: safeString(city, 80), planId, billingCycle }
+    });
+
+    await signupRef.set({
+      restaurantName: safeString(restaurantName, 120),
+      ownerName: safeString(ownerName, 120),
+      phone: cleanPhone,
+      email: cleanEmail,
+      city: safeString(city, 80),
+      planId,
+      billingCycle,
+      orderSource: "subscription",
+      amount,
+      currency: "INR",
+      razorpayOrderId: razorpayOrder.id,
+      razorpayPaymentId: null,
+      status: "pending_payment",
+      signatureVerified: false,
+      createdAt: FieldValue.serverTimestamp(),
+      paidAt: null,
+      failedAt: null
+    });
+
+    res.json({ success: true, publicKeyId: razorpayKeyId, amount, currency: "INR", razorpayOrderId: razorpayOrder.id });
+  } catch (error) {
+    console.error("subscriptions/create-order failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not start checkout. Please try again." });
+  }
+});
+
+app.post("/api/subscriptions/verify-payment", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+
+    const { razorpay_order_id = "", razorpay_payment_id = "", razorpay_signature = "" } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: "Missing payment verification fields." });
+    }
+
+    const db = getFirestore();
+    const signupSnap = await db.collection("subscriptionSignups").where("razorpayOrderId", "==", razorpay_order_id).limit(1).get();
+    if (signupSnap.empty) return res.status(404).json({ success: false, error: "Order not found." });
+    const signupDoc = signupSnap.docs[0];
+    const signup = signupDoc.data();
+
+    // Idempotency: a repeated/duplicate callback for an already-verified payment is a no-op.
+    if (signup.status === "paid" && signup.razorpayPaymentId === razorpay_payment_id) {
+      return res.json({ success: true, alreadyProcessed: true });
+    }
+
+    const expectedSignature = crypto.createHmac("sha256", razorpayKeySecret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+    const signatureValid = expectedSignature === razorpay_signature;
+    if (!signatureValid) {
+      await signupDoc.ref.set({ status: "payment_failed", signatureVerified: false, failedAt: FieldValue.serverTimestamp() }, { merge: true });
+      return res.status(400).json({ success: false, error: "Payment verification failed." });
+    }
+
+    await signupDoc.ref.set({
+      status: "paid",
+      signatureVerified: true,
+      razorpayPaymentId: razorpay_payment_id,
+      paidAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("subscriptions/verify-payment failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not verify payment." });
+  }
+});
+
 app.get("/api/ocr/status", (_, res) => {
   const ocrConfigured = Boolean(ocrKey());
   const ready = adminReady && ocrConfigured;

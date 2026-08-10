@@ -122,3 +122,21 @@ img{max-width:100%}
   body { background: #fff !important; }
   .card { box-shadow: none !important; border: 1px solid #ddd !important; }
 }
+
+.checkout-modal{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(23,17,10,.55);backdrop-filter:blur(2px)}
+.checkout-modal.open{display:flex}
+body.checkout-modal-open{overflow:hidden}
+.checkout-modal-panel{position:relative;width:min(460px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:22px;padding:30px 26px;box-shadow:0 30px 70px rgba(20,12,4,.28)}
+.checkout-modal-panel h3{margin:0 0 8px;font-size:22px}
+.checkout-modal-sub{margin:0 0 18px;color:#666;font-size:14px}
+.checkout-modal-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border:none;border-radius:10px;background:#f3f0eb;color:#333;font-size:18px;line-height:1;cursor:pointer}
+.checkout-modal-panel form{display:grid;gap:12px}
+.checkout-modal-panel label{display:grid;gap:6px;font-weight:700;font-size:13px;color:#33251b}
+.checkout-modal-panel input{width:100%;padding:11px 13px;border:1px solid #e5d5c3;border-radius:10px;font:inherit;color:#21160f;background:#fff}
+.checkout-modal-panel input:focus{outline:3px solid rgba(224,124,26,.18);border-color:#d86600}
+.checkout-modal-panel .btn{width:100%;margin-top:4px}
+.checkout-error{margin:0;font-size:13px;font-weight:700;color:#ad332d}
+.checkout-status{text-align:center;padding:10px 0}
+.checkout-status p{color:#444;line-height:1.6}
+.checkout-status-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px}
+.checkout-status-actions .btn{width:auto;margin-top:0}
