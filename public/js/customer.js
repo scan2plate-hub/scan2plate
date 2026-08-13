@@ -10,6 +10,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
@@ -201,7 +202,19 @@ async function validateTableAvailability() {
 }
 
 function activeTableOrdersSnapshot() {
-  return getDocs(query(collection(db, 'orders'), where('restaurantId', '==', restaurantId)));
+  // Bound to the most recent orders so this doesn't re-download a restaurant's
+  // entire order history on every menu load/checkout. Falls back to the
+  // unbounded query if the restaurantId+createdAt composite index isn't
+  // deployed yet, so this never breaks table-order detection.
+  const recent = query(
+    collection(db, 'orders'),
+    where('restaurantId', '==', restaurantId),
+    orderBy('createdAt', 'desc'),
+    limit(200)
+  );
+  return getDocs(recent).catch(() =>
+    getDocs(query(collection(db, 'orders'), where('restaurantId', '==', restaurantId)))
+  );
 }
 
 async function auditLog(action, details = {}) {
@@ -340,9 +353,11 @@ function applyPlanMode() {
 
 async function loadSettings() {
   try {
-    const restaurantSnap = await getDoc(doc(db, 'restaurants', restaurantId));
-    const scoped = await getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'general'));
-    const root = await getDoc(doc(db, 'settings', 'general'));
+    const [restaurantSnap, scoped, root] = await Promise.all([
+      getDoc(doc(db, 'restaurants', restaurantId)),
+      getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'general')),
+      getDoc(doc(db, 'settings', 'general'))
+    ]);
 
     const restaurantData = restaurantSnap.exists() ? restaurantSnap.data() : {};
     const rootData = root.exists() ? root.data() : {};
