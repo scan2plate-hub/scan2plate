@@ -1134,26 +1134,49 @@ function parseCsvMenu(text = "") {
   });
 }
 
+function normalizeHeaderKey(key = "") {
+  return String(key || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeRowKeys(row = {}) {
+  const normalized = {};
+  Object.keys(row).forEach(key => {
+    normalized[normalizeHeaderKey(key)] = row[key];
+  });
+  return normalized;
+}
+
+function fieldValue(row, ...aliases) {
+  for (const alias of aliases) {
+    const value = row[normalizeHeaderKey(alias)];
+    if (value !== undefined && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
 function parseMenuExcelRows(rows = []) {
-  return rows.map(row => {
+  return rows.map(rawRow => {
+    const row = normalizeRowKeys(rawRow);
     const variants = [];
     for (let index = 1; index <= 4; index++) {
-      if (String(row[`Variant ${index} Name`] || "").trim() || String(row[`Variant ${index} Price`] || "").trim()) {
-        variants.push({ name: row[`Variant ${index} Name`], price: row[`Variant ${index} Price`] });
+      const variantName = fieldValue(row, `Variant ${index} Name`);
+      const variantPrice = fieldValue(row, `Variant ${index} Price`);
+      if (String(variantName || "").trim() || String(variantPrice || "").trim()) {
+        variants.push({ name: variantName, price: variantPrice });
       }
     }
     return normalizeImportedMenuItem({
-      category: row.Category,
-      name: row["Item Name"],
-      foodType: row["Food Type"],
-      price: row["Base Price"],
-      description: row.Description,
-      available: yesNo(row.Available, true),
-      imageUrl: row["Image URL"],
-      hasVariants: yesNo(row["Has Variants"], false),
+      category: fieldValue(row, "Category", "Menu Category", "Section", "Group"),
+      name: fieldValue(row, "Item Name", "Name", "Menu Item", "Item"),
+      foodType: fieldValue(row, "Food Type", "Type", "Veg/Non Veg", "Veg Non Veg", "Veg/NonVeg"),
+      price: fieldValue(row, "Base Price", "Price", "Rate", "Amount", "MRP"),
+      description: fieldValue(row, "Description"),
+      available: yesNo(fieldValue(row, "Available", "Status"), true),
+      imageUrl: fieldValue(row, "Image URL", "Image", "Image Link"),
+      hasVariants: yesNo(fieldValue(row, "Has Variants"), false),
       variants,
-      sortOrder: row["Sort Order"],
-      tags: row.Tags
+      sortOrder: fieldValue(row, "Sort Order", "Order"),
+      tags: fieldValue(row, "Tags")
     });
   }).filter(item => item.name || item.category);
 }
@@ -1164,7 +1187,8 @@ async function readMenuExcelFile(file) {
   if (name.endsWith(".csv") || file.type === "text/csv") return parseMenuExcelRows(parseCsvMenu(await file.text()));
   if (!window.XLSX) throw new Error("Excel reader is unavailable. Please check internet and try CSV format.");
   const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const sheetName = workbook.SheetNames.find(nameOfSheet => !/instruction/i.test(nameOfSheet)) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
   return parseMenuExcelRows(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
 }
 
