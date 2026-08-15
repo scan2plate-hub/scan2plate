@@ -1,7 +1,7 @@
 import { db } from "./firebase.js";
 import { collection, getDocs, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { qs, escapeHtml, fmtCurrency, toast } from "./common.js";
-const restaurantList=qs("#restaurantList"), searchBox=qs("#searchBox"); let rows=[]; const p=JSON.parse(localStorage.getItem("scan2serve_super_admin")||localStorage.getItem("scan2plate_super_admin")||"{}"); if(p.role!=="super_admin") window.location.href="./admin-login.html"; searchBox?.addEventListener("input", renderList);
+const restaurantList=qs("#restaurantList"), searchBox=qs("#searchBox"); let rows=[]; const p=(()=>{try{return JSON.parse(localStorage.getItem("scan2serve_super_admin")||localStorage.getItem("scan2plate_super_admin")||"{}");}catch{return {};}})(); if(p.role!=="super_admin") window.location.href="./admin-login.html"; searchBox?.addEventListener("input", renderList);
 function dateFrom(value){ if(!value) return null; if(value.toDate) return value.toDate(); if(typeof value.seconds==="number") return new Date(value.seconds*1000); const date=new Date(value); return Number.isNaN(date.getTime())?null:date; }
 function isExpired(expiryDate){ const date=dateFrom(expiryDate); if(!date) return false; date.setHours(23,59,59,999); return date<Date.now(); }
 function sourceFor(id){ return rows.find(item=>item.id===id)?.sourceCollection || "restaurants"; }

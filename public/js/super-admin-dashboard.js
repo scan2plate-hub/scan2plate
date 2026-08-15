@@ -25,7 +25,13 @@ let orders = [];
 let supportTickets = [];
 let superResetMountedFor = "";
 
-const session = JSON.parse(localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin") || "{}");
+const session = (() => {
+  try {
+    return JSON.parse(localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin") || "{}");
+  } catch {
+    return {};
+  }
+})();
 if (session.role !== "super_admin") window.location.href = "./admin-login.html";
 $("#superAdminName").textContent = session.name || session.email || "Super Admin";
 

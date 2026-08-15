@@ -9,7 +9,13 @@ const el = id => qs(`#${id}`);
 const restaurantId = el("restaurantId"), restaurantName = el("restaurantName"), ownerName = el("ownerName"), phone = el("phone"), email = el("email"), plan = el("plan"), amount = el("amount"), status = el("status"), expiryDate = el("expiryDate"), tableCount = el("tableCount"), address = el("address"), adminName = el("adminName"), adminEmail = el("adminEmail"), saveRestaurantBtn = el("saveRestaurantBtn"), msg = el("msg");
 const adminPassword = el("adminPassword"), restaurantType = el("restaurantType"), businessMode = el("businessMode"), city = el("city"), state = el("state"), pincode = el("pincode"), billingType = el("billingType"), planStartDate = el("planStartDate"), upiId = el("upiId"), gstNumber = el("gstNumber"), taxPercent = el("taxPercent"), logoUrl = el("logoUrl"), kitchenWhatsApp = el("kitchenWhatsApp"), supportWhatsApp = el("supportWhatsApp"), restaurantLat = el("restaurantLat"), restaurantLng = el("restaurantLng"), allowedOrderRadius = el("allowedOrderRadius"), useCurrentLocationBtn = el("useCurrentLocationBtn"), locationStatus = el("locationStatus");
 
-const session = JSON.parse(localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin") || "{}");
+const session = (() => {
+  try {
+    return JSON.parse(localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin") || "{}");
+  } catch {
+    return {};
+  }
+})();
 if (session.role !== "super_admin") window.location.href = "./admin-login.html";
 // Keep legacy onboarding HTML intact while exposing the expanded business-type list.
 if (restaurantType) {
