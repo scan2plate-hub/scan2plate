@@ -3,7 +3,9 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs
+  getDocs,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   qs,
@@ -209,10 +211,8 @@ async function load() {
 
     // 2. Fallback: search by public orderId
     if (!orderDoc && orderId) {
-      const orderSnap = await getDocs(collection(db, 'orders'));
-      orderDoc = orderSnap.docs.find(
-        d => String(d.data().orderId || '') === String(orderId)
-      ) || null;
+      const orderSnap = await getDocs(query(collection(db, 'orders'), where('orderId', '==', orderId)));
+      orderDoc = orderSnap.docs[0] || null;
     }
 
     if (!orderDoc) {

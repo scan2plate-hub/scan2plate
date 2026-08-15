@@ -5,7 +5,9 @@ import {
   onSnapshot,
   updateDoc,
   serverTimestamp,
-  getDoc
+  getDoc,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
@@ -589,7 +591,7 @@ if (String(kitchenRestaurant.plan || "").toLowerCase() === "basic") {
 await withTimeout(loadSettings(), 15000, "Kitchen settings load timed out.");
 
 registerCleanup(onSnapshot(
-  collection(db, "orders"),
+  query(collection(db, "orders"), where("restaurantId", "==", restaurantId)),
   snap => {
     // Alert bookkeeping and the actual board render are kept independent:
     // a bad/legacy record must not stop the live order board from updating.
@@ -597,7 +599,6 @@ registerCleanup(onSnapshot(
       const activeDocs = snap.docs.filter(d => {
         const x = d.data();
         return (
-          String(x.restaurantId || "") === restaurantId &&
           !["delivered","cancelled","rejected"].includes(String(x.status || "pending").toLowerCase())
         );
       });
