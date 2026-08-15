@@ -1438,6 +1438,16 @@ function isOrderCompleted(order = {}) {
   return ["served", "completed"].includes(status) || payment === "paid";
 }
 
+// Centralized: once the kitchen workflow itself has reached a terminal state,
+// operational actions (Accept/Preparing/Ready/Reject/+10 min/KOT) no longer
+// apply, independent of payment status (a pre-paid online order that hasn't
+// been accepted yet is NOT workflow-closed, so this must key off status only).
+const CLOSED_WORKFLOW_STATUSES = ["completed", "served", "delivered", "cancelled", "rejected"];
+
+function isOrderWorkflowClosed(order = {}) {
+  return CLOSED_WORKFLOW_STATUSES.includes(String(order.status || "pending").toLowerCase());
+}
+
 function orderAmount(order = {}) {
   return Number(order.grandTotal ?? order.totalAmount ?? order.total ?? order.amount ?? 0);
 }
@@ -4495,6 +4505,16 @@ async function handleAdminOrderAction(orderDocId, action) {
     }
 
     const order = snap.data();
+
+    // Defense in depth: a stale browser tab can still render a closed order's
+    // action buttons. Block kitchen-workflow transitions server-side too, not
+    // just by hiding buttons in renderOrdersList.
+    const kitchenWorkflowActions = ["accept", "preparing", "ready", "reject", "add10", "printkot", "printnewkot", "seenupdate", "suggesttime", "readyforpickup", "dispatch", "delivered"];
+    if (isOrderWorkflowClosed(order) && kitchenWorkflowActions.includes(action)) {
+      showAdminToast("This order is already closed. Its kitchen workflow can no longer be changed.", "danger");
+      return;
+    }
+
     const currentEta = Number(order.etaMinutes || 10);
     const currentItems = order.items || [];
 
@@ -4969,6 +4989,9 @@ function renderOrdersList(targetEl, orders) {
   targetEl.innerHTML = orders.map(o => {
     const remaining = getRemainingSeconds(o);
     const hasNewItems = o.hasNewItems === true;
+    const workflowClosed = isOrderWorkflowClosed(o);
+    const isPaidOrder = String(o.paymentStatus || "").toLowerCase() === "paid";
+    const readOnlyOrder = workflowClosed && isPaidOrder;
 
     return `
       <div class="order-card">
@@ -4978,7 +5001,7 @@ function renderOrdersList(targetEl, orders) {
             <div class="order-time">Order ID: ${escapeHtml(o.orderId || o.id)}</div>
             <div class="order-time">${escapeHtml(formatDateTime(o.createdAt))}</div>
           </div>
-          <div class="order-status ${getStatusClass(o.status)}">${escapeHtml(o.businessMode === "vendor" && String(o.status || "").toLowerCase() === "pending" ? "New" : o.status || "pending")}</div>
+          <div class="order-status ${getStatusClass(o.status)}">${escapeHtml(o.businessMode === "vendor" && String(o.status || "").toLowerCase() === "pending" ? "New" : o.status || "pending")}${readOnlyOrder ? " • PAID" : ""}</div>
         </div>
 
         <div class="order-customer">
@@ -5026,6 +5049,7 @@ function renderOrdersList(targetEl, orders) {
         </div>
 
         <div class="order-actions">
+          ${workflowClosed ? "" : `
           <button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="accept">Accept</button>
           <button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="preparing">Preparing</button>
           <button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="ready">Ready</button>
@@ -5037,17 +5061,20 @@ function renderOrdersList(targetEl, orders) {
               ? `<button class="btn btn-outline admin-order-action" data-id="${o.id}" data-action="printnewkot">Print New KOT</button><button class="btn btn-success admin-order-action" data-id="${o.id}" data-action="seenupdate">Seen Update</button>`
               : ""
           }
+          `}
         </div>
 
         <div class="order-actions">
-          <button class="btn ${String(o.paymentStatus || "").toLowerCase() === "paid" ? "btn-success" : "btn-outline"} payment-btn"
+          ${readOnlyOrder ? "" : `
+          <button class="btn ${isPaidOrder ? "btn-success" : "btn-outline"} payment-btn"
             data-id="${o.id}" data-status="paid"><i class="fas fa-check"></i> Paid</button>
 
-          <button class="btn ${String(o.paymentStatus || "").toLowerCase() !== "paid" ? "btn-danger" : "btn-outline"} payment-btn"
+          <button class="btn ${!isPaidOrder ? "btn-danger" : "btn-outline"} payment-btn"
             data-id="${o.id}" data-status="unpaid"><i class="fas fa-times"></i> Unpaid</button>
 
           <button class="btn btn-outline pay-bill-btn" data-id="${o.id}"><i class="fas fa-edit"></i> Edit Bill</button>
           <button class="btn btn-primary pay-bill-btn" data-id="${o.id}"><i class="fas fa-plus"></i> Add Items</button>
+          `}
           <button class="btn btn-primary print-bill-btn" data-id="${o.id}"><i class="fas fa-print"></i> Print Bill</button>
         </div>
       </div>
