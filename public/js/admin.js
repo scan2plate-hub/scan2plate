@@ -2054,7 +2054,15 @@ let adminAlertPlaying = false;
 let adminAlertType = "";
 let adminFirstRealtimeLoad = true;
 const adminSeenRealtimeKeys = new Map();
-const adminMutedOrderIds = new Set(JSON.parse(localStorage.getItem("scan2plate_muted_order_alerts") || "[]"));
+const adminMutedOrderIds = new Set((() => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("scan2plate_muted_order_alerts") || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem("scan2plate_muted_order_alerts");
+    return [];
+  }
+})());
 let adminPendingAlarmIds = new Set();
 
 async function unlockAdminAudio() {
