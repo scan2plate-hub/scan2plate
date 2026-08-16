@@ -1,7 +1,7 @@
 import { app, auth, db } from "./firebase.js";
 import { collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, limit, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup } from "./common.js";
+import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup } from "./common.js?v=freeze-fix-20260816";
 
 installAppSafety({ pageName: "Admin Modules", stuckTimeoutMs: 18000 });
 

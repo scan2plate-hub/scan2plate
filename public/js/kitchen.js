@@ -20,7 +20,7 @@ import {
   withTimeout,
   registerCleanup,
   guardedAction
-} from "./common.js";
+} from "./common.js?v=freeze-fix-20260816";
 
 installAppSafety({ pageName: "Kitchen Dashboard", stuckTimeoutMs: 15000 });
 

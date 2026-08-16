@@ -139,6 +139,38 @@ export function installAppSafety(options = {}) {
       showStuckFallback(`${pageName} is still loading. You can refresh safely if needed.`);
     }
   }, timeoutMs);
+
+  // Ongoing watchdog (not just the one-shot initial-load check above): every
+  // 5s, verify the main thread actually got to run this tick close to on
+  // schedule (a long synchronous block — a runaway render loop, a giant
+  // list re-render, a slow third-party script — shows up as a large drift)
+  // and force-reset any action button that's been stuck "busy" past a hard
+  // ceiling. Without this, a hang partway through a click handler leaves the
+  // button disabled and the user sees "I click Save and nothing happens"
+  // with no way out short of guessing to refresh.
+  const watchdogIntervalMs = 5000;
+  const watchdogStuckAfterMs = 20000;
+  const hardBusyCeilingMs = 60000;
+  let lastTick = Date.now();
+  const busySince = new WeakMap();
+  setInterval(() => {
+    const now = Date.now();
+    const drift = now - lastTick - watchdogIntervalMs;
+    lastTick = now;
+    if (document.visibilityState === "visible" && drift > watchdogStuckAfterMs) {
+      showStuckFallback(`${pageName} is responding slowly. Refresh if buttons stop working.`);
+    }
+    document.querySelectorAll("[data-busy='true']").forEach(button => {
+      if (!busySince.has(button)) { busySince.set(button, now); return; }
+      if (now - busySince.get(button) > hardBusyCeilingMs) {
+        button.disabled = false;
+        button.dataset.busy = "false";
+        busySince.delete(button);
+        devError(`[${pageName}] force-reset a button stuck busy past ${hardBusyCeilingMs}ms`, button);
+      }
+    });
+    document.querySelectorAll("[data-busy='false'], [data-busy='']").forEach(button => busySince.delete(button));
+  }, watchdogIntervalMs);
 }
 
 export async function guardedAction(button, action, options = {}) {

@@ -18,7 +18,7 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js";
+import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js?v=freeze-fix-20260816";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
