@@ -4,7 +4,11 @@
   "private": true,
   "description": "Scan2Plate Restaurant POS — desktop shell for the existing scan2plate.com web app",
   "main": "main.js",
-  "author": "Scan2Plate",
+  "homepage": "https://scan2plate.com",
+  "author": {
+    "name": "Scan2Plate",
+    "email": "support@scan2plate.com"
+  },
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "start": "electron .",
