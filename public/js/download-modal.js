@@ -25,27 +25,45 @@
     return card;
   }
 
+  function buildComingSoonNotice(info) {
+    var el = document.createElement("div");
+    el.className = "download-coming-soon";
+    el.innerHTML =
+      '<div class="download-card-emoji" aria-hidden="true">' + info.emoji + "</div>" +
+      "<h3>" + info.tagline + " — coming soon</h3>" +
+      "<p>We detected you're on " + info.label + ". This build isn't published yet, but it's on the way. Check back soon, or use one of the platforms available below in the meantime.</p>";
+    return el;
+  }
+
   function renderInto(container) {
     var config = window.SCAN2PLATE_DOWNLOADS;
     if (!container || !config) return;
     var detected = detectPlatform();
     var order = ["windows", "macos", "android", "linux"];
-    // Only platforms with a real, uploaded build are shown - a platform
-    // without one (available !== true) is left off entirely rather than
-    // linking to a release asset that doesn't exist yet.
-    var recommended = detected && config[detected] && config[detected].available === true ? detected : null;
+    var detectedInfo = detected && config[detected] ? config[detected] : null;
+    // Only platforms with a real, uploaded build get a working download
+    // card - a platform without one (available !== true) never links to a
+    // release asset that doesn't exist yet. If the visitor's own detected
+    // platform isn't ready, they still get a clear "coming soon" notice
+    // naming their platform, rather than silently seeing only other
+    // platforms with no explanation of why theirs is missing.
+    var recommended = detectedInfo && detectedInfo.available === true ? detected : null;
     container.innerHTML = "";
+
     if (recommended) {
       var recSection = document.createElement("div");
       recSection.className = "download-recommended-section";
       recSection.appendChild(buildPlatformCard(recommended, config[recommended], true));
       container.appendChild(recSection);
-
-      var otherLabel = document.createElement("p");
-      otherLabel.className = "download-other-label";
-      otherLabel.textContent = "Available for other platforms";
-      container.appendChild(otherLabel);
+    } else if (detectedInfo) {
+      container.appendChild(buildComingSoonNotice(detectedInfo));
     }
+
+    var otherLabel = document.createElement("p");
+    otherLabel.className = "download-other-label";
+    otherLabel.textContent = recommended ? "Available for other platforms" : "Available now";
+    container.appendChild(otherLabel);
+
     var grid = document.createElement("div");
     grid.className = "download-card-grid";
     order.forEach(function (key) {
@@ -54,10 +72,12 @@
       grid.appendChild(buildPlatformCard(key, config[key], false));
     });
     container.appendChild(grid);
-    if (!recommended && !grid.children.length) {
+
+    if (!grid.children.length) {
+      otherLabel.textContent = "";
       var empty = document.createElement("p");
       empty.className = "download-other-label";
-      empty.textContent = "Downloads are being prepared - check back soon.";
+      empty.textContent = "Downloads are being prepared — check back soon.";
       container.appendChild(empty);
     }
   }

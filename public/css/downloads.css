@@ -48,6 +48,16 @@ body.download-modal-open { overflow: hidden; }
 .download-page-hero p { color: #666; font-size: 16px; line-height: 1.6; }
 
 .download-recommended-section { margin-bottom: 10px; }
+.download-coming-soon {
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 18px;
+  background: #f8fafc;
+  text-align: center;
+  margin-bottom: 6px;
+}
+.download-coming-soon h3 { margin: 6px 0 4px; font-size: 16px; color: #334155; }
+.download-coming-soon p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.5; }
 .download-other-label { color: #666; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; margin: 24px 0 12px; }
 
 .download-card-grid {
