@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scan2Plate — Offline Billing</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, "Segoe UI", Arial, sans-serif; background: #f8fafc; color: #1e293b; }
+  header { background: #b91c1c; color: #fff; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; }
+  header strong { font-size: 14px; }
+  header span { font-size: 12px; opacity: 0.9; }
+  .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 0; height: calc(100vh - 42px); }
+  .menu-pane { overflow-y: auto; padding: 16px; }
+  .cart-pane { border-left: 1px solid #e2e8f0; background: #fff; padding: 16px; display: flex; flex-direction: column; }
+  .category { font-weight: 800; color: #64748b; font-size: 12px; text-transform: uppercase; margin: 14px 0 8px; }
+  .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .menu-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; cursor: pointer; text-align: left; }
+  .menu-item:hover { border-color: #b91c1c; }
+  .menu-item strong { display: block; font-size: 13px; }
+  .menu-item span { color: #64748b; font-size: 12px; }
+  select, input, button { font: inherit; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; font-weight: 700; color: #64748b; margin-bottom: 4px; }
+  select, input[type=text], input[type=number] { width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 7px; }
+  .cart-list { flex: 1; overflow-y: auto; margin: 10px 0; }
+  .cart-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+  .cart-row .qty-btns button { width: 22px; height: 22px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+  .totals-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .totals-row.grand { font-weight: 800; font-size: 16px; border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 8px; }
+  .payment-methods { display: flex; gap: 8px; margin-bottom: 8px; }
+  .payment-methods button { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-weight: 700; }
+  .payment-methods button.active { background: #b91c1c; color: #fff; border-color: #b91c1c; }
+  .pending-note { font-size: 11.5px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; display: none; }
+  .place-btn { width: 100%; padding: 12px; border-radius: 10px; border: none; background: #16a34a; color: #fff; font-weight: 800; font-size: 15px; cursor: pointer; }
+  .place-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+  .razorpay-note { font-size: 12px; color: #64748b; background: #f1f5f9; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+  .empty { color: #94a3b8; text-align: center; padding: 30px 0; }
+
+  /* Print layout - kept close to the site's existing bill.html structure
+     (name / address / items table / totals / footer), not redesigned. */
+  #printArea { display: none; }
+  @media print {
+    body * { visibility: hidden; }
+    #printArea, #printArea * { visibility: visible; }
+    #printArea { display: block; position: absolute; left: 0; top: 0; width: 100%; font: 12px/1.4 monospace; }
+    #printArea table { width: 100%; border-collapse: collapse; }
+    #printArea td, #printArea th { padding: 2px 0; text-align: left; }
+    #printArea .right { text-align: right; }
+    #printArea .center { text-align: center; }
+    #printArea hr { border: none; border-top: 1px dashed #000; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <strong>Scan2Plate — Offline Billing</strong>
+    <span id="pendingLabel">Offline Mode</span>
+  </header>
+  <div class="layout">
+    <div class="menu-pane" id="menuPane"><p class="empty">Loading cached menu…</p></div>
+    <div class="cart-pane">
+      <div class="field">
+        <label for="tableSelect">Table</label>
+        <select id="tableSelect"><option value="">Select table</option></select>
+      </div>
+      <div class="cart-list" id="cartList"><p class="empty">Cart is empty. Tap a menu item to add it.</p></div>
+      <div class="field">
+        <label for="discountInput">Discount (₹, optional)</label>
+        <input id="discountInput" type="number" min="0" value="0" />
+      </div>
+      <div class="totals-row"><span>Subtotal</span><span id="subtotalOut">₹0</span></div>
+      <div class="totals-row"><span>Tax</span><span id="taxOut">₹0</span></div>
+      <div class="totals-row grand"><span>Total</span><span id="totalOut">₹0</span></div>
+
+      <div class="field" style="margin-top:10px">
+        <label>Payment Method</label>
+        <div class="payment-methods">
+          <button type="button" class="active" data-method="cash">Cash</button>
+          <button type="button" data-method="upi">UPI</button>
+          <button type="button" data-method="card">Card</button>
+        </div>
+      </div>
+      <p class="pending-note" id="pendingNote">Payment confirmation pending — this will need to be confirmed once the restaurant verifies the transaction.</p>
+      <p class="razorpay-note">Online payment requires internet connection. Razorpay checkout is disabled while offline.</p>
+
+      <button class="place-btn" id="placeBillBtn" disabled>Place Bill &amp; Print</button>
+    </div>
+  </div>
+
+  <div id="printArea"></div>
+
+  <script src="./offline-billing.js"></script>
+</body>
+</html>

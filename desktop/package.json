@@ -6,14 +6,17 @@
   "main": "main.js",
   "author": "Scan2Plate",
   "scripts": {
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
     "start": "electron .",
     "dev": "SCAN2PLATE_DESKTOP_DEV=1 electron .",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
-    "build:all": "electron-builder -mwl"
+    "build:all": "electron-builder -mwl",
+    "test": "node --test src/__tests__/*.test.js"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3"
   },
@@ -34,8 +37,18 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "msi", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "msi",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico",
       "artifactName": "Scan2Plate-Setup.${ext}"
@@ -53,16 +66,29 @@
       "artifactName": "Scan2Plate.${ext}"
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.business",
       "artifactName": "Scan2Plate.${ext}"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png",
       "category": "Office",
       "artifactName": "Scan2Plate.${ext}"
     }
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
   }
 }
