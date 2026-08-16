@@ -18,7 +18,7 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal } from "./common.js?v=freeze-fix-20260816";
+import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal, createCoalescedRunner } from "./common.js?v=freeze-fix-20260816";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -5480,31 +5480,18 @@ let ordersTokenRefreshRetried = false;
 // milliseconds of each other (e.g. a burst of new orders, or a local write
 // followed immediately by its server ack) — without coalescing, each one
 // re-runs that entire pipeline back-to-back and the tab visibly freezes.
-// The first snapshot after (re)subscribing still renders immediately so
-// initial load isn't delayed; only the rapid-fire follow-ups get batched.
-let ordersRenderScheduled = false;
-let latestOrdersSnap = null;
-let ordersSnapshotReceived = false;
-function scheduleOrdersRender(snap) {
-  latestOrdersSnap = snap;
-  if (!ordersSnapshotReceived) {
-    ordersSnapshotReceived = true;
-    processOrdersSnapshot(latestOrdersSnap);
-    return;
-  }
-  if (ordersRenderScheduled) return;
-  ordersRenderScheduled = true;
-  setTimeout(() => {
-    ordersRenderScheduled = false;
-    processOrdersSnapshot(latestOrdersSnap);
-  }, 200);
-}
+// createCoalescedRunner renders the first snapshot after (re)subscribing
+// immediately so initial load isn't delayed; only rapid-fire follow-ups
+// get batched. Re-created on every (re)subscribe in loadOrders() so a
+// resubscribe (e.g. after a token-refresh retry) also renders its first
+// snapshot immediately rather than inheriting stale coalescing state.
+let scheduleOrdersRender = createCoalescedRunner(processOrdersSnapshot, 200);
 
 async function loadOrders() {
   try {
     cleanupFirestoreListeners(ordersUnsubscribe);
     ordersUnsubscribe = null;
-    ordersSnapshotReceived = false;
+    scheduleOrdersRender = createCoalescedRunner(processOrdersSnapshot, 200);
 
     devLog("orders query started", {
       uid: auth.currentUser?.uid || null,
