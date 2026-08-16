@@ -1,0 +1,20 @@
+{
+  "name": "scan2plate-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scan2Plate Restaurant POS — Android app shell (Capacitor)",
+  "scripts": {
+    "android:sync": "cap sync android",
+    "android:open": "cap open android",
+    "android:build": "cd android && ./gradlew assembleRelease",
+    "android:build:bundle": "cd android && ./gradlew bundleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.1"
+  }
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scan2Plate</title>
+<style>
+  :root { color-scheme: light; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font: 15px/1.5 -apple-system, "Segoe UI", Arial, sans-serif;
+    background: #f8fafc; color: #1e293b;
+  }
+  .card { text-align: center; max-width: 380px; padding: 32px; }
+  .spinner {
+    width: 34px; height: 34px; margin: 0 auto 18px;
+    border: 3px solid #e2e8f0; border-top-color: #dc2626; border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size: 17px; margin: 0 0 8px; }
+  p { margin: 0; color: #64748b; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1>Internet connection lost</h1>
+    <p>Scan2Plate will reconnect automatically once your internet connection is back. No action needed.</p>
+  </div>
+</body>
+</html>

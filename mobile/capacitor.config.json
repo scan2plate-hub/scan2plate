@@ -1,0 +1,13 @@
+{
+  "appId": "com.scan2plate.restaurantpos",
+  "appName": "Scan2Plate Restaurant POS",
+  "webDir": "www",
+  "server": {
+    "url": "https://scan2plate.com/admin-login.html",
+    "cleartext": false,
+    "allowNavigation": ["scan2plate.com", "*.scan2plate.com"]
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

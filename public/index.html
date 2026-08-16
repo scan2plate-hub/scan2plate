@@ -1067,6 +1067,7 @@
     }
   </style>
   <link rel="stylesheet" href="./css/landing-redesign.css?v=restaurant-os-redesign" />
+  <link rel="stylesheet" href="./css/downloads.css" />
 </head>
 <body>
   <header class="topbar">
@@ -1091,6 +1092,7 @@
         <a href="/about">About</a>
         <a href="/contact">Contact</a>
         <a href="/demo">Demo</a>
+        <a href="/download" data-open-download-modal>Download App</a>
       </nav>
 
       <div class="nav-actions">
@@ -1112,6 +1114,7 @@
           <div class="hero-cta">
             <button type="button" class="btn btn-primary" data-open-checkout>Start for ₹499/month</button>
             <a href="/contact" class="btn btn-outline">Book Free Demo</a>
+            <a href="/download" class="btn btn-outline" data-open-download-modal>Download App</a>
             <a href="./admin-login.html?v=latest-business-login-fix" class="text-link">Restaurant Admin</a>
           </div>
           <p class="hero-reassurance">Everything included • No feature-based plans</p>
@@ -2654,6 +2657,18 @@ import {
     </div>
   </div>
 </div>
+
+<div class="download-modal" id="downloadModal" role="dialog" aria-modal="true" aria-labelledby="downloadModalTitle">
+  <div class="download-modal-panel">
+    <button type="button" class="download-modal-close" data-close-download aria-label="Close">&times;</button>
+    <h2 class="download-modal-title" id="downloadModalTitle">Download Scan2Plate</h2>
+    <p class="download-modal-sub">Which device do you want to install Scan2Plate on?</p>
+    <div id="downloadModalCards"></div>
+  </div>
+</div>
+
 <script src="/js/checkout.js" defer></script>
+<script src="/js/downloads-config.js"></script>
+<script src="/js/download-modal.js"></script>
 </body>
 </html>
