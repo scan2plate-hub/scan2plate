@@ -1,0 +1,108 @@
+/* Download modal (landing page) + /download page card grid. Scoped under
+   .download-modal / .download-card* / .download-page* so it can't collide
+   with existing .checkout-modal or other site styles. */
+
+.download-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  background: rgba(17, 17, 17, 0.55);
+  padding: 20px;
+}
+.download-modal.open { display: flex; }
+body.download-modal-open { overflow: hidden; }
+
+.download-modal-panel {
+  background: #fff;
+  border-radius: 18px;
+  max-width: 880px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 32px 28px;
+  position: relative;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+}
+.download-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  border: none;
+  background: #f3f3f3;
+  color: #333;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.download-modal-title { font-size: 22px; margin: 0 0 6px; color: #111; }
+.download-modal-sub { color: #666; margin: 0 0 20px; }
+
+.download-page-hero { text-align: center; max-width: 720px; margin: 0 auto 8px; }
+.download-page-hero h1 { font-size: clamp(26px, 4vw, 38px); margin: 0 0 12px; color: #111; }
+.download-page-hero p { color: #666; font-size: 16px; line-height: 1.6; }
+
+.download-recommended-section { margin-bottom: 10px; }
+.download-other-label { color: #666; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; margin: 24px 0 12px; }
+
+.download-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.download-card {
+  border: 1px solid #ececec;
+  border-radius: 14px;
+  padding: 20px 18px;
+  background: #fffaf3;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.download-card-recommended {
+  border-color: #d88a1d;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(216, 138, 29, 0.18);
+}
+.download-card-badge {
+  position: absolute;
+  top: -12px;
+  left: 16px;
+  background: #d88a1d;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.download-card-emoji { font-size: 30px; }
+.download-card h3 { margin: 0; font-size: 17px; color: #111; }
+.download-card p { margin: 0; color: #666; font-size: 13px; line-height: 1.5; }
+.download-card .btn { margin-top: 6px; width: 100%; text-align: center; }
+.download-card-meta { font-size: 11.5px !important; color: #999 !important; margin-top: 2px !important; }
+
+.download-benefits-section { background: #fff8ee; border-radius: 18px; padding: 28px 26px; margin: 40px auto; max-width: 880px; }
+.download-benefits-section h2 { margin: 0 0 10px; font-size: 22px; color: #111; }
+.download-benefits-section p { color: #555; line-height: 1.6; margin: 0 0 16px; }
+.download-benefits-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.download-benefits-list li { font-weight: 700; color: #16643a; font-size: 14px; }
+.download-benefits-disclaimer { font-size: 12.5px; color: #8a6d3b; background: #fff3cd; border: 1px solid #ffe8a1; border-radius: 10px; padding: 10px 14px; margin: 0; }
+
+.download-install-section { max-width: 880px; margin: 40px auto; }
+.download-install-section h2 { font-size: 22px; margin: 0 0 16px; color: #111; }
+.download-install details { border: 1px solid #ececec; border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; background: #fff; }
+.download-install summary { font-weight: 800; cursor: pointer; color: #111; }
+.download-install ol { margin: 10px 0 0; padding-left: 20px; color: #555; line-height: 1.7; }
+
+@media (max-width: 640px) {
+  .download-modal-panel { padding: 24px 18px; }
+  .download-card-grid { grid-template-columns: 1fr; }
+}
