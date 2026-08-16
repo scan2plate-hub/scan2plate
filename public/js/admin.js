@@ -5474,10 +5474,37 @@ function processOrdersSnapshot(snap) {
 ========================================================= */
 let ordersTokenRefreshRetried = false;
 
+// processOrdersSnapshot re-sorts the full order history and re-renders the
+// dashboard, all-orders list, reports, KOT, tables and online-orders sections
+// synchronously. Firestore can deliver several snapshot events within
+// milliseconds of each other (e.g. a burst of new orders, or a local write
+// followed immediately by its server ack) — without coalescing, each one
+// re-runs that entire pipeline back-to-back and the tab visibly freezes.
+// The first snapshot after (re)subscribing still renders immediately so
+// initial load isn't delayed; only the rapid-fire follow-ups get batched.
+let ordersRenderScheduled = false;
+let latestOrdersSnap = null;
+let ordersSnapshotReceived = false;
+function scheduleOrdersRender(snap) {
+  latestOrdersSnap = snap;
+  if (!ordersSnapshotReceived) {
+    ordersSnapshotReceived = true;
+    processOrdersSnapshot(latestOrdersSnap);
+    return;
+  }
+  if (ordersRenderScheduled) return;
+  ordersRenderScheduled = true;
+  setTimeout(() => {
+    ordersRenderScheduled = false;
+    processOrdersSnapshot(latestOrdersSnap);
+  }, 200);
+}
+
 async function loadOrders() {
   try {
     cleanupFirestoreListeners(ordersUnsubscribe);
     ordersUnsubscribe = null;
+    ordersSnapshotReceived = false;
 
     devLog("orders query started", {
       uid: auth.currentUser?.uid || null,
@@ -5491,7 +5518,7 @@ async function loadOrders() {
       snap => {
         ordersTokenRefreshRetried = false;
         devLog("orders query result", { restaurantId, resultCount: snap.docs.length });
-        processOrdersSnapshot(snap);
+        scheduleOrdersRender(snap);
       },
       async err => {
         console.error("orders listener error", { code: err?.code, message: err?.message, restaurantId });
