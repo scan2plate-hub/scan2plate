@@ -1,0 +1,75 @@
+name: Build Scan2Plate Desktop Installers
+
+# Manual trigger only. This never runs on push/PR, and it is entirely
+# separate from jekyll-gh-pages.yml — it does not touch the production
+# website deploy in any way.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            script: build:win
+            artifacts: |
+              desktop/dist/*.exe
+              desktop/dist/*.msi
+          - os: macos-latest
+            script: build:mac
+            artifacts: |
+              desktop/dist/*.dmg
+          - os: ubuntu-latest
+            script: build:linux
+            artifacts: |
+              desktop/dist/*.AppImage
+              desktop/dist/*.deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build
+        working-directory: desktop
+        run: npm run ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan2plate-desktop-${{ matrix.os }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Sync Capacitor Android project
+        working-directory: mobile
+        run: npx cap sync android
+      # ubuntu-latest ships with an Android SDK and JDK preinstalled, so no
+      # separate SDK setup step is needed. assembleDebug (not
+      # assembleRelease) deliberately - there is no release signing keystore
+      # configured yet, and a debug-signed APK is a real, installable build
+      # rather than a release build that would fail without one.
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan2plate-android
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
