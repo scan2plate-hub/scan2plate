@@ -47,6 +47,34 @@ export function devError(...args) {
   if (isDevHost()) console.error(...args);
 }
 
+// A live onSnapshot listener on a frequently-written collection can deliver
+// several events within milliseconds of each other (a burst of writes, or a
+// local write followed immediately by its server ack). Without coalescing,
+// each one re-runs whatever expensive render `run` does, back-to-back on
+// the main thread, which is what made the Admin Dashboard freeze under
+// load. The first call still runs immediately (so initial load isn't
+// delayed); only rapid-fire follow-ups within `delayMs` of each other are
+// batched into a single trailing call with the latest argument.
+export function createCoalescedRunner(run, delayMs = 200) {
+  let scheduled = false;
+  let receivedFirst = false;
+  let latestArg;
+  return function schedule(arg) {
+    latestArg = arg;
+    if (!receivedFirst) {
+      receivedFirst = true;
+      run(latestArg);
+      return;
+    }
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(() => {
+      scheduled = false;
+      run(latestArg);
+    }, delayMs);
+  };
+}
+
 export function withTimeout(promise, ms = 20000, label = "Request timed out") {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
