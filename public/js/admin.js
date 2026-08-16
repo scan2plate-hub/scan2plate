@@ -347,6 +347,8 @@ const menuMaxPriceFilterEl = document.getElementById("menuMaxPriceFilter");
 const menuSortFilterEl = document.getElementById("menuSortFilter");
 const uploadMenuPdfBtn = document.getElementById("uploadMenuPdfBtn");
 const menuPdfInput = document.getElementById("menuPdfInput");
+const uploadMenuImageBtn = document.getElementById("uploadMenuImageBtn");
+const menuImageInput = document.getElementById("menuImageInput");
 const downloadMenuPdfSampleBtn = document.getElementById("downloadMenuPdfSampleBtn");
 const menuImportCard = document.getElementById("menuImportCard");
 const menuImportRowsEl = document.getElementById("menuImportRows");
@@ -384,6 +386,8 @@ const purchaseSupplierNameEl = document.getElementById("purchaseSupplierName");
 const purchaseBillPreviewEl = document.getElementById("purchaseBillPreview");
 const scanPurchaseBillBtn = document.getElementById("scanPurchaseBillBtn");
 const rescanPurchaseBillBtn = document.getElementById("rescanPurchaseBillBtn");
+const uploadInventoryExcelBtn = document.getElementById("uploadInventoryExcelBtn");
+const inventoryExcelInput = document.getElementById("inventoryExcelInput");
 const purchaseReviewEl = document.getElementById("purchaseReview");
 const purchaseReviewRowsEl = document.getElementById("purchaseReviewRows");
 const addPurchaseReviewRowBtn = document.getElementById("addPurchaseReviewRowBtn");
@@ -1069,6 +1073,15 @@ async function extractMenuPdf(file) {
   return { items:[...unique.values()], invalid:parsed.invalid, headings:parsed.headings };
 }
 
+// Reuses the same line-based category/price parser as PDF import, fed with
+// OCR'd text instead of PDF.js text — one parser, two input sources.
+function extractMenuFromOcrText(text = "") {
+  const result = parsePdfColumnLines(String(text || "").split(/\r?\n/));
+  const unique = new Map();
+  result.items.forEach(item => unique.set(`${normalizedMenuName(item.category)}|${normalizedMenuName(item.name)}|${item.price}`, item));
+  return { items: [...unique.values()], invalid: result.invalid, headings: result.headings };
+}
+
 function menuDuplicateFor(item) {
   return allMenuItems.find(existing => normalizedMenuName(existing.name) === normalizedMenuName(item.name) && normalizedMenuName(existing.category) === normalizedMenuName(item.category));
 }
@@ -1190,6 +1203,30 @@ async function readMenuExcelFile(file) {
   const sheetName = workbook.SheetNames.find(nameOfSheet => !/instruction/i.test(nameOfSheet)) || workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   return parseMenuExcelRows(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+}
+
+function parseInventoryExcelRows(rows = []) {
+  return rows.map(rawRow => {
+    const row = normalizeRowKeys(rawRow);
+    const itemName = String(fieldValue(row, "Item Name", "Item", "Product", "Stock Item") || "").trim();
+    const quantity = Number(fieldValue(row, "Quantity", "Qty", "Stock") || 0);
+    const unit = String(fieldValue(row, "Unit", "UOM") || "pcs").trim() || "pcs";
+    const unitPrice = Number(fieldValue(row, "Purchase Price", "Rate", "Price", "Unit Price") || 0);
+    const totalPriceRaw = fieldValue(row, "Amount", "Total", "Total Price");
+    const totalPrice = totalPriceRaw !== "" ? Number(totalPriceRaw) : quantity * unitPrice;
+    const category = String(fieldValue(row, "Category", "Section") || "").trim();
+    return { itemName, quantity, unit, unitPrice, totalPrice, category };
+  }).filter(item => item.itemName && item.quantity > 0);
+}
+
+async function readInventorySpreadsheetFile(file) {
+  if (!file) throw new Error("Choose an Excel or CSV stock sheet first.");
+  const name = String(file.name || "").toLowerCase();
+  if (name.endsWith(".csv") || file.type === "text/csv") return parseInventoryExcelRows(parseCsvMenu(await file.text()));
+  if (!window.XLSX) throw new Error("Excel reader is unavailable. Please check internet and try CSV format.");
+  const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return parseInventoryExcelRows(window.XLSX.utils.sheet_to_json(sheet, { defval: "" }));
 }
 
 function renderMenuImportReview() {
@@ -5586,6 +5623,34 @@ menuPdfInput?.addEventListener("change", async () => {
     alert("PDF is image based and could not be read accurately. Please use Excel menu upload format.");
   }
 });
+uploadMenuImageBtn?.addEventListener("click", () => menuImageInput?.click());
+menuImageInput?.addEventListener("change", async () => {
+  const file = menuImageInput.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) { menuImageInput.value = ""; return alert("Please upload a JPG, PNG, or WEBP menu image."); }
+  try {
+    if (menuImportStatusEl) menuImportStatusEl.textContent = "Scanning menu image…";
+    const uploadFile = await preparePurchaseBillForUpload(file);
+    const form = new FormData();
+    form.append("file", uploadFile, uploadFile.name || file.name || "menu.jpg");
+    form.append("restaurantId", restaurantId);
+    const response = await fetch(`${purchaseBackendUrl()}/api/ocr/scan`, { method: "POST", headers: await purchaseAuthHeaders(), body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) throw new Error(backendOcrErrorDetail(data, "Couldn't confidently read this menu image. Please try a clearer photo or use Excel/PDF upload."));
+    const extracted = extractMenuFromOcrText(data.parsedText || "");
+    if (!extracted.items.length) throw new Error("Couldn't confidently detect menu items in this image. Please try a clearer, well-lit photo, or use Excel/PDF upload instead.");
+    menuImportItems = extracted.items.map(item => normalizeImportedMenuItem({ ...item, foodType: "veg", available: true, hasVariants: false }));
+    menuImportInvalidCount = extracted.invalid;
+    menuImportWarning = "Detected from image scan — please review category, name and price carefully before import.";
+    renderMenuImportReview();
+  } catch (error) {
+    console.error("Menu image OCR failed", error);
+    menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; renderMenuImportReview();
+    alert(error.message || "Couldn't read this menu image. Please try a clearer photo or use Excel/PDF upload.");
+  } finally {
+    menuImageInput.value = "";
+  }
+});
 importMenuBtn?.addEventListener("click", importReviewedMenuItems);
 cancelMenuImportBtn?.addEventListener("click", () => { menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuExcelInput) menuExcelInput.value = ""; renderMenuImportReview(); });
 downloadMenuPdfSampleBtn?.addEventListener("click", downloadSampleMenuPdf);
@@ -5627,6 +5692,25 @@ downloadAllTableQrsBtn?.addEventListener("click", () => {
 purchaseBillFileEl?.addEventListener("change", previewPurchaseFile);
 scanPurchaseBillBtn?.addEventListener("click", scanPurchaseBill);
 rescanPurchaseBillBtn?.addEventListener("click", () => { purchaseReviewEl?.classList.add("hidden"); purchaseBillFileEl?.click(); });
+uploadInventoryExcelBtn?.addEventListener("click", () => inventoryExcelInput?.click());
+inventoryExcelInput?.addEventListener("change", async () => {
+  const file = inventoryExcelInput.files?.[0];
+  if (!file) return;
+  showPurchaseOcrMessage("");
+  try {
+    const items = await readInventorySpreadsheetFile(file);
+    if (!items.length) throw new Error("No stock rows detected. Check the sheet has Item Name and Quantity columns.");
+    reviewedPurchaseFileUrl = "";
+    applyPurchaseOcrResult({ items, rawText: "", parseWarnings: [] });
+    rescanPurchaseBillBtn?.classList.remove("hidden");
+    showPurchaseOcrMessage(`${items.length} row(s) read from the sheet. Review before adding to inventory.`, true);
+  } catch (error) {
+    console.error("Inventory spreadsheet import failed", error);
+    showPurchaseOcrMessage(error.message || "Could not read this Excel/CSV file. Please check the format and try again.");
+  } finally {
+    inventoryExcelInput.value = "";
+  }
+});
 addPurchaseReviewRowBtn?.addEventListener("click", () => { purchaseReviewRowsEl?.insertAdjacentHTML("beforeend", purchaseReviewRow()); bindPurchaseReviewRowActions(); });
 savePurchaseBillBtn?.addEventListener("click", saveReviewedPurchase);
 

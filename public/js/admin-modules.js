@@ -126,7 +126,20 @@ function renderStaff(){
   document.querySelectorAll(".reactivate-staff").forEach(b=>b.onclick=()=>reactivateStaffMaster(b.dataset.id,b.dataset.name));
   document.querySelectorAll(".delete-staff").forEach(b=>b.onclick=()=>deleteStaffMaster(b.dataset.id,b.dataset.name));
 }
-function renderPayroll(){const m=document.getElementById("pay-month").value||today().slice(0,7);document.getElementById("pay-table").innerHTML=`<table class="data-table"><tr><th>Staff</th><th>Type</th><th>Present</th><th>Half</th><th>Leave</th><th>Absent</th><th>Advance</th><th>Bonus</th><th>Deductions</th><th>Final</th><th>Status</th></tr>${staff.map(s=>{const a=attendance.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)),p=a.filter(x=>x.status==="Present").length,h=a.filter(x=>x.status==="Half Day").length,l=a.filter(x=>x.status==="Paid Leave").length,ab=a.filter(x=>x.status==="Absent").length,ad=advances.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)).reduce((z,x)=>z+Number(x.amount||0),0),base=s.salaryType==="daily"?s.salary*(p+h*.5+l):s.salary,final=Math.max(0,base-ad);return `<tr><td>${esc(s.name)}</td><td>${esc(s.salaryType)}</td><td>${p}</td><td>${h}</td><td>${l}</td><td>${ab}</td><td>${money(ad)}</td><td>0</td><td>0</td><td>${money(final)}</td><td>Unpaid</td></tr>`}).join("")}</table>`;}
+function renderPayroll(){
+  const m=document.getElementById("pay-month").value||today().slice(0,7);
+  document.getElementById("pay-table").innerHTML=`<table class="data-table"><tr><th>Staff</th><th>Type</th><th>Present</th><th>Half</th><th>Leave</th><th>Absent</th><th>Advance</th><th>Bonus</th><th>Deductions</th><th>Final</th><th>Status</th><th>Actions</th></tr>${staff.map(s=>{
+    const a=attendance.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)),p=a.filter(x=>x.status==="Present").length,h=a.filter(x=>x.status==="Half Day").length,l=a.filter(x=>x.status==="Paid Leave").length,ab=a.filter(x=>x.status==="Absent").length,ad=advances.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)).reduce((z,x)=>z+Number(x.amount||0),0),base=s.salaryType==="daily"?s.salary*(p+h*.5+l):s.salary,final=Math.max(0,base-ad);
+    const inactive=s.isActive===false;
+    const actions=inactive
+      ?`<button class="btn btn-sm btn-outline reactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Reactivate</button><button class="btn btn-sm btn-danger delete-staff" data-id="${s.id}" data-name="${esc(s.name)}">Delete</button>`
+      :`<button class="btn btn-sm btn-outline deactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Deactivate</button>`;
+    return `<tr><td>${esc(s.name)}</td><td>${esc(s.salaryType)}</td><td>${p}</td><td>${h}</td><td>${l}</td><td>${ab}</td><td>${money(ad)}</td><td>0</td><td>0</td><td>${money(final)}</td><td>${inactive?"Inactive":"Unpaid"}</td><td><div class="btn-group">${actions}</div></td></tr>`;
+  }).join("")}</table>`;
+  document.querySelectorAll("#pay-table .deactivate-staff").forEach(b=>b.onclick=()=>deactivateStaffMaster(b.dataset.id,b.dataset.name));
+  document.querySelectorAll("#pay-table .reactivate-staff").forEach(b=>b.onclick=()=>reactivateStaffMaster(b.dataset.id,b.dataset.name));
+  document.querySelectorAll("#pay-table .delete-staff").forEach(b=>b.onclick=()=>deleteStaffMaster(b.dataset.id,b.dataset.name));
+}
 async function addAdvance(){const s=staff.find(x=>x.id===document.getElementById("adv-staff").value),a=Number(document.getElementById("adv-amount").value||0);if(!s||!a)return;await addDoc(collection(db,"restaurants",restaurantId,"staff_advances"),{staffId:s.id,amount:a,date:today(),createdAt:serverTimestamp()});}
 export async function fetchZomatoOrders(){return []} export async function fetchSwiggyOrders(){return []} export async function fetchONDCOrders(){return []} export async function updateOrderStatus(){return false} export function calculateCommission(amount,percent=0){return Number(amount||0)*Number(percent||0)/100}
 function renderDelivery(){document.getElementById("del-list").innerHTML=integrations.map(x=>`<tr><td>${esc(x.platform)}</td><td>${x.enabled?"Enabled":"Disabled"}</td><td>${esc(x.merchantId||"-")}</td><td>${Number(x.commissionPercent||0)}%</td></tr>`).join("")||"<tr><td colspan=4>No integrations configured.</td></tr>";}
