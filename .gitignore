@@ -4,5 +4,6 @@ backend/.env
 backend/node_modules/
 desktop/node_modules/
 desktop/dist/
+mobile/node_modules/
 public/.DS_Store
 public/js/.DS_Store

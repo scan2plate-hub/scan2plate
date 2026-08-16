@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Scan2Plate Restaurant POS</string>
+    <string name="title_activity_main">Scan2Plate Restaurant POS</string>
+    <string name="package_name">com.scan2plate.restaurantpos</string>
+    <string name="custom_url_scheme">com.scan2plate.restaurantpos</string>
+</resources>
