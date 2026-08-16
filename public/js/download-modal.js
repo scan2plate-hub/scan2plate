@@ -28,10 +28,14 @@
   function renderInto(container) {
     var config = window.SCAN2PLATE_DOWNLOADS;
     if (!container || !config) return;
-    var recommended = detectPlatform();
+    var detected = detectPlatform();
     var order = ["windows", "macos", "android", "linux"];
+    // Only platforms with a real, uploaded build are shown - a platform
+    // without one (available !== true) is left off entirely rather than
+    // linking to a release asset that doesn't exist yet.
+    var recommended = detected && config[detected] && config[detected].available === true ? detected : null;
     container.innerHTML = "";
-    if (recommended && config[recommended]) {
+    if (recommended) {
       var recSection = document.createElement("div");
       recSection.className = "download-recommended-section";
       recSection.appendChild(buildPlatformCard(recommended, config[recommended], true));
@@ -46,10 +50,16 @@
     grid.className = "download-card-grid";
     order.forEach(function (key) {
       if (key === recommended) return;
-      if (!config[key]) return;
+      if (!config[key] || config[key].available !== true) return;
       grid.appendChild(buildPlatformCard(key, config[key], false));
     });
     container.appendChild(grid);
+    if (!recommended && !grid.children.length) {
+      var empty = document.createElement("p");
+      empty.className = "download-other-label";
+      empty.textContent = "Downloads are being prepared - check back soon.";
+      container.appendChild(empty);
+    }
   }
 
   document.addEventListener("DOMContentLoaded", function () {
