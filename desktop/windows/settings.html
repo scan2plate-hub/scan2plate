@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scan2Plate Settings</title>
+<style>
+  :root { color-scheme: light; }
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: #f8fafc; color: #1e293b; }
+  header { padding: 16px 22px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+  header h1 { font-size: 16px; margin: 0; }
+  .tabs { display: flex; gap: 4px; padding: 10px 18px 0; background: #fff; }
+  .tab { padding: 8px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600; color: #64748b; }
+  .tab.active { background: #f8fafc; color: #0f172a; }
+  section { display: none; padding: 20px 24px; max-width: 520px; }
+  section.active { display: block; }
+  .field { margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
+  select, button, input[type="checkbox"] { font: inherit; }
+  select { width: 100%; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .muted { color: #64748b; font-size: 12px; }
+  .actions { margin-top: 18px; display: flex; gap: 10px; align-items: center; }
+  button.primary { background: #dc2626; color: #fff; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+  button.primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+  .saved { color: #16a34a; font-size: 13px; display: none; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; font-size: 13px; }
+  .kv div:nth-child(odd) { color: #64748b; }
+  a { color: #dc2626; }
+</style>
+</head>
+<body>
+  <header><h1>Scan2Plate Restaurant POS — Settings</h1></header>
+  <div class="tabs">
+    <div class="tab active" data-tab="printer">Printer</div>
+    <div class="tab" data-tab="about">About Scan2Plate</div>
+  </div>
+
+  <section id="tab-printer" class="active">
+    <p class="muted">Browser Print Mode (the print dialog you already use for bills, KOT and reports) always works, regardless of these settings. Direct/silent printing to a specific thermal printer is being prepared for a future update — the fields below save your preferred printers and paper width so that work can build on them without asking restaurants to reconfigure.</p>
+
+    <div class="field">
+      <label for="billPrinter">Bill Printer</label>
+      <select id="billPrinter"><option value="">Not selected</option></select>
+    </div>
+    <div class="field">
+      <label for="kotPrinter">KOT Printer</label>
+      <select id="kotPrinter"><option value="">Not selected</option></select>
+    </div>
+    <div class="field">
+      <label for="paperWidth">Paper Width</label>
+      <select id="paperWidth">
+        <option value="58">58mm</option>
+        <option value="80">80mm</option>
+      </select>
+    </div>
+
+    <div class="row"><input type="checkbox" id="autoPrintKot" /><label for="autoPrintKot" style="margin:0">Auto Print KOT</label></div>
+    <div class="row"><input type="checkbox" id="autoPrintBill" /><label for="autoPrintBill" style="margin:0">Auto Print Bill</label></div>
+
+    <div class="field">
+      <label for="printMode">Print Behavior</label>
+      <select id="printMode">
+        <option value="browser">Open Print Preview (recommended)</option>
+        <option value="silent" id="silentOption" disabled>Silent Print (requires both printers selected)</option>
+      </select>
+      <p class="muted" id="silentHint">Select both a Bill Printer and a KOT Printer to unlock Silent Print.</p>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="savePrinterBtn">Save Printer Settings</button>
+      <span class="saved" id="printerSaved">Saved.</span>
+    </div>
+  </section>
+
+  <section id="tab-about">
+    <div class="kv">
+      <div>Application</div><div id="aboutName">—</div>
+      <div>Application Version</div><div id="aboutVersion">—</div>
+      <div>Build Version</div><div id="aboutBuild">—</div>
+      <div>Electron</div><div id="aboutElectron">—</div>
+      <div>Website</div><div><a href="#" id="aboutWebsite">scan2plate.com</a></div>
+    </div>
+  </section>
+
+  <script src="./settings.js"></script>
+</body>
+</html>

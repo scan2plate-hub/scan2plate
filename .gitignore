@@ -2,5 +2,7 @@
 .vscode/
 backend/.env
 backend/node_modules/
+desktop/node_modules/
+desktop/dist/
 public/.DS_Store
 public/js/.DS_Store
