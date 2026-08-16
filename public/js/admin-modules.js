@@ -1,7 +1,7 @@
 import { app, auth, db } from "./firebase.js";
 import { collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, limit, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup } from "./common.js?v=freeze-fix-20260816";
+import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, devError, showStuckFallback, createCoalescedRunner } from "./common.js?v=freeze-fix-20260816";
 
 installAppSafety({ pageName: "Admin Modules", stuckTimeoutMs: 18000 });
 
@@ -80,15 +80,27 @@ const billCard = (o, viewClass = "pb-view", printClass = "pb-print") => {
   </div>`;
 };
 
-// Deferred override runs after the extension creates its sections/listeners.
+// Runs after nav()/section() below have created the real "Print Bills"
+// module UI. This used to keep its own parallel render()/onSnapshot(orders)
+// pair (billCard with .pb-view/.pb-print classes) alongside the canonical
+// one wired at the bottom of this file (renderBills(), .bill-view/.bill-print
+// classes) — both writing into the same #bill-list on every order update,
+// racing to bind two different sets of button handlers depending on which
+// listener happened to fire last. That's why "View/Print Bill" clicks in
+// this section could silently stop working. Only the DOM repositioning,
+// the openOrderBillPicker entry point (used by the dashboard's quick
+// action), and the restaurant-settings listener (the sole source of
+// moduleSettings/today() in this file) are load-bearing; both are kept,
+// now driving the single canonical renderBills().
 setTimeout(() => {
-  const dev = ["localhost", "127.0.0.1"].includes(location.hostname);
-  const render = () => { const root=document.getElementById("bill-list"),q=(document.getElementById("bill-q")?.value||"").toLowerCase(),day=document.getElementById("bill-date")?.value||"",payment=document.getElementById("bill-status")?.value||"",method=document.getElementById("bill-method")?.value||"",sortMode=document.getElementById("bill-sort")?.value||"newest"; if(!root)return; const list=sortBills(orders.filter(o=>billSearchText(o).includes(q)&&(!day||businessDateOf(o)===day)&&(!payment||String(o.paymentStatus||"unpaid").toLowerCase()===payment)&&(!method||String(o.paymentMethod||"cash").toLowerCase()===method)),sortMode); if(dev)console.log("[Print Bills]",{restaurantId,selectedDate:day,sortMode,ordersFetchedCount:orders.length,filteredOrdersCount:list.length,orderDateFieldDetected:orders[0]&&["createdAt","timestamp","date","orderDate","time"].find(k=>orders[0][k])}); root.innerHTML=list.map(o=>billCard(o)).join("")||"<p class='muted'>No orders match the selected filter.</p>"; root.querySelectorAll(".pb-view,.pb-print").forEach(b=>b.onclick=()=>{const o=orders.find(x=>x.id===b.dataset.id);window.fillBillPreview?.(o);document.getElementById("billModal")?.classList.add("active");if(b.classList.contains("pb-print"))setTimeout(()=>document.getElementById("printBillBtn")?.click(),100);}); };
-  const open = () => { document.querySelectorAll(".content-section").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));document.getElementById("module-print-bills")?.classList.add("active");document.querySelector('.module-nav[data-module="print-bills"]')?.classList.add("active");document.getElementById("pageTitle").textContent="Print Bills";document.getElementById("pageSubtitle").textContent="Select and print an order";window.closeSidebarOnMobile?.();render(); };
-  window.openOrderBillPicker=open;
-  const nav=document.querySelector('.module-nav[data-module="print-bills"]'),main=document.querySelectorAll(".nav-group")[0],tables=document.querySelector('.nav-item[data-section="tables"]');if(nav&&main)main.insertBefore(nav,tables||null);nav?.addEventListener("click",e=>{e.preventDefault();open()}); const date=document.getElementById("bill-date");if(date){date.value=today();date.insertAdjacentHTML("afterend",'<button id="bill-all-dates" class="btn btn-outline btn-sm" type="button">All Dates</button>');document.getElementById("bill-all-dates")?.addEventListener("click",()=>{date.dataset.touched="1";date.value="";render()});["bill-q","bill-date","bill-status","bill-method","bill-sort"].forEach(id=>document.getElementById(id)?.addEventListener("input",()=>{if(id==="bill-date")date.dataset.touched="1";render();}));}
-  registerCleanup(onSnapshot(query(collection(db,"orders"),where("restaurantId","==",restaurantId)),snap=>{orders=snap.docs.map(d=>({id:d.id,...d.data()}));render();}));
-  registerCleanup(onSnapshot(doc(db,"restaurants",restaurantId),snap=>{moduleSettings=snap.exists()?snap.data():{};if(date&&!date.dataset.touched)date.value=today();render();}));
+  const nav=document.querySelector('.module-nav[data-module="print-bills"]'),main=document.querySelectorAll(".nav-group")[0],tables=document.querySelector('.nav-item[data-section="tables"]');
+  if(nav&&main)main.insertBefore(nav,tables||null);
+  window.openOrderBillPicker=()=>{open("print-bills","Print Bills","Select and print an order");renderBills();};
+  const date=document.getElementById("bill-date");
+  if(date&&!date.dataset.touched)date.value=today();
+  if(date&&!date.dataset.touchTrackerBound){date.dataset.touchTrackerBound="1";date.addEventListener("input",()=>{date.dataset.touched="1"});}
+  if(date&&!document.getElementById("bill-all-dates")){date.insertAdjacentHTML("afterend",'<button id="bill-all-dates" class="btn btn-outline btn-sm" type="button">All Dates</button>');document.getElementById("bill-all-dates")?.addEventListener("click",()=>{date.dataset.touched="1";date.value="";renderBills()});}
+  subscribeWithAuthRetry("restaurant settings",doc(db,"restaurants",restaurantId),snap=>{moduleSettings=snap.exists()?snap.data():{};if(date&&!date.dataset.touched)date.value=today();renderBills();});
 }, 0);
 
 function nav(name, icon, title) { document.querySelectorAll(".nav-group")[1]?.insertAdjacentHTML("beforeend", `<a class="nav-item module-nav" data-module="${name}"><span class="nav-icon"><i class="fas ${icon}"></i></span>${title}</a>`); }
@@ -152,4 +164,44 @@ section("staff",`<div class="grid-2"><div class="card"><div class="card-header">
 section("payroll",`<div class="card"><div class="card-header"><h3 class="card-title">Attendance-based Payroll</h3><button id="pay-print" class="btn btn-outline btn-sm">Salary Slips / Print</button></div><div class="card-body"><input id="pay-month" class="form-input" type="month" value="${today().slice(0,7)}"/><div class="form-row"><select id="adv-staff" class="form-select"></select><input id="adv-amount" class="form-input" type="number" placeholder="Advance salary"/><button id="adv-save" class="btn btn-outline">Add Advance</button></div><div id="pay-table"></div></div></div>`);
 section("delivery",`<div class="grid-2"><div class="card"><div class="card-header"><h3 class="card-title">Integration Settings</h3></div><div class="card-body"><select id="del-platform" class="form-select"><option>Zomato</option><option>Swiggy</option><option>ONDC</option><option>Magicpin</option><option>Manual Orders</option><option>Other Platform</option></select><label><input id="del-enabled" type="checkbox"/> Enable platform</label><input id="del-merchant" class="form-input" placeholder="Merchant ID"/><input id="del-key" class="form-input" placeholder="API key"/><input id="del-webhook" class="form-input" placeholder="Webhook URL"/><input id="del-commission" class="form-input" type="number" placeholder="Commission %"/><button id="del-save" class="btn btn-primary">Save Integration</button></div></div><div class="card"><div class="card-header"><h3 class="card-title">Platform Reports</h3></div><div class="card-body"><table class="data-table"><thead><tr><th>Platform</th><th>Status</th><th>Merchant</th><th>Commission</th></tr></thead><tbody id="del-list"></tbody></table><p class="small muted">Gross sales, commission, net receivable and settlement reports become available as platform orders are imported.</p></div></div></div>`);
 document.querySelectorAll(".module-nav").forEach(a=>a.onclick=e=>{e.preventDefault();open(a.dataset.module,a.textContent.trim(),"")});document.getElementById("ex-save").onclick=saveExpense;document.getElementById("st-save").onclick=saveStaff;document.getElementById("adv-save").onclick=addAdvance;document.getElementById("del-save").onclick=saveIntegration;["bill-q","bill-date","bill-status","bill-method","bill-sort"].forEach(id=>document.getElementById(id).oninput=renderBills);document.getElementById("at-date").onchange=renderStaff;document.getElementById("pay-month").onchange=renderPayroll;document.getElementById("pay-print").onclick=()=>print("pay-table","Salary Slip / Payroll");document.getElementById("acc-print").onclick=()=>print("acc-table","Accounts Report");document.getElementById("acc-csv").onclick=()=>exportCsv([["Report","Generated"],["Accounts",today()]],"accounts-report.csv");
-registerCleanup(onSnapshot(query(collection(db,"orders"),where("restaurantId","==",restaurantId)),s=>{orders=s.docs.map(d=>({id:d.id,...d.data()}));renderAccounts();renderBills()}));registerCleanup(onSnapshot(collection(db,"restaurants",restaurantId,"expenses"),s=>{expenses=s.docs.map(d=>d.data());renderAccounts()}));registerCleanup(onSnapshot(collection(db,"restaurants",restaurantId,"staff"),s=>{staff=s.docs.map(d=>({id:d.id,...d.data()}));document.getElementById("adv-staff").innerHTML=staff.filter(x=>x.isActive!==false).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");renderStaff();renderPayroll()}));registerCleanup(onSnapshot(collection(db,"restaurants",restaurantId,"attendance"),s=>{attendance=s.docs.map(d=>d.data());renderStaff();renderPayroll()}));registerCleanup(onSnapshot(collection(db,"restaurants",restaurantId,"staff_advances"),s=>{advances=s.docs.map(d=>d.data());renderPayroll()}));registerCleanup(onSnapshot(collection(db,"restaurants",restaurantId,"delivery_integrations"),s=>{integrations=s.docs.map(d=>d.data());renderDelivery()}));
+// Every onSnapshot below previously had no error callback: a transient
+// permission-denied — e.g. the ID token not yet restored from IndexedDB on
+// a cold page load (this file fires all of these synchronously at module
+// load, with no onAuthStateChanged gate anywhere in the app), or a token
+// expiring mid-shift — silently killed that section's realtime updates
+// forever with zero UI feedback: "sometimes works, sometimes doesn't" with
+// no way to tell why. admin.js's own orders listener already had a
+// one-shot "refresh token and resubscribe" retry for exactly this reason;
+// subscribeWithAuthRetry generalizes that same proven pattern to every
+// listener in this file instead of only surfacing the failure. The orders
+// listener is also debounced (matches the fix in admin.js) since it was
+// re-filtering the full order history and re-rendering Accounts+Bills on
+// every single write.
+function subscribeWithAuthRetry(label, ref, onNext) {
+  let retried = false, unsub = () => {};
+  const start = () => {
+    unsub = onSnapshot(ref, onNext, async error => {
+      if (error?.code === "permission-denied" && auth.currentUser && !retried) {
+        retried = true;
+        try {
+          await auth.currentUser.getIdToken(true);
+          start();
+          return;
+        } catch (refreshError) {
+          devError(`${label} token refresh retry failed`, refreshError);
+        }
+      }
+      devError(`${label} listener failed`, error);
+      showStuckFallback("Unable to load this data. Refresh if needed.");
+    });
+  };
+  start();
+  registerCleanup(() => unsub());
+}
+const scheduleModuleOrdersRender = createCoalescedRunner(snap => { orders=snap.docs.map(d=>({id:d.id,...d.data()}));renderAccounts();renderBills(); }, 200);
+subscribeWithAuthRetry("orders",query(collection(db,"orders"),where("restaurantId","==",restaurantId)),scheduleModuleOrdersRender);
+subscribeWithAuthRetry("expenses",collection(db,"restaurants",restaurantId,"expenses"),s=>{expenses=s.docs.map(d=>d.data());renderAccounts()});
+subscribeWithAuthRetry("staff",collection(db,"restaurants",restaurantId,"staff"),s=>{staff=s.docs.map(d=>({id:d.id,...d.data()}));document.getElementById("adv-staff").innerHTML=staff.filter(x=>x.isActive!==false).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");renderStaff();renderPayroll()});
+subscribeWithAuthRetry("attendance",collection(db,"restaurants",restaurantId,"attendance"),s=>{attendance=s.docs.map(d=>d.data());renderStaff();renderPayroll()});
+subscribeWithAuthRetry("staff_advances",collection(db,"restaurants",restaurantId,"staff_advances"),s=>{advances=s.docs.map(d=>d.data());renderPayroll()});
+subscribeWithAuthRetry("delivery_integrations",collection(db,"restaurants",restaurantId,"delivery_integrations"),s=>{integrations=s.docs.map(d=>d.data());renderDelivery()});
