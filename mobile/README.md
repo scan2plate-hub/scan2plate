@@ -29,30 +29,73 @@ without adopting a second, separate frontend framework.
   generated for real via `@capacitor/assets` from the existing
   `public/assets/logo.PNG` — 92 files under `android/app/src/main/res/`.
 
+## Offline billing (added, real, CI-verified — not device-verified)
+
+The desktop app's offline engine (SQLite, offlineId generation, the
+idempotent sync planner) has been ported here. What's real:
+
+- **`mobile/www/offline-core.js`** — the same `OFF-<restaurantId>-
+  <YYYYMMDD>-<uuid>` ID generator and idempotent `buildSyncPlan` as
+  `desktop/src/offlineId.js`/`syncPlan.js`, ported to a plain UMD script (no
+  build step) so it works via a raw `<script>` tag here and via `require`/
+  `import` in Node tests. 12 unit tests in `mobile/www/__tests__/` (`npm
+  test` in `mobile/`), mirroring desktop's test suite exactly.
+- **`mobile/www/offline-db.js`** — the same schema as `desktop/src/
+  offlineDb.js` (`restaurant_cache`, `menu_cache`, `tables_cache`,
+  `offline_orders`), implemented against the `@capacitor-community/sqlite`
+  plugin's raw native bridge (`Capacitor.Plugins.CapacitorSQLite`) rather
+  than the npm-distributed `SQLiteConnection` JS wrapper, which needs a
+  bundler this plain `www/` directory doesn't have.
+- **`mobile/www/offline-billing.html`/`.js`** — a bundled, fully local
+  billing page (table select, cached menu, cart, discount, tax, Cash/UPI/
+  Card with the same "payment confirmation pending" policy as desktop for
+  non-cash, `window.print()`), reachable with zero network.
+- **`OfflineNavPlugin.java`** — a real native Capacitor plugin
+  (`android/app/src/main/java/com/scan2plate/restaurantpos/`) that switches
+  the app's single WebView between the live site and the bundled offline
+  page via `WebView.loadUrl()`, since a page can't navigate itself across
+  that origin boundary with plain JS. Registered in `MainActivity.java`.
+  Loads the bundled page via Capacitor's own local-server origin
+  (`https://localhost/offline-billing.html`), not a raw `file://` path,
+  specifically so Capacitor's JS bridge is actually injected into it (see
+  the plugin's own doc comment for the full reasoning).
+- **`public/js/mobile-offline.js`** (on the live site, not in `mobile/`) —
+  entirely inert outside the Capacitor app (`window.Capacitor?.
+  isNativePlatform()` guard). While online, caches restaurant/menu/tables
+  into the same on-device SQLite and uploads any bills recorded offline,
+  using a duplicate of the core logic (`public/js/mobile-offline-core.js`/
+  `-db.js` — real ES modules this time, matching the rest of `public/js/`,
+  since that directory isn't a bundler-free zone). Parity between the two
+  duplicate pairs is checked by `test/mobile-offline-core-parity.test.mjs`.
+
+**What's not verified, and why:** this sandbox has no JRE, Android SDK, or
+emulator/device (`java`, `adb`, `$ANDROID_HOME` all absent — same
+limitation as the rest of this project). Every piece above was written
+against the actual installed `@capacitor/android` source in
+`node_modules/` (Plugin/PluginCall/Bridge APIs, the `DEFAULT_WEB_ASSET_DIR
+= "public"` convention, the `localhost` default hostname) rather than
+guessed, and the Gradle build is validated via the same CI workflow
+(`.github/workflows/desktop-build.yml`'s `build-android` job) already used
+to produce the real APK on the download page — but nobody has tapped
+through this on an actual phone. In particular: whether `window.print()`
+actually opens Android's native print dialog inside this WebView
+configuration hasn't been confirmed on real hardware, and the `@capacitor-
+community/sqlite` plugin's Android build occasionally needs an extra Gradle
+repository (`jitpack.io`) depending on version — not pre-added here since
+guessing wrong would be worse than letting a real CI failure name the exact
+problem, matching how the desktop Linux `.deb` build issue was actually
+diagnosed and fixed earlier in this project.
+
 ## What has not been done
 
-- **No APK or AAB has been built.** This sandbox has no JRE and no Android
-  SDK (`java`, `adb`, and `$ANDROID_HOME` are all absent) — `./gradlew
-  assembleRelease` cannot run here. Building one needs Android Studio (or
-  the command-line SDK + a JDK) on a machine that has them, or CI.
-- **No offline billing implementation for Android yet.** The desktop app's
-  offline engine (SQLite via better-sqlite3, offlineId generation, the
-  idempotent sync planner) is real, tested Node code — none of it runs in a
-  WebView. Porting it means: a Capacitor-compatible SQLite plugin (the
-  community `@capacitor-community/sqlite` plugin is the standard choice),
-  and reusing the *same* offlineId format (`OFF-<restaurantId>-<YYYYMMDD>-
-  <uuid>`, via `crypto.randomUUID()` which is available natively in a
-  WebView) and the *same* idempotency strategy already proven in
-  `desktop/src/syncPlan.js` (check existing `offlineId`s before uploading,
-  never re-upload one that's already there). That planning logic is pure
-  JS with no Node-specific APIs — it can be copied into this project
-  largely as-is when that work happens. Not done in this pass.
 - External links have not been specially intercepted to open in the
   system browser (the desktop shell does this via `shell.openExternal`).
   `allowNavigation` already stops the in-app WebView from navigating to
   anything outside scan2plate.com, but a nicer experience routes those
   taps to the system browser instead of just blocking them — needs the
   `@capacitor/browser` plugin, not added here.
+- No release-signing keystore is configured (CI builds `assembleDebug`,
+  a real installable debug-signed APK, not a Play Store release build).
 
 ## Build commands
 

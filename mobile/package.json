@@ -7,9 +7,11 @@
     "android:sync": "cap sync android",
     "android:open": "cap open android",
     "android:build": "cd android && ./gradlew assembleRelease",
-    "android:build:bundle": "cd android && ./gradlew bundleRelease"
+    "android:build:bundle": "cd android && ./gradlew bundleRelease",
+    "test": "node --test www/__tests__/*.test.mjs"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^6.0.2",
     "@capacitor/android": "^6.2.1",
     "@capacitor/core": "^6.2.1"
   },
