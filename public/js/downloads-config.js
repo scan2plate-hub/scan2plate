@@ -14,10 +14,7 @@ window.SCAN2PLATE_DOWNLOADS = {
     url: "https://github.com/scan2plate-hub/scan2plate/releases/download/v1.0.0/Scan2Plate-1.0.0-Windows.exe",
     requirements: "Windows 10 or Windows 11 (64-bit)",
     emoji: "🪟",
-    // No Windows build has been produced/uploaded yet - hidden until one is,
-    // so this button never sends a visitor to a 404. Flip to true once
-    // Scan2Plate-1.0.0-Windows.exe is actually uploaded to the v1.0.0 release.
-    available: false
+    available: true
   },
   macos: {
     label: "macOS",
@@ -39,7 +36,7 @@ window.SCAN2PLATE_DOWNLOADS = {
     url: "https://github.com/scan2plate-hub/scan2plate/releases/download/v1.0.0/Scan2Plate-1.0.0-Android.apk",
     requirements: "Android 7.0 (API 24) or later",
     emoji: "🤖",
-    available: false
+    available: true
   },
   linux: {
     label: "Linux",
@@ -50,6 +47,6 @@ window.SCAN2PLATE_DOWNLOADS = {
     url: "https://github.com/scan2plate-hub/scan2plate/releases/download/v1.0.0/Scan2Plate-1.0.0-Linux.AppImage",
     requirements: "Most 64-bit distributions supporting AppImage (Ubuntu 20.04+, Fedora, Debian and derivatives)",
     emoji: "🐧",
-    available: false
+    available: true
   }
 };
