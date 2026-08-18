@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Scan2Plate — Offline Billing</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, Roboto, Arial, sans-serif; background: #f4f4f4; color: #111; }
+  header { background: #111; color: #fff; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  #pendingLabel { font-size: 12px; background: #ffedd5; color: #9a3412; padding: 4px 10px; border-radius: 999px; font-weight: 700; }
+  #returnOnlineBtn { border: 1px solid #fff; background: transparent; color: #fff; border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
+  main { padding: 12px; display: grid; gap: 12px; grid-template-columns: 1fr; max-width: 720px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+  .empty { color: #888; font-size: 13px; }
+  select, input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px; font: inherit; margin-top: 6px; }
+  .category { font-weight: 800; font-size: 12px; text-transform: uppercase; color: #666; margin: 12px 0 6px; }
+  .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr)); gap: 8px; }
+  .menu-item { border: 1px solid #eee; background: #fafafa; border-radius: 10px; padding: 10px; text-align: left; cursor: pointer; font: inherit; }
+  .menu-item strong { display: block; font-size: 13px; }
+  .menu-item span { color: #16a34a; font-weight: 700; font-size: 13px; }
+  .cart-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .qty-btns button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #ddd; background: #fff; font-size: 16px; cursor: pointer; }
+  .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+  .totals-row.grand { font-weight: 800; font-size: 17px; border-top: 1px solid #eee; margin-top: 6px; padding-top: 8px; }
+  .payment-methods { display: flex; gap: 8px; margin-top: 8px; }
+  .payment-methods button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #ddd; background: #fff; font: inherit; cursor: pointer; }
+  .payment-methods button.active { background: #111; color: #fff; border-color: #111; }
+  #pendingNote { display: none; font-size: 12px; color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  #placeBillBtn { width: 100%; margin-top: 12px; padding: 14px; border: 0; border-radius: 12px; background: #16a34a; color: #fff; font-weight: 800; font-size: 15px; cursor: pointer; }
+  #placeBillBtn:disabled { background: #ccc; }
+  @media print {
+    header, main > .card:not(#printCard) { display: none !important; }
+    #printArea { display: block !important; }
+  }
+  #printArea { display: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Scan2Plate — Offline Billing</h1>
+    <span id="pendingLabel">🟠 Offline Mode</span>
+    <button type="button" id="returnOnlineBtn">Back Online</button>
+  </header>
+  <main>
+    <div class="card">
+      <label>Table<select id="tableSelect"></select></label>
+    </div>
+    <div class="card">
+      <div class="category">Menu (cached)</div>
+      <div id="menuPane"></div>
+    </div>
+    <div class="card">
+      <div class="category">Cart</div>
+      <div id="cartList"></div>
+      <label>Discount (₹)<input id="discountInput" type="number" min="0" value="0" /></label>
+      <div class="totals-row"><span>Subtotal</span><span id="subtotalOut">₹0</span></div>
+      <div class="totals-row"><span>Tax</span><span id="taxOut">₹0</span></div>
+      <div class="totals-row grand"><span>Total</span><span id="totalOut">₹0</span></div>
+      <div class="payment-methods">
+        <button type="button" class="active" data-method="cash">Cash</button>
+        <button type="button" data-method="upi">UPI</button>
+        <button type="button" data-method="card">Card</button>
+      </div>
+      <div id="pendingNote">Card/UPI can't be verified offline — this bill is recorded as payment-confirmation-pending until it syncs.</div>
+      <button type="button" id="placeBillBtn" disabled>Place Bill &amp; Print</button>
+    </div>
+  </main>
+  <div id="printArea"></div>
+
+  <script src="offline-core.js"></script>
+  <script src="offline-db.js"></script>
+  <script src="offline-billing.js"></script>
+</body>
+</html>

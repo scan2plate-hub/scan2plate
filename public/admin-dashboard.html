@@ -1436,6 +1436,10 @@
   <script type="module" src="./js/admin.js?v=freeze-fix-20260816"></script>
   <script type="module" src="./js/admin-modules.js?v=freeze-fix-20260816"></script>
 
+  <!-- Android offline billing: entirely inert outside the Capacitor app -
+       see public/js/mobile-offline.js's top-of-file guard. -->
+  <script type="module" src="./js/mobile-offline.js?v=android-offline-20260819"></script>
+
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       const navItems     = document.querySelectorAll(".nav-item[data-section]");
