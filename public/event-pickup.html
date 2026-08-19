@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Event Pickup Scanner — Scan2Plate</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="/assets/logo.PNG" />
+  <link rel="stylesheet" href="/css/event-pickup-scanner.css" />
+</head>
+<body>
+  <header class="scanner-header">
+    <strong>Event Pickup Scanner</strong>
+    <button id="logoutBtn" type="button">Logout</button>
+  </header>
+
+  <main id="scannerApp" class="scanner-app">
+    <div class="scanner-camera-wrap">
+      <video id="scannerVideo" playsinline muted></video>
+      <div id="scannerOverlay" class="scanner-overlay">READY TO SCAN</div>
+    </div>
+
+    <button id="startScanBtn" type="button" class="scanner-btn scanner-btn-primary">Scan Pickup QR</button>
+
+    <details class="scanner-manual">
+      <summary>Enter Booking Code / Token manually</summary>
+      <div class="scanner-manual-body">
+        <input id="manualTokenInput" placeholder="Paste pickup token or link" />
+        <button id="manualSubmitBtn" type="button" class="scanner-btn scanner-btn-outline">Check</button>
+      </div>
+    </details>
+
+    <div id="resultScreen" class="result-screen" style="display:none">
+      <div id="resultBody"></div>
+      <button id="scanAgainBtn" type="button" class="scanner-btn scanner-btn-outline">Scan Next</button>
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+  <script type="module" src="./js/event-pickup.js"></script>
+</body>
+</html>
