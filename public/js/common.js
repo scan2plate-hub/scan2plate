@@ -338,7 +338,11 @@ const modulePermissions = {
   manager: ["liveOrders", "quickBilling", "tables", "printBills", "kotManagement", "kitchenDisplay", "orders", "billing", "kot"],
   cashier: ["quickBilling", "tables", "printBills", "liveOrders", "orders", "billing"],
   kitchen: ["kot", "kotManagement", "kitchenDisplay"],
-  waiter: ["liveOrders", "tables", "quickBilling", "orders", "billing"]
+  waiter: ["liveOrders", "tables", "quickBilling", "orders", "billing"],
+  // Event pre-booking pickup staff (Part 31): scanner access only - no
+  // restaurant settings, payroll, reports, or Super Admin.
+  event_staff: ["eventPickup"],
+  pickup_staff: ["eventPickup"]
 };
 
 export function canAccessModule(userRole = "", moduleName = "") {

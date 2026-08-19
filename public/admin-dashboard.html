@@ -1440,6 +1440,10 @@
        see public/js/mobile-offline.js's top-of-file guard. -->
   <script type="module" src="./js/mobile-offline.js?v=android-offline-20260819"></script>
 
+  <!-- Event Food Pre-Booking: isolated admin module, gated behind
+       restaurants/{id}.eventPrebookingEnabled (default off). -->
+  <script type="module" src="./js/admin-events.js?v=event-prebooking-20260819"></script>
+
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       const navItems     = document.querySelectorAll(".nav-item[data-section]");
