@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Event Food Pre-Booking — Scan2Plate</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="/assets/logo.PNG" />
+  <link rel="stylesheet" href="/css/style.css?v=latest-business-login-fix" />
+  <link rel="stylesheet" href="/css/event-prebooking.css" />
+</head>
+<body>
+  <header class="event-header">
+    <strong>Scan2Plate</strong>
+    <span>Event Pre-Booking</span>
+  </header>
+
+  <main id="eventApp" class="event-app">
+    <div id="eventLoading" class="event-state">Loading event…</div>
+    <div id="eventError" class="event-state event-state-error" style="display:none"></div>
+
+    <div id="eventBookingView" style="display:none">
+      <section class="event-info-card">
+        <h1 id="evName"></h1>
+        <div class="event-meta">
+          <div><i class="fas fa-calendar"></i> <span id="evDate"></span></div>
+          <div><i class="fas fa-map-marker-alt"></i> <span id="evVenue"></span></div>
+          <div id="evBookingClose"></div>
+        </div>
+        <p id="evDescription" class="event-description"></p>
+      </section>
+
+      <section>
+        <h2 class="event-section-title">Select One Item</h2>
+        <div id="menuList" class="event-menu-list"></div>
+      </section>
+
+      <section id="detailsSection" class="event-details-card" style="display:none">
+        <h2 class="event-section-title">Your Details</h2>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="custName" /></div>
+        <div class="form-group"><label class="form-label">Phone Number</label><input class="form-input" id="custPhone" type="tel" inputmode="numeric" maxlength="10" /></div>
+        <div class="form-group"><label class="form-label">Email (optional)</label><input class="form-input" id="custEmail" type="email" /></div>
+        <button id="payBtn" class="btn btn-primary event-pay-btn">Pay & Book</button>
+        <p id="payError" class="event-error-text" style="display:none"></p>
+      </section>
+    </div>
+
+    <div id="eventConfirmedView" class="event-state-error" style="display:none"></div>
+  </main>
+
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script type="module" src="./js/event-booking.js"></script>
+</body>
+</html>
