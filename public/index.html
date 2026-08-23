@@ -1688,6 +1688,7 @@
 import {
   collection,
   query,
+  where,
   getDocs,
   getDoc,
   doc,
@@ -1867,9 +1868,8 @@ import {
     async function findActiveTableOrderForPhone(phone = "") {
       if (tokenMode) return { orderDoc: null, blocked: false };
       const submittedPhone = normalizeCustomerPhone(phone);
-      const snap = await getDocs(collection(db, "orders"));
+      const snap = await getDocs(query(collection(db, "orders"), where("restaurantId", "==", restaurantId)));
       const activeOrders = snap.docs
-        .filter(d => String(d.data().restaurantId || "") === restaurantId)
         .filter(d => String(d.data().tableNo || d.data().tableNumber || "").padStart(2, "0") === String(table).padStart(2, "0"))
         .filter(d => isActiveUnpaidOrder(d.data()))
         .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0));
@@ -1883,9 +1883,8 @@ import {
 
     async function findActiveTableOrder() {
       if (tokenMode) return null;
-      const snap = await getDocs(collection(db, "orders"));
+      const snap = await getDocs(query(collection(db, "orders"), where("restaurantId", "==", restaurantId)));
       return snap.docs
-        .filter(d => String(d.data().restaurantId || "") === restaurantId)
         .filter(d => String(d.data().tableNo || d.data().tableNumber || "").padStart(2, "0") === String(table).padStart(2, "0"))
         .filter(d => isActiveUnpaidOrder(d.data()))
         .sort((a, b) => (b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0) - (a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0))[0] || null;
@@ -2043,13 +2042,15 @@ import {
       categoryChips.innerHTML = "";
 
       try {
-        await loadRestaurantSettings();
-
-        // Keep this explicit path aligned with the admin menu writer. A failed
-        // Firestore request used to reject here and leave the grid blank.
-        const snap = await getDocs(
-          query(collection(db, "restaurants", restaurantId, "menu"))
-        );
+        // Settings/open-bill lookup and the menu items query touch different
+        // collections, so run them in parallel instead of stacking their
+        // latencies — this roughly halves time-to-first-render on slow networks.
+        const [, snap] = await Promise.all([
+          loadRestaurantSettings(),
+          // Keep this explicit path aligned with the admin menu writer. A failed
+          // Firestore request used to reject here and leave the grid blank.
+          getDocs(query(collection(db, "restaurants", restaurantId, "menu")))
+        ]);
 
         menu = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
@@ -2210,11 +2211,14 @@ import {
         return;
       }
 
-      menuGrid.innerHTML = items.map(item => `
+      menuGrid.innerHTML = items.map((item, index) => `
         <div class="menu-item">
           <img
             src="${item.imageUrl || item.image || "./assets/placeholder-food.jpg"}"
             alt="${item.name || "item"}"
+            loading="${index < 6 ? "eager" : "lazy"}"
+            decoding="async"
+            fetchpriority="${index < 6 ? "high" : "low"}"
             onerror="this.onerror=null;this.src='./assets/placeholder-food.jpg'"
           >
           <div class="menu-item-body">
