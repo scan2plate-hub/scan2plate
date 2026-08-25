@@ -9,6 +9,14 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import {
+  evaluateStockConfirmation,
+  evaluateBookingWindow,
+  evaluateRedemption,
+  evaluateValidation,
+  hashPickupToken,
+  bookingCodeFromId
+} from "./lib/eventBookingLogic.js";
 
 dotenv.config();
 const app = express();
@@ -454,7 +462,7 @@ app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) =
     const { name = "", email = "", password = "", phone = "", role = "waiter" } = req.body || {};
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanRole = String(role || "waiter").trim().toLowerCase();
-    const allowedRoles = new Set(["owner", "manager", "cashier", "kitchen", "waiter"]);
+    const allowedRoles = new Set(["owner", "manager", "cashier", "kitchen", "waiter", "event_staff", "pickup_staff"]);
     if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
     if (!String(name).trim()) return res.status(400).json({ ok: false, error: "Staff name is required." });
     if (!cleanEmail) return res.status(400).json({ ok: false, error: "Email is required." });
@@ -528,6 +536,28 @@ async function assertOwnerOrAdminAccess(uid, restaurantId, user = {}) {
 async function findStaffDoc(db, restaurantId, uid) {
   const snap = await db.collection(`restaurants/${restaurantId}/users`).where("uid", "==", uid).limit(1).get();
   return snap.empty ? null : snap.docs[0];
+}
+
+// Deliberately separate from assertRestaurantAccess: event_staff/pickup_staff
+// (Part 31) must be able to validate and redeem event pickups, but must NOT
+// gain the broader restaurant access assertRestaurantAccess already grants
+// to "manager" for other endpoints (settings, payroll, reports, staff...).
+// Owner/admin/manager retain full access here too, same as everywhere else.
+async function assertEventAccess(uid, restaurantId, user = {}) {
+  const restaurant = await assertRestaurantAccess(uid, restaurantId, user).catch(() => null);
+  if (restaurant) return restaurant;
+
+  const db = getFirestore();
+  const docIdsToCheck = [String(restaurantId || "").trim()].filter(Boolean);
+  for (const docId of docIdsToCheck) {
+    const memberships = await db.collection(`restaurants/${docId}/users`).where("uid", "==", uid).limit(1).get();
+    const role = String(memberships.docs[0]?.data()?.role || "").toLowerCase();
+    if (["event_staff", "pickup_staff"].includes(role)) {
+      const direct = await db.doc(`restaurants/${docId}`).get();
+      if (direct.exists) return direct;
+    }
+  }
+  throw accessDeniedError({ reason: "event_staff_access_required" });
 }
 
 app.post("/api/restaurants/:restaurantId/staff/:uid/deactivate", verifyAdmin, async (req, res) => {
@@ -1061,5 +1091,424 @@ async function saveReviewedPurchase(req, res) {
 
 app.post("/api/inventory/save-purchase", verifyAdmin, saveReviewedPurchase);
 app.post("/api/inventory/purchase-review/save", verifyAdmin, saveReviewedPurchase);
+
+/* =========================================================
+   EVENT FOOD PRE-BOOKING — isolated feature, own Firestore
+   collections (events, events/{id}/menu, eventBookings). Never
+   touches the "orders" collection or existing restaurant billing
+   schema. Gated per-restaurant by restaurants/{id}.eventPrebookingEnabled
+   (checked server-side here, not just hidden in the UI) so this stays
+   opt-in per Part 35.
+
+   Payment architecture mirrors the existing, already-deployed
+   /api/subscriptions/create-order + verify-payment pair above:
+   frontend never decides success, amount is always the server's own
+   trusted price, and Razorpay signature verification is the only
+   thing that can mark a payment paid.
+
+   Overselling protection: stock is never reserved at "pending" time.
+   It is confirmed atomically inside a Firestore transaction only
+   *after* the Razorpay signature verifies, using the exact same
+   read-check-write pattern already proven in saveReviewedPurchase()
+   above. If the transaction finds the item sold out (lost the race to
+   another already-verified payment), the booking is cancelled and the
+   already-captured payment is refunded automatically - this also
+   covers Part 22 (cancellation/refund) for that specific case.
+
+   One-time redemption: /redeem re-reads the booking *inside* a
+   transaction and only commits redeemed:true if evaluateRedemption()
+   (backend/lib/eventBookingLogic.js, unit-tested) says the booking is
+   still eligible. Two concurrent redeem calls for the same booking are
+   serialized by Firestore's transaction retry - the loser's retry
+   observes the winner's committed write and correctly reports
+   already_redeemed instead of both succeeding.
+========================================================= */
+
+// Simple in-memory per-IP counters (Part 29). This backend runs as a
+// single Render instance (not horizontally scaled - see the rest of this
+// file's aiHelpDailyUsage for the same pattern already in production), so
+// process-local memory is sufficient; it resets on redeploy, which is
+// acceptable for abuse-slowing rather than hard security.
+const eventRateLimitHits = new Map();
+function checkRateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  const entry = eventRateLimitHits.get(key);
+  if (!entry || now - entry.windowStart > windowMs) {
+    eventRateLimitHits.set(key, { windowStart: now, count: 1 });
+    return true;
+  }
+  if (entry.count >= limit) return false;
+  entry.count += 1;
+  return true;
+}
+function clientIp(req) {
+  return String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+}
+function rateLimited(res, retryAfterSeconds = 60) {
+  res.status(429).json({ success: false, error: "Too many requests. Please wait a moment and try again." });
+}
+
+function toMillis(value) {
+  if (value == null) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value === "number") return value;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+async function loadEventAndItem(db, eventId, itemId) {
+  const eventSnap = await db.doc(`events/${eventId}`).get();
+  if (!eventSnap.exists) return { event: null, item: null };
+  const event = { id: eventSnap.id, ...eventSnap.data() };
+  const itemSnap = await db.doc(`events/${eventId}/menu/${itemId}`).get();
+  const item = itemSnap.exists ? { id: itemSnap.id, ...itemSnap.data() } : null;
+  return { event, eventRef: eventSnap.ref, item, itemRef: itemSnap.ref };
+}
+
+async function restaurantEventPrebookingEnabled(db, restaurantId) {
+  const snap = await db.doc(`restaurants/${restaurantId}`).get();
+  return Boolean(snap.exists && snap.data()?.eventPrebookingEnabled === true);
+}
+
+app.post("/api/event-bookings/create-payment", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable. Please try again shortly." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+    if (!checkRateLimit(`create-payment:${clientIp(req)}`, 10, 60_000)) return rateLimited(res);
+
+    const { eventId = "", itemId = "", customerName = "", customerPhone = "", customerEmail = "" } = req.body || {};
+    const cleanName = safeString(customerName, 120);
+    const cleanPhone = String(customerPhone || "").replace(/\D/g, "");
+    const cleanEmail = String(customerEmail || "").trim();
+    if (!eventId || !itemId) return res.status(400).json({ success: false, error: "eventId and itemId are required." });
+    if (!cleanName) return res.status(400).json({ success: false, error: "Name is required." });
+    if (cleanPhone.length < 10) return res.status(400).json({ success: false, error: "A valid phone number is required." });
+
+    const db = getFirestore();
+    const { event, item, itemRef } = await loadEventAndItem(db, eventId, itemId);
+    if (!event) return res.status(404).json({ success: false, error: "Event not found." });
+    if (!(await restaurantEventPrebookingEnabled(db, event.restaurantId))) {
+      return res.status(403).json({ success: false, error: "Event pre-booking is not enabled for this restaurant." });
+    }
+    const windowCheck = evaluateBookingWindow({
+      status: event.status,
+      bookingStartAt: toMillis(event.bookingStartAt),
+      bookingEndAt: toMillis(event.bookingEndAt)
+    });
+    if (!windowCheck.ok) {
+      const messages = {
+        event_not_active: "This event is not currently open for booking.",
+        booking_not_open_yet: "Online pre-booking has not opened yet for this event.",
+        booking_closed: "Online pre-booking is closed for this event."
+      };
+      return res.status(400).json({ success: false, code: windowCheck.code, error: messages[windowCheck.code] || "Booking is not available." });
+    }
+    if (!item) return res.status(404).json({ success: false, error: "Food item not found." });
+    // Read-only pre-check only - never trust this alone; the real
+    // oversell-proof check happens atomically in verify-payment below.
+    const stockPreview = evaluateStockConfirmation(item);
+    if (!stockPreview.ok) {
+      const messages = { sold_out: "This item is sold out.", item_inactive: "This item is no longer available." };
+      return res.status(400).json({ success: false, code: stockPreview.code, error: messages[stockPreview.code] || "Item unavailable." });
+    }
+
+    // Server-side trusted price. The client never supplies an amount.
+    const amountPaise = Math.round(Number(item.price || 0) * 100);
+    if (!(amountPaise > 0)) return res.status(400).json({ success: false, error: "This item is not available for booking." });
+
+    const bookingRef = db.collection("eventBookings").doc();
+    const razorpayOrder = await razorpayClient.orders.create({
+      amount: amountPaise,
+      currency: "INR",
+      receipt: bookingRef.id,
+      notes: { eventId, itemId, restaurantId: event.restaurantId }
+    });
+
+    await bookingRef.set({
+      bookingId: bookingRef.id,
+      bookingCode: bookingCodeFromId(bookingRef.id),
+      eventId,
+      eventSlug: event.eventSlug || "",
+      restaurantId: event.restaurantId,
+      itemId,
+      eventNameSnapshot: safeString(event.eventName, 150),
+      itemNameSnapshot: safeString(item.itemName, 120),
+      priceSnapshot: Number(item.price || 0),
+      customerName: cleanName,
+      customerPhone: cleanPhone,
+      customerEmail: cleanEmail,
+      bookingStatus: "pending_payment",
+      paymentStatus: "pending",
+      orderSource: "event_prebooking",
+      razorpayOrderId: razorpayOrder.id,
+      razorpayPaymentId: null,
+      paymentAmount: amountPaise,
+      pickupTokenHash: null,
+      redeemed: false,
+      redeemedAt: null,
+      redeemedBy: null,
+      createdAt: FieldValue.serverTimestamp(),
+      confirmedAt: null,
+      cancelledAt: null
+    });
+
+    res.json({
+      success: true,
+      bookingId: bookingRef.id,
+      publicKeyId: razorpayKeyId,
+      amount: amountPaise,
+      currency: "INR",
+      razorpayOrderId: razorpayOrder.id,
+      eventName: safeString(event.eventName, 150),
+      itemName: safeString(item.itemName, 120)
+    });
+  } catch (error) {
+    console.error("event-bookings/create-payment failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not start checkout. Please try again." });
+  }
+});
+
+app.post("/api/event-bookings/verify-payment", async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ success: false, error: "Payments are temporarily unavailable." });
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+    if (!checkRateLimit(`verify-payment:${clientIp(req)}`, 20, 60_000)) return rateLimited(res);
+
+    const { razorpay_order_id = "", razorpay_payment_id = "", razorpay_signature = "" } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: "Missing payment verification fields." });
+    }
+
+    const db = getFirestore();
+    const bookingSnap = await db.collection("eventBookings").where("razorpayOrderId", "==", razorpay_order_id).limit(1).get();
+    if (bookingSnap.empty) return res.status(404).json({ success: false, error: "Booking not found." });
+    const bookingRef = bookingSnap.docs[0].ref;
+    const existing = bookingSnap.docs[0].data();
+
+    // Idempotency: a repeated/duplicate callback for an already-verified
+    // payment is a no-op, matching the subscriptions endpoint above.
+    if (existing.paymentStatus === "paid" && existing.razorpayPaymentId === razorpay_payment_id) {
+      return res.json({
+        success: true,
+        alreadyProcessed: true,
+        bookingId: bookingRef.id,
+        bookingCode: existing.bookingCode
+      });
+    }
+
+    const expectedSignature = crypto.createHmac("sha256", razorpayKeySecret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+    if (expectedSignature !== razorpay_signature) {
+      await bookingRef.set({ bookingStatus: "cancelled", paymentStatus: "payment_failed", cancelledAt: FieldValue.serverTimestamp() }, { merge: true });
+      return res.status(400).json({ success: false, error: "Payment verification failed." });
+    }
+
+    const itemRef = db.doc(`events/${existing.eventId}/menu/${existing.itemId}`);
+    let rawToken = null;
+    let stockOutcome = null;
+    await db.runTransaction(async transaction => {
+      const itemSnap = await transaction.get(itemRef);
+      const item = itemSnap.exists ? itemSnap.data() : null;
+      stockOutcome = evaluateStockConfirmation(item);
+      if (!stockOutcome.ok) return;
+      rawToken = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(24).toString("hex");
+      transaction.update(itemRef, { soldQuantity: FieldValue.increment(1) });
+      transaction.set(bookingRef, {
+        bookingStatus: "confirmed",
+        paymentStatus: "paid",
+        razorpayPaymentId: razorpay_payment_id,
+        pickupTokenHash: hashPickupToken(rawToken),
+        redeemed: false,
+        paidAt: FieldValue.serverTimestamp(),
+        confirmedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    });
+
+    if (!stockOutcome.ok) {
+      // Payment genuinely succeeded but the item sold out in the window
+      // between checkout opening and payment completing (Part 6's accepted
+      // tradeoff for a scheduler-free reservation model - see
+      // eventBookingLogic.js's header comment). Refund immediately rather
+      // than leave a paid booking with no entitlement.
+      let refundStatus = "refund_pending";
+      try {
+        await razorpayClient.payments.refund(razorpay_payment_id, { amount: existing.paymentAmount, speed: "optimum" });
+        refundStatus = "refunded";
+      } catch (refundError) {
+        console.error("event booking sold-out refund failed:", refundError.message);
+        refundStatus = "refund_failed";
+      }
+      await bookingRef.set({
+        bookingStatus: "cancelled",
+        paymentStatus: refundStatus,
+        razorpayPaymentId: razorpay_payment_id,
+        cancelledAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      return res.status(409).json({
+        success: false,
+        code: "sold_out_after_payment",
+        error: "This item sold out just before your payment completed. Your payment is being refunded automatically.",
+        refundStatus
+      });
+    }
+
+    res.json({
+      success: true,
+      bookingId: bookingRef.id,
+      bookingCode: existing.bookingCode,
+      pickupToken: rawToken,
+      eventName: existing.eventNameSnapshot || undefined,
+      itemName: existing.itemNameSnapshot
+    });
+  } catch (error) {
+    console.error("event-bookings/verify-payment failed:", error.message);
+    res.status(500).json({ success: false, error: "Could not verify payment." });
+  }
+});
+
+async function findBookingByToken(db, token) {
+  const tokenHash = hashPickupToken(token);
+  if (!tokenHash) return null;
+  const snap = await db.collection("eventBookings").where("pickupTokenHash", "==", tokenHash).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
+// Masks a phone number for display to pickup staff (Part 12): the person
+// handing over food only needs enough to informally match the customer,
+// never the full number.
+function maskPhone(phone = "") {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length < 4) return "••••";
+  return `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+}
+
+app.post("/api/event-bookings/validate", verifyAdmin, async (req, res) => {
+  try {
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+    const ipKey = `validate:${clientIp(req)}`;
+    if (!checkRateLimit(ipKey, 60, 60_000)) return rateLimited(res);
+
+    const { token = "", eventId = "" } = req.body || {};
+    if (!token) return res.status(400).json({ success: false, code: "invalid_token", error: "No pickup token provided." });
+
+    const db = getFirestore();
+    const bookingDoc = await findBookingByToken(db, token);
+    if (!bookingDoc) return res.status(404).json({ success: false, code: "invalid_token", error: "Invalid pickup QR." });
+    const booking = bookingDoc.data();
+    await assertEventAccess(req.user.uid, booking.restaurantId, req.user);
+
+    const outcome = evaluateValidation(booking, { eventId: eventId || undefined });
+    res.json({
+      success: outcome.ok,
+      code: outcome.ok ? "valid" : outcome.code,
+      booking: {
+        bookingId: bookingDoc.id,
+        bookingCode: booking.bookingCode,
+        itemName: booking.itemNameSnapshot,
+        paymentStatus: booking.paymentStatus,
+        bookingStatus: booking.bookingStatus,
+        redeemed: booking.redeemed === true,
+        redeemedAt: booking.redeemedAt || null,
+        customerNameMasked: booking.customerName ? `${String(booking.customerName).trim().slice(0, 1)}***` : "",
+        customerPhoneMasked: maskPhone(booking.customerPhone)
+      }
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, error: error.status === 403 ? "Not permitted." : "Could not validate this QR. Please try again." });
+  }
+});
+
+app.post("/api/event-bookings/redeem", verifyAdmin, async (req, res) => {
+  try {
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+    if (!checkRateLimit(`redeem:${clientIp(req)}`, 60, 60_000)) return rateLimited(res);
+
+    const { token = "", eventId = "" } = req.body || {};
+    if (!token) return res.status(400).json({ success: false, code: "invalid_token", error: "No pickup token provided." });
+
+    const db = getFirestore();
+    const bookingDoc = await findBookingByToken(db, token);
+    if (!bookingDoc) return res.status(404).json({ success: false, code: "invalid_token", error: "Invalid pickup QR." });
+    const bookingRestaurantId = bookingDoc.data().restaurantId;
+    await assertEventAccess(req.user.uid, bookingRestaurantId, req.user);
+
+    const bookingRef = bookingDoc.ref;
+    let outcome;
+    await db.runTransaction(async transaction => {
+      const freshSnap = await transaction.get(bookingRef);
+      const fresh = freshSnap.exists ? freshSnap.data() : null;
+      outcome = evaluateRedemption(fresh, { eventId: eventId || undefined });
+      if (!outcome.ok) return;
+      transaction.update(bookingRef, {
+        redeemed: true,
+        redeemedAt: FieldValue.serverTimestamp(),
+        redeemedBy: req.user.email || req.user.uid,
+        bookingStatus: "redeemed"
+      });
+    });
+
+    await db.collection("eventRedemptionAudit").add({
+      eventId: outcome.booking?.eventId || eventId || "",
+      bookingId: bookingRef.id,
+      action: outcome.ok ? "redeemed" : outcome.code,
+      staffId: req.user.uid,
+      staffEmail: req.user.email || "",
+      result: outcome.ok ? "success" : "rejected",
+      createdAt: FieldValue.serverTimestamp()
+    });
+
+    if (!outcome.ok) {
+      const messages = {
+        already_redeemed: "This QR has already been redeemed.",
+        not_paid: "This booking's payment is not confirmed.",
+        cancelled: "This booking was cancelled.",
+        wrong_event: "This QR belongs to a different event.",
+        invalid_token: "Invalid pickup QR."
+      };
+      return res.status(409).json({ success: false, code: outcome.code, error: messages[outcome.code] || "This QR cannot be redeemed." });
+    }
+
+    res.json({
+      success: true,
+      bookingId: bookingRef.id,
+      bookingCode: outcome.booking.bookingCode,
+      itemName: outcome.booking.itemNameSnapshot
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, error: error.status === 403 ? "Not permitted." : "Could not redeem this QR. Please try again." });
+  }
+});
+
+app.post("/api/event-bookings/cancel", verifyAdmin, async (req, res) => {
+  try {
+    if (!adminReady) return res.status(503).json({ success: false, error: firebaseAdminError });
+    const { bookingId = "" } = req.body || {};
+    if (!bookingId) return res.status(400).json({ success: false, error: "bookingId is required." });
+
+    const db = getFirestore();
+    const bookingRef = db.doc(`eventBookings/${bookingId}`);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists) return res.status(404).json({ success: false, error: "Booking not found." });
+    const booking = bookingSnap.data();
+    await assertOwnerOrAdminAccess(req.user.uid, booking.restaurantId, req.user);
+
+    if (booking.redeemed === true) return res.status(400).json({ success: false, error: "This booking has already been redeemed and cannot be cancelled." });
+    if (booking.bookingStatus === "cancelled") return res.json({ success: true, alreadyCancelled: true });
+
+    let paymentStatus = booking.paymentStatus;
+    if (booking.paymentStatus === "paid" && booking.razorpayPaymentId) {
+      try {
+        await razorpayClient.payments.refund(booking.razorpayPaymentId, { amount: booking.paymentAmount, speed: "optimum" });
+        paymentStatus = "refunded";
+      } catch (refundError) {
+        console.error("event booking cancel refund failed:", refundError.message);
+        paymentStatus = "refund_failed";
+      }
+    }
+    await bookingRef.set({ bookingStatus: "cancelled", paymentStatus, cancelledAt: FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, paymentStatus });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, error: error.status === 403 ? "Not permitted." : "Could not cancel this booking." });
+  }
+});
 
 app.listen(process.env.PORT || 5000, () => console.log(`Scan2Plate backend running on port ${process.env.PORT || 5000}`));

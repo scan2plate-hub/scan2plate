@@ -1,1 +1,151 @@
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hotel Room Service</title></head><body data-panel-type="Hotel"><script>location.replace('./cafe-token-panel.html'+location.search)</script></body></html>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hotel PMS · Scan2Plate</title><link rel="stylesheet" href="./css/style.css"><style>
+:root{--tp:#f97316;--td:#111827;--tm:#64748b;--tl:#e5e7eb;--tb:#fff7ed}*{box-sizing:border-box}body{margin:0;background:#f8fafc;color:var(--td);font:14px Inter,Arial,sans-serif}.token-app{display:grid;grid-template-columns:238px 1fr;min-height:100vh}.token-side{position:sticky;top:0;height:100vh;padding:18px 12px;background:#111827;color:#fff}.token-brand{display:flex;gap:10px;align-items:center;padding:5px 9px 20px;font-size:18px;font-weight:900}.token-brand img{width:36px;height:36px;border-radius:10px;background:#fff;padding:3px}.token-brand small{display:block;color:#cbd5e1;font-size:10px;font-weight:700}.token-nav{display:grid;gap:4px}.token-nav button{border:0;border-radius:10px;background:transparent;color:#dbeafe;text-align:left;padding:11px 12px;font:inherit;font-weight:750;cursor:pointer}.token-nav button:hover,.token-nav button.active{background:#f97316;color:#fff}.token-main{min-width:0}.token-top{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:18px 25px;background:#fff;border-bottom:1px solid var(--tl);position:sticky;top:0;z-index:4}.token-top h1{margin:0;font-size:22px}.token-top p{margin:4px 0 0;color:var(--tm);font-size:12px}.token-content{padding:24px;max-width:1500px}.token-section{display:none}.token-section.active{display:block}.token-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.token-card{background:#fff;border:1px solid var(--tl);border-radius:16px;padding:17px;box-shadow:0 5px 18px #0f172a08}.token-card span{color:var(--tm);font-weight:700;font-size:12px}.token-card b{display:block;margin-top:8px;font-size:26px}.token-panel{background:#fff;border:1px solid var(--tl);border-radius:16px;padding:18px;margin-top:16px}.token-panel h2{margin:0 0 14px;font-size:16px}.token-orders{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:13px}.token-order{border:1px solid var(--tl);border-radius:14px;padding:14px;background:#fff}.token-order-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.token-pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#fff0e6;color:#c2410c;font-size:11px;font-weight:850}.token-order small{display:block;color:var(--tm);margin-top:5px}.token-items{margin:9px 0;padding:9px 0;border-top:1px dashed var(--tl);border-bottom:1px dashed var(--tl);line-height:1.55}.token-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.token-btn{border:0;border-radius:9px;padding:8px 10px;background:var(--tp);color:#fff;font:inherit;font-size:12px;font-weight:800;cursor:pointer}.token-btn.alt{background:#fff;color:#334155;border:1px solid #cbd5e1}.token-btn.danger{background:#dc2626}.token-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.token-form label{display:block;font-size:12px;font-weight:800;margin-bottom:5px}.token-form input,.token-form select,.token-form textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit}.token-form .full{grid-column:1/-1}.token-table{width:100%;border-collapse:collapse}.token-table th,.token-table td{padding:10px;border-bottom:1px solid var(--tl);text-align:left;vertical-align:top}.token-table th{font-size:11px;color:var(--tm);text-transform:uppercase}.menu-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.menu-choice{padding:11px;border:1px solid var(--tl);border-radius:11px;background:#fff;text-align:left}.menu-choice b,.menu-choice small{display:block}.menu-choice small{color:var(--tm);margin-top:4px}.token-cart-row{display:flex;justify-content:space-between;gap:8px}.token-empty{color:var(--tm);padding:18px;text-align:center}.token-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.token-bottom{display:none}@media(max-width:800px){.token-app{display:block}.token-side{display:none}.token-top{padding:13px 16px}.token-top h1{font-size:18px}.token-content{padding:14px 14px 84px}.token-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.token-card{padding:13px}.token-card b{font-size:21px}.token-form{grid-template-columns:1fr 1fr}.token-form .full{grid-column:1/-1}.token-panel{padding:14px;margin-top:12px;overflow:auto}.token-orders{grid-template-columns:1fr}.token-bottom{position:fixed;display:grid;grid-template-columns:repeat(6,1fr);bottom:0;left:0;right:0;z-index:8;background:#fff;border-top:1px solid var(--tl);padding:7px 4px env(safe-area-inset-bottom)}.token-bottom button{border:0;background:transparent;color:#64748b;font:inherit;font-size:10px;font-weight:800;padding:5px 1px}.token-bottom button.active{color:var(--tp)}.token-table{min-width:700px}}
+/* Hotel-specific additions */
+.token-pill.ok{background:#dcfce7;color:#166534}.token-pill.warn{background:#fef3c7;color:#92400e}.token-pill.danger{background:#fee2e2;color:#b91c1c}
+.hotel-cal-controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.hotel-cal-grid{overflow-x:auto}
+.hotel-cal-row{display:grid;grid-template-columns:110px repeat(14,minmax(46px,1fr));gap:2px;margin-bottom:2px}
+.hotel-cal-room{padding:6px 8px;font-size:11px;font-weight:800;background:#f8fafc;border-radius:6px;display:flex;flex-direction:column;justify-content:center}
+.hotel-cal-room small{color:var(--tm);font-weight:600}
+.hotel-cal-cell{height:36px;border-radius:6px}
+.hotel-cal-head .hotel-cal-cell{height:auto;background:transparent;font-size:10px;font-weight:800;color:var(--tm);text-align:center;display:flex;align-items:center;justify-content:center}
+.hotel-cal-date{background:transparent!important}
+.cal-available{background:#dcfce7;cursor:pointer}
+.cal-reserved{background:#fef3c7}
+.cal-occupied{background:#fecaca}
+.cal-blocked{background:#e2e8f0}
+</style></head><body data-panel-type="Hotel"><div class="token-app"><aside class="token-side"><div class="token-brand"><img src="./assets/logo.PNG" alt="Scan2Plate logo"><div>Scan2Plate<small>Hotel PMS</small></div></div><nav class="token-nav"><button class="active" data-section="dashboard">Dashboard</button><button data-section="rooms">Rooms</button><button data-section="roomtypes">Room Types</button><button data-section="reservations">Reservations</button><button data-section="frontdesk">Front Desk</button><button data-section="calendar">Calendar</button><button data-section="guests">Guests</button><button data-section="settings">Settings</button></nav></aside><main class="token-main"><header class="token-top"><div><h1 id="hotelBusinessName">Hotel</h1><p>Rooms · Reservations · Front Desk</p></div><div><button class="token-btn alt" id="hotelLogout">Logout</button></div></header><div class="token-content">
+
+<section class="token-section active" id="hotel-dashboard">
+  <div class="token-grid" id="hotelStats"></div>
+  <div class="token-panel" id="hotelUpcoming"></div>
+</section>
+
+<section class="token-section" id="hotel-rooms">
+  <div class="token-panel">
+    <h2>Add / Update Room</h2>
+    <div class="token-form">
+      <div><label>Room Number</label><input id="hotelRoomNumber" placeholder="101"></div>
+      <div><label>Room Type</label><select id="hotelRoomType"></select></div>
+      <div><label>Floor</label><input id="hotelRoomFloor" placeholder="1"></div>
+      <div><label>Bed Type</label><input id="hotelRoomBedType" placeholder="King / Twin"></div>
+      <div><label>Max Guests</label><input id="hotelRoomMaxGuests" type="number" min="1"></div>
+      <div><label>Base Price / Night</label><input id="hotelRoomBasePrice" type="number" min="0"></div>
+      <div><label>Extra Adult Price</label><input id="hotelRoomExtraAdult" type="number" min="0"></div>
+      <div><label>Extra Child Price</label><input id="hotelRoomExtraChild" type="number" min="0"></div>
+      <div><label>AC / Non-AC</label><select id="hotelRoomAc"><option>AC</option><option>Non-AC</option></select></div>
+      <div><label>GST Rate %</label><input id="hotelRoomGst" type="number" min="0" step="0.01"></div>
+      <div><label>Status</label><select id="hotelRoomStatus"><option>Available</option><option>Reserved</option><option>Occupied</option><option>Dirty</option><option>Cleaning</option><option>Inspected</option><option>Maintenance</option><option>Out of Order</option><option>Blocked</option></select></div>
+      <div class="full"><label>Amenities (comma separated)</label><input id="hotelRoomAmenities" placeholder="WiFi, TV, Minibar"></div>
+      <div class="full"><label>Description</label><textarea id="hotelRoomDescription" rows="2"></textarea></div>
+    </div>
+    <div class="token-actions"><button class="token-btn" id="saveHotelRoom">Save Room</button><button class="token-btn alt" id="clearHotelRoom">Clear</button></div>
+  </div>
+  <div class="token-panel">
+    <h2>Rooms</h2>
+    <input id="hotelRoomSearch" placeholder="Search room number, type, floor..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;margin-bottom:12px">
+    <div class="menu-picker" id="hotelRoomList"></div>
+  </div>
+</section>
+
+<section class="token-section" id="hotel-roomtypes">
+  <div class="token-panel">
+    <h2>Add / Update Room Type</h2>
+    <div class="token-form">
+      <div><label>Name</label><input id="hotelRoomTypeName" placeholder="Deluxe"></div>
+      <div><label>Base Price</label><input id="hotelRoomTypeBasePrice" type="number" min="0"></div>
+      <div><label>Max Guests</label><input id="hotelRoomTypeMaxGuests" type="number" min="1"></div>
+      <div><label>Extra Adult Price</label><input id="hotelRoomTypeExtraAdult" type="number" min="0"></div>
+      <div><label>Extra Child Price</label><input id="hotelRoomTypeExtraChild" type="number" min="0"></div>
+    </div>
+    <div class="token-actions"><button class="token-btn" id="saveHotelRoomType">Save Room Type</button><button class="token-btn alt" id="clearHotelRoomType">Clear</button></div>
+  </div>
+  <div class="token-panel"><h2>Room Types</h2><div class="menu-picker" id="hotelRoomTypeList"></div></div>
+</section>
+
+<section class="token-section" id="hotel-reservations">
+  <div class="token-panel">
+    <h2>New Reservation / Walk-in</h2>
+    <div class="token-form">
+      <div><label>Guest Name</label><input id="hotelGuestName"></div>
+      <div><label>Mobile</label><input id="hotelGuestMobile" inputmode="tel"></div>
+      <div><label>Email</label><input id="hotelGuestEmail" type="email"></div>
+      <div class="full"><label>Address</label><input id="hotelGuestAddress"></div>
+      <div><label>ID Proof Type</label><input id="hotelIdProofType" placeholder="Aadhaar / Passport"></div>
+      <div><label>ID Proof Number</label><input id="hotelIdProofNumber"></div>
+      <div><label>Adults</label><input id="hotelAdults" type="number" min="1" value="1"></div>
+      <div><label>Children</label><input id="hotelChildren" type="number" min="0" value="0"></div>
+      <div><label>Room Type</label><select id="hotelBookingRoomType"></select></div>
+      <div><label>Check-in Date</label><input id="hotelBookingCheckIn" type="date"></div>
+      <div><label>Check-out Date</label><input id="hotelBookingCheckOut" type="date"></div>
+      <div><label>Available Room</label><select id="hotelBookingRoom"></select></div>
+      <div><label>Rate / Night</label><input id="hotelBookingRate" type="number" min="0"></div>
+      <div><label>Advance Paid</label><input id="hotelAdvancePaid" type="number" min="0" value="0"></div>
+      <div><label>Booking Source</label><select id="hotelBookingSource"><option>Walk-in</option><option>Direct Website</option><option>Phone</option><option>WhatsApp</option><option>OTA</option><option>Travel Agent</option><option>Corporate</option><option>Other</option></select></div>
+      <div class="full"><label>Special Requests</label><input id="hotelSpecialRequests"></div>
+      <div class="full"><label>Notes</label><textarea id="hotelBookingNotes" rows="2"></textarea></div>
+    </div>
+    <div class="token-actions">
+      <button class="token-btn" id="createHotelBooking">Create Reservation</button>
+      <button class="token-btn" id="createHotelWalkin">Walk-in (Check-in Now)</button>
+      <button class="token-btn alt" id="clearHotelBooking">Clear</button>
+    </div>
+  </div>
+  <div class="token-panel">
+    <h2>Reservations</h2>
+    <div class="token-form" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
+      <select id="hotelBookingFilter"><option value="all">All Statuses</option><option value="inquiry">Inquiry</option><option value="reserved">Reserved</option><option value="confirmed">Confirmed</option><option value="checked_in">Checked-in</option><option value="checked_out">Checked-out</option><option value="cancelled">Cancelled</option><option value="no_show">No-show</option></select>
+      <input id="hotelBookingSearch" placeholder="Search guest, mobile, booking ID, room...">
+    </div>
+    <div class="token-orders" id="hotelBookingList"></div>
+  </div>
+</section>
+
+<section class="token-section" id="hotel-frontdesk">
+  <div class="token-panel">
+    <h2>Front Desk</h2>
+    <input id="hotelFrontDeskSearch" placeholder="Search guest name, mobile, booking ID or room number..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;margin-bottom:12px">
+    <div id="hotelFrontDeskList"></div>
+  </div>
+</section>
+
+<section class="token-section" id="hotel-calendar">
+  <div class="token-panel">
+    <h2>Availability Calendar</h2>
+    <div class="hotel-cal-controls">
+      <button class="token-btn alt" id="hotelCalPrev">← Prev week</button>
+      <button class="token-btn alt" id="hotelCalToday">Today</button>
+      <button class="token-btn alt" id="hotelCalNext">Next week →</button>
+      <span class="muted" style="font-size:12px;color:var(--tm)">Click an available (green) cell to start a booking for that room and date.</span>
+    </div>
+    <div class="hotel-cal-grid"><div id="hotelCalendarGrid"></div></div>
+  </div>
+</section>
+
+<section class="token-section" id="hotel-guests">
+  <div class="token-panel">
+    <h2>Guests</h2>
+    <input id="hotelGuestSearch" placeholder="Search guest name or mobile..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;margin-bottom:12px">
+    <div class="menu-picker" id="hotelGuestList"></div>
+  </div>
+</section>
+
+<section class="token-section" id="hotel-settings">
+  <div class="token-panel">
+    <h2>Hotel Settings</h2>
+    <div class="token-form">
+      <div><label>Hotel Name</label><input id="hotelSettingName"></div>
+      <div><label>Phone</label><input id="hotelSettingPhone" inputmode="tel"></div>
+      <div class="full"><label>Address</label><input id="hotelSettingAddress"></div>
+      <div><label>GSTIN</label><input id="hotelSettingGst" style="text-transform:uppercase"></div>
+      <div><label>Tax %</label><input id="hotelSettingTax" type="number" min="0" step="0.01"></div>
+      <div><label>Default Check-in Time</label><input id="hotelSettingCheckinTime" type="time"></div>
+      <div><label>Default Check-out Time</label><input id="hotelSettingCheckoutTime" type="time"></div>
+      <div><label>Active Rooms</label><input id="hotelSettingRoomCount" readonly></div>
+    </div>
+    <div class="token-actions"><button class="token-btn" id="saveHotelSettings">Save Settings</button></div>
+  </div>
+</section>
+
+</div></main></div><script type="module" src="./js/hotel-panel.js"></script></body></html>
