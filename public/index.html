@@ -2611,7 +2611,7 @@ import {
       await loadMenu();
     } catch (error) {
       console.error("Customer menu load failed", error);
-      menuGrid.innerHTML = `<div class="card" style="padding:18px;text-align:center;"><h3>Unable to load data. Please retry.</h3><button class="btn" type="button" onclick="location.reload()">Retry</button><details style="margin-top:8px;"><summary>Debug</summary><pre style="white-space:pre-wrap;font-size:11px;">${escapeHtml(String(error?.message || error))}</pre></details></div>`;
+      menuGrid.innerHTML = `<div class="card" style="padding:18px;text-align:center;"><h3>Unable to load data. Please retry.</h3><button class="btn" type="button" onclick="location.reload()">Retry</button></div>`;
     } finally {
       customerLoadDone = true;
       clearTimeout(customerLoadTimer);

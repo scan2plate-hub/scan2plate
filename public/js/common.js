@@ -134,7 +134,16 @@ export function closeStaleOverlays() {
   document.body.classList.remove("modal-open");
 }
 
+// The admin dashboard loads admin.js AND admin-modules.js, and both called
+// this. That installed two window error handlers, two document click handlers
+// and — the expensive one — two 5-second watchdog intervals, each running four
+// full-document querySelectorAll sweeps forever. One install per page is
+// enough; the first caller's page name wins.
+let appSafetyInstalled = false;
+
 export function installAppSafety(options = {}) {
+  if (appSafetyInstalled) return;
+  appSafetyInstalled = true;
   const timeoutMs = Number(options.stuckTimeoutMs || 15000);
   const pageName = options.pageName || "Scan2Plate";
   window.addEventListener("error", event => {
@@ -341,10 +350,71 @@ const modulePermissions = {
   waiter: ["liveOrders", "tables", "quickBilling", "orders", "billing"]
 };
 
-export function canAccessModule(userRole = "", moduleName = "") {
+export function rolePermissions(userRole = "") {
   const role = String(userRole || "owner").toLowerCase();
-  const allowed = modulePermissions[role] || modulePermissions.owner;
+  return modulePermissions[role] || modulePermissions.owner;
+}
+
+// A staff document may carry an explicit `permissions` array that overrides
+// the role default. An absent/empty array keeps the existing role-based
+// behaviour exactly as before, so staff created before per-staff permissions
+// existed are unaffected.
+export function resolveAllowedModules(userRole = "", customPermissions = null) {
+  const base = rolePermissions(userRole);
+  if (base === "all") return "all";
+  if (!Array.isArray(customPermissions) || !customPermissions.length) return base;
+  return [...new Set(customPermissions.map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+export function canAccessModule(userRole = "", moduleName = "", customPermissions = null) {
+  const allowed = resolveAllowedModules(userRole, customPermissions);
   return allowed === "all" || allowed.includes(moduleName);
+}
+
+/* =========================================================
+   CURRENT vs PAST STAFF
+
+   Staff records carry `status` ("active"/"inactive") and the
+   older boolean `isActive`. saveStaff and the deactivate path
+   have always written BOTH, so they agree; this reads `status`
+   first and falls back to `isActive`, and treats a record with
+   neither as active so staff created before either field
+   existed are still current employees.
+
+   Every current-staff surface (Attendance, current Payroll,
+   advance-salary and staff dropdowns) must decide membership
+   with this — never with "a Firestore document exists".
+========================================================= */
+export function isActiveStaffRecord(staffMember = {}) {
+  const status = String(staffMember.status || "").trim().toLowerCase();
+  if (status) return status === "active";
+  return staffMember.isActive !== false;
+}
+
+/**
+ * Who appears on a payroll month.
+ *
+ * Current (or future) month -> current staff only. A person who has left is
+ * not a current employee, so they must not appear in payroll being generated
+ * now, even though their documents and history remain.
+ *
+ * A PAST month -> current staff PLUS any past staff who actually have
+ * attendance or advance records in that month. That is historical accounting
+ * data and has to stay reportable; it is never deleted to hide someone from
+ * the current list.
+ *
+ * `historical: true` marks a row as a closed record, which the UI renders
+ * without edit/delete actions.
+ */
+export function selectPayrollStaff({ staff = [], attendance = [], advances = [], month = "", currentMonth = "" } = {}) {
+  const active = staff.filter(isActiveStaffRecord).map(member => ({ member, historical: false }));
+  if (!month || !currentMonth || month >= currentMonth) return active;
+  const inMonth = (rows, id) => rows.some(row => row.staffId === id && String(row.date || "").startsWith(month));
+  const past = staff
+    .filter(member => !isActiveStaffRecord(member))
+    .filter(member => inMonth(attendance, member.id) || inMonth(advances, member.id))
+    .map(member => ({ member, historical: true }));
+  return [...active, ...past];
 }
 
 export function renderStatus(status = "pending") {
@@ -505,4 +575,89 @@ export async function notifyBackend(payload) {
     console.error("notifyBackend error:", err);
     return null;
   }
+}
+
+/* =========================================================
+   SEARCH / FILTER DEBOUNCE
+   Typing in a search box used to re-render the whole list on
+   every keystroke. Debouncing collapses a burst of keystrokes
+   into a single render once typing pauses.
+========================================================= */
+export function debounce(fn, delayMs = 180) {
+  let timerId = null;
+  const debounced = (...args) => {
+    clearTimeout(timerId);
+    timerId = setTimeout(() => fn(...args), delayMs);
+  };
+  debounced.cancel = () => clearTimeout(timerId);
+  debounced.flush = (...args) => { clearTimeout(timerId); fn(...args); };
+  return debounced;
+}
+
+/* =========================================================
+   DOM WRITE GUARD
+   Re-assigning innerHTML with byte-identical markup still
+   destroys and rebuilds every child node: it drops focus,
+   resets scroll position and makes the panel visibly flicker,
+   which is what reads to staff as "the dashboard refreshed
+   again". Skipping the write when nothing changed keeps a
+   realtime snapshot from touching sections it did not affect.
+========================================================= */
+const htmlSignatures = new WeakMap();
+
+export function setHtmlIfChanged(element, html) {
+  if (!element) return false;
+  if (htmlSignatures.get(element) === html) return false;
+  htmlSignatures.set(element, html);
+  element.innerHTML = html;
+  return true;
+}
+
+/* =========================================================
+   BILL SERIAL NUMBER
+   Serial numbers are stored as plain integers in Firestore and
+   only zero-padded for display, so sorting, reporting and
+   "next number" arithmetic all stay numeric.
+========================================================= */
+export function formatBillSerial(value, minDigits = 3) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "";
+  return String(Math.trunc(numeric)).padStart(minDigits, "0");
+}
+
+/**
+ * The arithmetic behind a bill/order number allocation, split out from the
+ * Firestore transaction so it is identical in every panel (admin dashboard,
+ * customer ordering, vendor/token panel) and can be tested directly.
+ *
+ * `counter` is the current contents of restaurants/<id>/counters/<businessDate>.
+ * The bill serial is seeded from lastDailyOrderNo when lastBillSerialNumber is
+ * absent, so a business day that already had orders before bill serials
+ * existed continues upward instead of restarting at 1 and colliding with a
+ * bill that was already printed earlier the same day.
+ *
+ * Both numbers only ever move forward. A deleted or cancelled bill does not
+ * release its number, so a serial is never reused.
+ */
+export function allocateFromCounter(counter = {}) {
+  const lastOrderNo = Number(counter.lastDailyOrderNo || 0);
+  const safeLastOrderNo = Number.isFinite(lastOrderNo) && lastOrderNo > 0 ? Math.trunc(lastOrderNo) : 0;
+  const rawLastBill = Number(counter.lastBillSerialNumber ?? counter.lastDailyOrderNo ?? 0);
+  const safeLastBill = Number.isFinite(rawLastBill) && rawLastBill > 0 ? Math.trunc(rawLastBill) : 0;
+  return {
+    dailyOrderNo: safeLastOrderNo + 1,
+    billSerialNumber: safeLastBill + 1
+  };
+}
+
+// Older bills (and any created by a client that predates the bill-serial
+// field) have no billSerialNumber. They still have the daily order number,
+// which was the de-facto bill number before this change, so fall back to it
+// rather than rendering an empty Bill No on a printed bill.
+export function billDisplayNumber(order = {}) {
+  const serial = formatBillSerial(order.billSerialNumber ?? order.billSerial ?? order.billNo);
+  if (serial) return serial;
+  const legacy = formatBillSerial(order.displayOrderNo ?? order.dailyOrderNo ?? order.dailyOrderNumber);
+  if (legacy) return legacy;
+  return String(order.orderId || "-");
 }

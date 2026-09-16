@@ -35,7 +35,9 @@ import {
   installAppSafety,
   withTimeout,
   guardedAction,
-  readValidatedLocal
+  readValidatedLocal,
+  formatBillSerial,
+  allocateFromCounter
 } from './common.js';
 
 installAppSafety({ pageName: 'Customer Menu', stuckTimeoutMs: 16000 });
@@ -114,8 +116,10 @@ function ensureMenuFilters() {
 
 function showCustomerLoadNotice(message = 'Taking longer than expected. Please check internet and retry.', error = null) {
   const target = menuGrid || customerApp || document.body;
-  const debug = error ? `<details style="margin-top:8px"><summary>Debug</summary><pre style="white-space:pre-wrap;font-size:11px">${escapeHtml(error?.message || error)}</pre></details>` : '';
-  const html = `<div class="card" style="padding:18px;text-align:center"><h3 style="margin-top:0">${escapeHtml(message)}</h3><button class="btn btn-primary" type="button" onclick="location.reload()">Retry</button>${debug}</div>`;
+  // The technical detail goes to the console for support. A diner only ever
+  // sees a plain message and a Retry button.
+  if (error) console.error('Customer menu load problem', error);
+  const html = `<div class="card" style="padding:18px;text-align:center"><h3 style="margin-top:0">${escapeHtml(message)}</h3><button class="btn btn-primary" type="button" onclick="location.reload()">Retry</button></div>`;
   if (target === menuGrid) target.innerHTML = html;
   else target.insertAdjacentHTML('afterbegin', html);
 }
@@ -714,18 +718,22 @@ async function nextVendorToken() {
   return { tokenDate, tokenNumber };
 }
 
+// Daily order number AND bill serial are allocated together in a single
+// Firestore transaction on a single counter document, so a customer order
+// placed at the same instant as a counter bill can never share a serial.
 async function nextDailyOrderMeta() {
   const dailyResetTime = normalizeResetTime(settings.dailyOrderResetTime || '04:00');
   const businessTimezone = settings.timezone || settings.timeZone || 'Asia/Kolkata';
   const businessDate = getBusinessDate(dailyResetTime, businessTimezone);
   const counterRef = doc(db, 'restaurants', restaurantId, 'counters', businessDate);
-  const dailyOrderNo = await runTransaction(db, async transaction => {
+  const allocated = await runTransaction(db, async transaction => {
     const counter = await transaction.get(counterRef);
-    const next = Number(counter.exists() ? counter.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, businessTimezone, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
-    return next;
+    const { dailyOrderNo: nextOrderNo, billSerialNumber: nextBillSerial } = allocateFromCounter(counter.exists() ? counter.data() : {});
+    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime, businessTimezone, lastDailyOrderNo: nextOrderNo, lastBillSerialNumber: nextBillSerial, updatedAt: serverTimestamp() }, { merge: true });
+    return { nextOrderNo, nextBillSerial };
   });
-  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, businessTimezone, displayOrderNo: String(dailyOrderNo) };
+  const dailyOrderNo = allocated.nextOrderNo;
+  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime, dailyOrderDate: businessDate, businessTimezone, displayOrderNo: String(dailyOrderNo), billSerialNumber: allocated.nextBillSerial, billSerialLabel: formatBillSerial(allocated.nextBillSerial), billNo: formatBillSerial(allocated.nextBillSerial), billDate: businessDate };
 }
 
 function mergeItems(existing = [], incoming = []) {

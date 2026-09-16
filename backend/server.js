@@ -530,6 +530,107 @@ async function findStaffDoc(db, restaurantId, uid) {
   return snap.empty ? null : snap.docs[0];
 }
 
+// Edit an existing staff member. This deliberately looks the target up by uid
+// and writes back to THAT SAME document (staffDoc.ref) rather than deriving a
+// document id from the email: editing can therefore never create a second,
+// duplicate staff record, even if the name or role changes.
+app.patch("/api/restaurants/:restaurantId/staff/:uid", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const targetUid = String(req.params.uid || "").trim();
+    if (!restaurantId || !targetUid) return res.status(400).json({ ok: false, error: "restaurantId and uid are required." });
+    await assertOwnerOrAdminAccess(req.user.uid, restaurantId, req.user);
+
+    const db = getFirestore();
+    const staffDoc = await findStaffDoc(db, restaurantId, targetUid);
+    if (!staffDoc) return res.status(404).json({ ok: false, error: "Staff account not found." });
+    const staffData = staffDoc.data() || {};
+    const currentRole = String(staffData.role || "").toLowerCase();
+
+    // Owner/admin accounts are managed elsewhere; this route only edits staff.
+    if (["owner", "admin"].includes(currentRole)) {
+      return res.status(400).json({ ok: false, error: "Owner/admin accounts cannot be edited here." });
+    }
+
+    const { name, phone, role, status, permissions, assignedSection, assignedTable, kitchenAccess } = req.body || {};
+    const update = { updatedAt: FieldValue.serverTimestamp(), updatedBy: req.user.email || req.user.uid };
+
+    if (name !== undefined) {
+      const cleanName = String(name || "").trim();
+      if (cleanName.length < 2) return res.status(400).json({ ok: false, error: "Staff name is required." });
+      update.name = cleanName;
+    }
+    if (phone !== undefined) {
+      const cleanPhone = String(phone || "").trim();
+      if (cleanPhone && cleanPhone.replace(/\D/g, "").length < 10) {
+        return res.status(400).json({ ok: false, error: "Enter a valid phone number, or leave it empty." });
+      }
+      update.phone = cleanPhone;
+    }
+    if (role !== undefined) {
+      const cleanRole = String(role || "").trim().toLowerCase();
+      const editableRoles = new Set(["manager", "cashier", "kitchen", "waiter"]);
+      // Promoting a staff account to owner/admin is never done from this route.
+      if (["owner", "admin"].includes(cleanRole)) {
+        return res.status(400).json({ ok: false, error: "Staff cannot be promoted to owner or admin here." });
+      }
+      // An unchanged legacy role is allowed through so editing a staff member
+      // created under an older role set does not force a role change.
+      if (!editableRoles.has(cleanRole) && cleanRole !== currentRole) {
+        return res.status(400).json({ ok: false, error: "Invalid staff role." });
+      }
+      update.role = cleanRole;
+    }
+    if (permissions !== undefined) {
+      if (!Array.isArray(permissions)) return res.status(400).json({ ok: false, error: "Permissions must be a list." });
+      update.permissions = [...new Set(permissions.map(value => String(value || "").trim()).filter(Boolean))].slice(0, 40);
+    }
+    if (assignedSection !== undefined) update.assignedSection = String(assignedSection || "").trim().slice(0, 120);
+    if (assignedTable !== undefined) update.assignedTable = String(assignedTable || "").trim().slice(0, 40);
+    if (kitchenAccess !== undefined) update.kitchenAccess = kitchenAccess === true;
+
+    if (status !== undefined) {
+      const cleanStatus = String(status || "").trim().toLowerCase();
+      if (!["active", "inactive"].includes(cleanStatus)) return res.status(400).json({ ok: false, error: "Status must be active or inactive." });
+      if (targetUid === req.user.uid && cleanStatus === "inactive") {
+        return res.status(400).json({ ok: false, error: "You cannot deactivate your own account." });
+      }
+      update.status = cleanStatus;
+      update.isActive = cleanStatus === "active";
+      const wasInactive = String(staffData.status || "").toLowerCase() === "inactive" || staffData.isActive === false;
+      // Only touch the Auth account when the status actually changes, so an
+      // ordinary name/phone edit never disturbs an active login.
+      if (wasInactive !== (cleanStatus === "inactive")) {
+        await getAuth().updateUser(targetUid, { disabled: cleanStatus === "inactive" });
+        update[cleanStatus === "inactive" ? "deactivatedAt" : "reactivatedAt"] = FieldValue.serverTimestamp();
+        update[cleanStatus === "inactive" ? "deactivatedBy" : "reactivatedBy"] = req.user.email || req.user.uid;
+      }
+    }
+
+    if (update.name && update.name !== staffData.name) {
+      try {
+        await getAuth().updateUser(targetUid, { displayName: update.name });
+      } catch (error) {
+        if (error.code !== "auth/user-not-found") throw error;
+      }
+    }
+
+    // Both copies of the staff record stay in step, exactly as create does.
+    await staffDoc.ref.set(update, { merge: true });
+    await db.doc(`restaurantStaff/${targetUid}`).set(update, { merge: true });
+    await db.collection("auditLogs").add({
+      restaurantId,
+      action: "staff_updated",
+      performedBy: req.user.email || req.user.uid,
+      details: { staffUid: targetUid, email: staffData.email || "", changed: Object.keys(update).filter(key => !["updatedAt", "updatedBy"].includes(key)) },
+      createdAt: FieldValue.serverTimestamp()
+    });
+    res.json({ ok: true, success: true, uid: targetUid });
+  } catch (error) {
+    res.status(error.status || 400).json({ ok: false, error: error.message || "Could not update staff." });
+  }
+});
+
 app.post("/api/restaurants/:restaurantId/staff/:uid/deactivate", verifyAdmin, async (req, res) => {
   try {
     const restaurantId = String(req.params.restaurantId || "").trim();
