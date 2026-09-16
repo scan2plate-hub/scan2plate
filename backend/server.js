@@ -411,6 +411,8 @@ app.get("/api/health", (_, res) => res.json({
   aiModel: process.env.AI_MODEL || "",
   aiLimitBasic: Number(process.env.DAILY_AI_LIMIT_BASIC || 20),
   aiLimitAdvanced: Number(process.env.DAILY_AI_LIMIT_ADVANCED || process.env.DAILY_AI_LIMIT_ADVANCE || 100),
+  menuImageGeneration: Boolean(String(process.env.AI_IMAGE_API_KEY || process.env.AI_API_KEY || "").trim()),
+  menuImageProvider: String(process.env.AI_IMAGE_PROVIDER || process.env.AI_PROVIDER || "openai").toLowerCase(),
   time: new Date().toISOString()
 }));
 app.post("/api/ai/help", async (req, res) => {
@@ -446,6 +448,141 @@ app.post("/api/ai/help", async (req, res) => {
   }
   if (!answer) answer = `${providerFailed ? "AI service is temporarily unavailable. Here is a standard troubleshooting guide.\n\n" : ""}${fallbackHelpAnswer(cleanMessage)}`;
   res.json({ success: true, answer, source, diagnostics: backendDiagnostics });
+});
+
+/* =========================================================
+   MENU ITEM IMAGES
+
+   Two routes, deliberately separate:
+
+   /menu-image/generate  asks the image provider for a picture and
+                         returns it as base64 for PREVIEW ONLY. It
+                         stores nothing, so Regenerate and Cancel
+                         cannot leave orphaned files in Storage.
+   /menu-image           stores an image (uploaded or accepted from
+                         a preview) in Firebase Storage and returns
+                         its URL and path.
+
+   The provider API key only ever exists here, in backend env. It is
+   never sent to, or reachable from, the browser.
+========================================================= */
+function aiImageKey() {
+  return String(process.env.AI_IMAGE_API_KEY || process.env.AI_API_KEY || "").trim();
+}
+
+function aiImageProvider() {
+  return String(process.env.AI_IMAGE_PROVIDER || process.env.AI_PROVIDER || "openai").toLowerCase();
+}
+
+// The prompt is built from the restaurant's own item name so every item gets
+// its own picture. The negative constraints keep out the things that make a
+// generated image unusable on a menu: people, text, logos and watermarks.
+function menuImagePrompt({ itemName, category = "", description = "" }) {
+  const name = safeString(itemName, 120);
+  const extra = [safeString(category, 60), safeString(description, 200)].filter(Boolean).join(", ");
+  return `Realistic professional restaurant menu photograph of ${name}, authentic ${name}${extra ? ` (${extra})` : ""}, appetizing presentation, high-quality food photography, served on an appropriate plate or bowl, clean restaurant presentation, natural lighting, realistic food texture, no people, no text, no logo, no watermark.`;
+}
+
+async function generateMenuImageBase64(prompt) {
+  const apiKey = aiImageKey();
+  if (!apiKey) {
+    const error = new Error("Image generation is not configured on the server.");
+    error.status = 503;
+    throw error;
+  }
+  const provider = aiImageProvider();
+
+  if (provider.includes("gemini") || provider.includes("imagen") || provider.includes("google")) {
+    const model = String(process.env.AI_IMAGE_MODEL || "imagen-3.0-generate-002").trim();
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predict?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: "1:1" } })
+    });
+    if (!response.ok) throw new Error(`Image provider HTTP ${response.status}`);
+    const result = await response.json();
+    const b64 = result?.predictions?.[0]?.bytesBase64Encoded;
+    if (!b64) throw new Error("Image provider returned no image.");
+    return { base64: b64, contentType: "image/png" };
+  }
+
+  const model = String(process.env.AI_IMAGE_MODEL || "gpt-image-1").trim();
+  const baseUrl = String(process.env.AI_IMAGE_BASE_URL || "https://api.openai.com/v1/images/generations").trim();
+  const response = await fetch(baseUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt, n: 1, size: "1024x1024" })
+  });
+  if (!response.ok) throw new Error(`Image provider HTTP ${response.status}`);
+  const result = await response.json();
+  const entry = result?.data?.[0] || {};
+  if (entry.b64_json) return { base64: entry.b64_json, contentType: "image/png" };
+  if (entry.url) {
+    // Some models return a link instead of bytes; fetch it here so the key and
+    // the provider's host stay server-side.
+    const imageResponse = await fetch(entry.url);
+    if (!imageResponse.ok) throw new Error(`Image download HTTP ${imageResponse.status}`);
+    const buffer = Buffer.from(await imageResponse.arrayBuffer());
+    return { base64: buffer.toString("base64"), contentType: imageResponse.headers.get("content-type") || "image/png" };
+  }
+  throw new Error("Image provider returned no image.");
+}
+
+app.post("/api/restaurants/:restaurantId/menu-image/generate", verifyAdmin, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const { itemName = "", category = "", description = "" } = req.body || {};
+    if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
+    if (!String(itemName).trim()) return res.status(400).json({ ok: false, error: "Enter the item name first." });
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
+
+    const prompt = menuImagePrompt({ itemName, category, description });
+    const { base64, contentType } = await generateMenuImageBase64(prompt);
+    // Returned for preview only — nothing is written to Storage until the user
+    // accepts the image.
+    res.json({ ok: true, success: true, dataUrl: `data:${contentType};base64,${base64}`, prompt });
+  } catch (error) {
+    const status = error.status || 502;
+    console.warn("Menu image generation failed:", error.message);
+    res.status(status).json({ ok: false, error: status === 503 ? error.message : "Unable to generate image. Please try again." });
+  }
+});
+
+app.post("/api/restaurants/:restaurantId/menu-image", verifyAdmin, (req, res, next) => {
+  logoUpload.fields([{ name: "image", maxCount: 1 }, { name: "file", maxCount: 1 }])(req, res, error => {
+    if (!error) return next();
+    if (error.code === "LIMIT_FILE_SIZE") return res.status(413).json({ ok: false, error: "Image must be 5MB or smaller." });
+    return res.status(400).json({ ok: false, error: error.message || "Image upload failed." });
+  });
+}, async (req, res) => {
+  try {
+    const restaurantId = String(req.params.restaurantId || "").trim();
+    const uploaded = req.file || req.files?.image?.[0] || req.files?.file?.[0] || null;
+    if (!restaurantId) return res.status(400).json({ ok: false, error: "restaurantId is required." });
+    if (!uploaded) return res.status(400).json({ ok: false, error: "Image file is required." });
+    const mime = String(uploaded.mimetype || "").toLowerCase();
+    if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mime)) {
+      return res.status(415).json({ ok: false, error: "Use a JPG, PNG or WEBP image." });
+    }
+    if (!adminReady) return res.status(503).json({ ok: false, error: "FIREBASE_SERVICE_ACCOUNT missing on backend" });
+    if (!storageBucketName) return res.status(503).json({ ok: false, error: "FIREBASE_STORAGE_BUCKET missing on backend" });
+    await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
+
+    const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "image/jpg": "jpg" })[mime] || "jpg";
+    const storagePath = `restaurants/${restaurantId}/menu-images/item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+    const bucket = getStorage().bucket(storageBucketName);
+    const file = bucket.file(storagePath);
+    const token = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
+    await file.save(uploaded.buffer, {
+      metadata: { contentType: mime, metadata: { firebaseStorageDownloadTokens: token } },
+      resumable: false
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(storageBucketName)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    res.json({ ok: true, success: true, imageUrl, imageStoragePath: storagePath });
+  } catch (error) {
+    console.warn("Menu image upload failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: "Could not save the image. Please try again." });
+  }
 });
 
 app.post("/api/restaurants/:restaurantId/staff", verifyAdmin, async (req, res) => {

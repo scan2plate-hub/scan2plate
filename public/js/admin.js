@@ -18,7 +18,7 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter } from "./common.js?v=freeze-fix-20260816";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
@@ -152,15 +152,22 @@ function safeSetLoading(isLoading, target = document.body) {
   target.classList.toggle("is-loading", Boolean(isLoading));
 }
 
+// Unsubscribes ONLY the listeners handed to it.
+//
+// This used to finish with cleanupRegisteredListeners(), which tears down every
+// listener registered anywhere in the app. startInventoryListeners() calls this
+// during boot, so it was silently killing the listeners created before it — the
+// menu and the staff-accounts list — leaving both permanently stale: a menu
+// edit or a staff edit would not appear until a full page reload. Page-level
+// teardown still happens via the pagehide/beforeunload handlers in common.js.
 function cleanupFirestoreListeners(...listeners) {
   listeners.forEach(unsubscribe => {
     try {
       if (typeof unsubscribe === "function") unsubscribe();
     } catch (error) {
-      console.warn("Firestore listener cleanup failed", error);
+      devError("Firestore listener cleanup failed", error);
     }
   });
-  cleanupRegisteredListeners();
 }
 
 /* =========================================================
@@ -636,10 +643,13 @@ function ensureOnlineOrdersUi() {
   }
   document.querySelector('.nav-item[data-section="online-orders"]')?.addEventListener("click", event => {
     event.preventDefault();
+    // switchSection flushes this section if an order changed while it was
+    // hidden. Calling renderOnlineOrders() here as well re-filtered the whole
+    // order history and rebuilt the page on every single visit, even when
+    // nothing had changed.
     if (typeof window.switchSection === "function") window.switchSection("online-orders");
     document.getElementById("pageTitle").textContent = "Online Orders";
     document.getElementById("pageSubtitle").textContent = "Pre-orders, delivery and takeaway";
-    renderOnlineOrders();
   });
   if (!document.getElementById("section-online-orders")) {
     document.querySelector("main.main-content")?.insertAdjacentHTML("beforeend", `
@@ -663,6 +673,7 @@ function ensureOnlineOrdersUi() {
     button.addEventListener("click", () => {
       document.querySelectorAll("[data-online-tab]").forEach(item => item.classList.remove("active"));
       button.classList.add("active");
+      resetWindow(document.getElementById("onlineOrdersList"));
       renderOnlineOrders();
     });
   });
@@ -729,7 +740,11 @@ function renderOnlineOrders() {
   if (!list) return;
   const tab = onlineOrderTab();
   const rows = allOrders.filter(order => orderTypeGroup(order) === tab);
-  list.innerHTML = rows.length ? rows.map(order => {
+  // Only the first page is built. The default "Dine-in" tab matches any order
+  // without an explicit orderType, so this was rendering the restaurant's
+  // entire order history — the single most expensive render in the dashboard.
+  const windowed = takeWindow(list, rows);
+  const html = rows.length ? windowed.visible.map(order => {
     const effective = withEffectiveOrderTotals(order);
     return `<div class="order-card">
       <div class="order-header">
@@ -756,8 +771,21 @@ function renderOnlineOrders() {
         <button class="btn btn-danger admin-order-action" data-id="${order.id}" data-action="reject">Reject</button>
       </div>
     </div>`;
-  }).join("") : `<div class="empty-state"><i class="fas fa-inbox"></i><h4>No ${escapeHtml(tab.replace("_", " "))} orders</h4><p>Orders appear here when customers use public workflows.</p></div>`;
-  list.querySelectorAll(".admin-order-action").forEach(btn => btn.addEventListener("click", () => handleAdminOrderAction(btn.dataset.id || "", btn.dataset.action || "")));
+  }).join("") + showMoreMarkup(windowed.hidden, windowed.total, "orders") : `<div class="empty-state"><i class="fas fa-inbox"></i><h4>No ${escapeHtml(tab.replace("_", " "))} orders</h4><p>Orders appear here when customers use public workflows.</p></div>`;
+  setHtmlIfChanged(list, html);
+  bindOnlineOrderActions(list);
+}
+
+// One delegated handler instead of an addEventListener per button on every
+// render (seven per card, on every card, on every order write).
+function bindOnlineOrderActions(list) {
+  if (!list || list.dataset.s2pActionsBound === "true") return;
+  list.dataset.s2pActionsBound = "true";
+  bindShowMore(list, renderOnlineOrders);
+  list.addEventListener("click", event => {
+    const button = event.target.closest(".admin-order-action");
+    if (button) handleAdminOrderAction(button.dataset.id || "", button.dataset.action || "");
+  });
 }
 
 function setStaffMessage(message = "", type = "info") {
@@ -1180,12 +1208,11 @@ staffDeletePasswordField?.addEventListener("keydown", event => {
 /* =========================================================
    UTILS
 ========================================================= */
+// money() is called for every amount on every card, row and bill line. It was
+// building a fresh Intl.NumberFormat each time; the shared formatter is built
+// once. Output is byte-identical.
 function money(v) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0
-  }).format(Number(v || 0));
+  return currencyFormatter(0).format(Number(v || 0));
 }
 
 function escapeHtml(str = "") {
@@ -3265,6 +3292,7 @@ function renderMenuSortSelectors() {
 }
 
 function clearMenuForm() {
+  resetMenuImageState();
   if (itemNameEl) itemNameEl.value = "";
   if (itemCategoryEl) itemCategoryEl.value = "";
   if (itemPriceEl) itemPriceEl.value = "";
@@ -3284,6 +3312,220 @@ function clearMenuForm() {
   renderMenuSortSelectors();
 }
 
+/* =========================================================
+   MENU ITEM IMAGE
+
+   Upload or generate a picture for the item being added/edited.
+
+   - The provider API key lives only in backend env. The browser
+     calls our own backend, never the image provider.
+   - Generation returns the image for PREVIEW ONLY. Nothing is
+     written to Storage until "Use This Image", so Regenerate and
+     Cancel cannot leave orphaned files behind.
+   - Large images are downscaled and re-encoded before upload.
+   - Only imageUrl / image / imageStoragePath are ever written to
+     the menu document; no existing field is touched.
+========================================================= */
+const MENU_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+let menuImageState = { imageUrl: "", imageStoragePath: "", pendingDataUrl: "" };
+
+function menuImageEl(id) { return document.getElementById(id); }
+
+function setMenuImageStatus(message = "", tone = "muted") {
+  const el = menuImageEl("menuImageStatus");
+  if (!el) return;
+  const colors = { muted: "var(--text-3)", error: "#b43731", success: "#18794e", busy: "var(--text-3)" };
+  el.style.color = colors[tone] || colors.muted;
+  el.textContent = message;
+}
+
+function renderMenuImageState() {
+  const wrap = menuImageEl("menuImagePreviewWrap");
+  const img = menuImageEl("menuImagePreview");
+  const caption = menuImageEl("menuImageCaption");
+  const reviewing = Boolean(menuImageState.pendingDataUrl);
+  const src = menuImageState.pendingDataUrl || menuImageState.imageUrl || itemImageEl?.value.trim() || "";
+
+  if (wrap) wrap.style.display = src ? "block" : "none";
+  if (img && src && img.src !== src) img.src = src;
+  if (caption) caption.textContent = reviewing ? "Preview — not saved yet." : (src ? "Current image" : "");
+
+  menuImageEl("menuImageActions")?.classList.toggle("hidden", reviewing);
+  menuImageEl("menuImageReviewActions")?.classList.toggle("hidden", !reviewing);
+  menuImageEl("menuImageRemoveBtn")?.classList.toggle("hidden", reviewing || !src);
+  const uploadBtn = menuImageEl("menuImageUploadBtn");
+  if (uploadBtn) uploadBtn.innerHTML = src && !reviewing ? `<i class="fas fa-image"></i> Change Image` : `<i class="fas fa-upload"></i> Upload Image`;
+  const generateBtn = menuImageEl("menuImageGenerateBtn");
+  if (generateBtn) generateBtn.innerHTML = src && !reviewing ? "✨ Generate New AI Image" : "✨ Generate AI Image";
+}
+
+function resetMenuImageState({ imageUrl = "", imageStoragePath = "" } = {}) {
+  menuImageState = { imageUrl, imageStoragePath, pendingDataUrl: "" };
+  const input = menuImageEl("menuImageFileInput");
+  if (input) input.value = "";
+  setMenuImageStatus("");
+  renderMenuImageState();
+}
+
+// Downscales to a menu-sized picture and re-encodes as JPEG, stepping the
+// quality down until it is comfortably small enough to serve on a phone.
+async function compressMenuImage(source, fileName = "menu-item") {
+  const image = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Could not read this image."));
+    el.crossOrigin = "anonymous";
+    el.src = source;
+  });
+  const maxSide = 900;
+  const width0 = image.naturalWidth || image.width;
+  const height0 = image.naturalHeight || image.height;
+  const scale = Math.min(1, maxSide / Math.max(1, width0), maxSide / Math.max(1, height0));
+  const width = Math.max(1, Math.round(width0 * scale));
+  const height = Math.max(1, Math.round(height0 * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+
+  const targetBytes = 280 * 1024;
+  let blob = null;
+  for (const quality of [0.86, 0.78, 0.7, 0.6, 0.5]) {
+    blob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (blob && blob.size <= targetBytes) break;
+  }
+  if (!blob) throw new Error("Could not process this image.");
+  const base = String(fileName).replace(/\.[^.]+$/, "") || "menu-item";
+  return new File([blob], `${base}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+async function uploadMenuImageFile(file) {
+  const form = new FormData();
+  form.append("image", file, file.name || `menu-item-${Date.now()}.jpg`);
+  const response = await withTimeout(
+    fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/menu-image`, {
+      method: "POST",
+      headers: await purchaseAuthHeaders(),
+      body: form
+    }),
+    45000,
+    "Image upload timed out. Please try again."
+  );
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) throw new Error(result.error || "Could not save the image.");
+  if (!result.imageUrl) throw new Error("Upload did not return an image URL.");
+  return { imageUrl: result.imageUrl, imageStoragePath: result.imageStoragePath || "" };
+}
+
+async function applyMenuImageSource(source, fileName, busyMessage) {
+  setMenuImageStatus(busyMessage, "busy");
+  try {
+    const file = await compressMenuImage(source, fileName);
+    const stored = await uploadMenuImageFile(file);
+    menuImageState = { ...stored, pendingDataUrl: "" };
+    if (itemImageEl) itemImageEl.value = stored.imageUrl;
+    setMenuImageStatus("Image saved. Remember to save the item.", "success");
+    renderMenuImageState();
+    return true;
+  } catch (error) {
+    devError("menu image save failed", error);
+    setMenuImageStatus(error?.message || "Could not save the image. Please try again.", "error");
+    renderMenuImageState();
+    return false;
+  }
+}
+
+async function handleMenuImageFile(file) {
+  if (!file) return;
+  if (!MENU_IMAGE_TYPES.includes(String(file.type || "").toLowerCase())) {
+    return setMenuImageStatus("Use a JPG, PNG or WEBP image.", "error");
+  }
+  const reader = new FileReader();
+  const dataUrl = await new Promise((resolve, reject) => {
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read this file."));
+    reader.readAsDataURL(file);
+  }).catch(error => { devError("menu image read failed", error); return ""; });
+  if (!dataUrl) return setMenuImageStatus("Could not read this file.", "error");
+  await applyMenuImageSource(dataUrl, file.name, "Optimising and uploading…");
+}
+
+// Runs as an ordinary async request: the rest of the dashboard keeps rendering
+// and its listeners keep updating while the image is being generated.
+async function generateMenuImage() {
+  const itemName = itemNameEl?.value.trim() || "";
+  if (!itemName) return setMenuImageStatus("Enter the item name first.", "error");
+  setMenuImageStatus("Generating image…", "busy");
+  menuImageEl("menuImageGenerateBtn")?.setAttribute("disabled", "true");
+  try {
+    const response = await withTimeout(
+      fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/menu-image/generate`, {
+        method: "POST",
+        headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemName,
+          category: itemCategoryEl?.value.trim() || "",
+          description: itemDescriptionEl?.value.trim() || ""
+        })
+      }),
+      90000,
+      "Image generation timed out. Please try again."
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false || !result.dataUrl) throw new Error(result.error || "Unable to generate image. Please try again.");
+    menuImageState.pendingDataUrl = result.dataUrl;
+    setMenuImageStatus("Preview ready. Use this image, regenerate, or cancel.", "success");
+    renderMenuImageState();
+  } catch (error) {
+    devError("menu image generation failed", error);
+    setMenuImageStatus("Unable to generate image. Please try again, or upload an image instead.", "error");
+    renderMenuImageState();
+  } finally {
+    menuImageEl("menuImageGenerateBtn")?.removeAttribute("disabled");
+  }
+}
+
+function bindMenuImageControls() {
+  const fileInput = menuImageEl("menuImageFileInput");
+  menuImageEl("menuImageUploadBtn")?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", event => handleMenuImageFile(event.target.files?.[0]));
+  menuImageEl("menuImageGenerateBtn")?.addEventListener("click", generateMenuImage);
+  menuImageEl("menuImageRegenerateBtn")?.addEventListener("click", () => {
+    menuImageState.pendingDataUrl = "";
+    renderMenuImageState();
+    generateMenuImage();
+  });
+  menuImageEl("menuImageCancelBtn")?.addEventListener("click", () => {
+    menuImageState.pendingDataUrl = "";
+    setMenuImageStatus("");
+    renderMenuImageState();
+  });
+  menuImageEl("menuImageUseBtn")?.addEventListener("click", async () => {
+    const pending = menuImageState.pendingDataUrl;
+    if (!pending) return;
+    menuImageState.pendingDataUrl = "";
+    const saved = await applyMenuImageSource(pending, `${itemNameEl?.value.trim() || "menu-item"}`, "Saving image…");
+    if (!saved) { menuImageState.pendingDataUrl = pending; renderMenuImageState(); }
+  });
+  menuImageEl("menuImageRemoveBtn")?.addEventListener("click", () => {
+    // Clears the item's image. The stored file is left in place so any other
+    // item or older bill still referencing it keeps working.
+    menuImageState = { imageUrl: "", imageStoragePath: "", pendingDataUrl: "" };
+    if (itemImageEl) itemImageEl.value = "";
+    setMenuImageStatus("Image removed. Remember to save the item.", "muted");
+    renderMenuImageState();
+  });
+  itemImageEl?.addEventListener("input", () => {
+    menuImageState.imageUrl = itemImageEl.value.trim();
+    menuImageState.imageStoragePath = "";
+    renderMenuImageState();
+  });
+  renderMenuImageState();
+}
+
 async function saveMenuItem() {
   try {
     const name = itemNameEl?.value.trim() || "";
@@ -3294,7 +3536,7 @@ async function saveMenuItem() {
     const price = hasVariants ? fullPrice : Number(itemPriceEl?.value || 0);
     const available = itemAvailableEl?.value === "true";
     const foodType = normalizedFoodType(itemFoodTypeEl?.value || "veg");
-    const imageUrl = itemImageEl?.value.trim() || "";
+    const imageUrl = menuImageState.imageUrl || itemImageEl?.value.trim() || "";
     const sortOrder = Number(itemInCategorySortEl?.value || itemSortOrderEl?.value || 0);
     const description = itemDescriptionEl?.value.trim() || "";
     const customDocId = menuDocIdEl?.value.trim() || "";
@@ -3324,6 +3566,9 @@ async function saveMenuItem() {
       available,
       imageUrl,
       image: imageUrl,
+      // Recorded so the stored file can be traced back to its item. Existing
+      // items that never had an image simply store empty strings.
+      imageStoragePath: menuImageState.imageStoragePath || "",
       sortOrder,
       description,
       inventoryUsage,
@@ -3424,6 +3669,8 @@ function renderMenuManagement() {
     <div class="menu-item-card edit-menu-btn" data-id="${item.id}">
       <img
         class="menu-item-img"
+        loading="lazy"
+        decoding="async"
         src="${escapeHtml(item.imageUrl || item.image || "./assets/placeholder-food.jpg")}"
         alt="${escapeHtml(item.name || "Item")}"
         onerror="this.src='./assets/placeholder-food.jpg'"
@@ -3473,9 +3720,22 @@ function bindMenuListActions() {
       if (itemAvailableEl) itemAvailableEl.value = String(item.available !== false);
       if (itemFoodTypeEl) itemFoodTypeEl.value = normalizedFoodType(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : "veg"));
       if (itemImageEl) itemImageEl.value = item.imageUrl || item.image || "";
+      resetMenuImageState({ imageUrl: item.imageUrl || item.image || "", imageStoragePath: item.imageStoragePath || "" });
       if (itemSortOrderEl) itemSortOrderEl.value = item.sortOrder || "";
       renderMenuSortSelectors();
-      if (itemInCategorySortEl && item.sortOrder) itemInCategorySortEl.value = String(item.sortOrder);
+      // The position dropdown only lists positions 1..n for the category. An
+      // item whose stored sortOrder is outside that range (a gap, or a value
+      // set elsewhere) could not be selected, so the select stayed blank and
+      // saving silently rewrote the item's sortOrder — reordering the menu on
+      // every plain edit. Offer the stored position so it round-trips intact.
+      if (itemInCategorySortEl && item.sortOrder) {
+        const stored = String(item.sortOrder);
+        if (![...itemInCategorySortEl.options].some(option => option.value === stored)) {
+          itemInCategorySortEl.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(stored)}">${escapeHtml(stored)}. Keep current position</option>`);
+        }
+        itemInCategorySortEl.value = stored;
+        if (itemSortOrderEl) itemSortOrderEl.value = stored;
+      }
       if (itemDescriptionEl) itemDescriptionEl.value = item.description || "";
       renderInventoryUsageRows(item.inventoryUsage || []);
       if (menuDocIdEl) menuDocIdEl.value = id;
@@ -4016,6 +4276,7 @@ function renderTablesSection() {
   });
 
   if (!visibleTableStatuses.length) {
+    resetKeyedList(tablesGridEl);
     setHtmlIfChanged(tablesGridEl, `
       <div class="empty-state" style="grid-column:1/-1;">
         <i class="fas fa-table"></i>
@@ -4026,7 +4287,9 @@ function renderTablesSection() {
     return;
   }
 
-  setHtmlIfChanged(tablesGridEl, visibleTableStatuses.map(table => {
+  // Per-card update: when Table 07 changes state, only Table 07's card is
+  // replaced. The other cards are left in the DOM untouched.
+  const tableCardHtml = table => {
     const { tableNo, order, occupied, disabled, lastOrder } = table;
     const cardClass = table.state;
     const statusText = table.label;
@@ -4068,8 +4331,9 @@ function renderTablesSection() {
         <div class="table-actions">${actionBtn}${paymentAction}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">QR</button></div>
       </div>
     `;
-  }).join(""));
+  };
 
+  reconcileKeyedList(tablesGridEl, visibleTableStatuses, table => table.tableNo, tableCardHtml);
   bindTableGridActions();
 }
 
@@ -4384,6 +4648,8 @@ function renderManualMenuPicker() {
     <div class="menu-item-card">
       <img
         class="menu-item-img"
+        loading="lazy"
+        decoding="async"
         src="${escapeHtml(item.imageUrl || item.image || "./assets/placeholder-food.jpg")}"
         alt="${escapeHtml(item.name || "Item")}"
         onerror="this.src='./assets/placeholder-food.jpg'"
@@ -5422,6 +5688,7 @@ function getFilteredActiveOrders() {
 function bindOrderListActions(targetEl) {
   if (!targetEl || targetEl.dataset.s2pActionsBound === "true") return;
   targetEl.dataset.s2pActionsBound = "true";
+  bindShowMore(targetEl, () => renderOrdersList(targetEl, targetEl === allOrdersListEl ? getFilteredActiveOrders() : dashboardOrdersCache));
   targetEl.addEventListener("click", async event => {
     const paymentBtn = event.target.closest(".payment-btn");
     if (paymentBtn) {
@@ -5463,7 +5730,8 @@ function renderOrdersList(targetEl, orders) {
     return;
   }
 
-  const html = orders.map(o => {
+  const windowed = takeWindow(targetEl, orders);
+  const html = windowed.visible.map(o => {
     const remaining = getRemainingSeconds(o);
     const hasNewItems = o.hasNewItems === true;
     const workflowClosed = isOrderWorkflowClosed(o);
@@ -5560,7 +5828,7 @@ function renderOrdersList(targetEl, orders) {
 
   // Skips the write entirely when this snapshot did not change what this list
   // shows: no flicker, no lost scroll position, no rebuilt DOM.
-  setHtmlIfChanged(targetEl, html);
+  setHtmlIfChanged(targetEl, html + showMoreMarkup(windowed.hidden, windowed.total, "orders"));
 }
 
 /* =========================================================
@@ -5694,11 +5962,23 @@ function renderReportRows(filteredOrders = getFilteredReportOrders()) {
     renderPaymentBreakdown(filteredOrders);
     renderBestSellingReport(filteredOrders);
     renderTableWiseReport(filteredOrders);
-    reportRowsEl.innerHTML = filteredOrders.length ? filteredOrders.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml(orderItemsArray(order).map(item => `${itemDisplayName(item || {})} x${item?.qty ?? 0}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`; }).join("") : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
-    reportRowsEl.querySelectorAll(".report-edit-btn").forEach(btn => btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || "")));
+    const windowed = takeWindow(reportRowsEl, filteredOrders);
+    const rowsHtml = filteredOrders.length ? windowed.visible.map(rawOrder => { const order = withEffectiveOrderTotals(rawOrder); return `<tr><td>${escapeHtml(billDisplayOrderNo(order))}</td><td>${escapeHtml(order.orderId || order.id)}</td><td>${escapeHtml(order.businessDate || order.dailyOrderDate || "-")}</td><td>${escapeHtml(order.customerName || "-")}</td><td>${escapeHtml(order.tableNo || "-")}</td><td>${escapeHtml(orderItemsArray(order).map(item => `${itemDisplayName(item || {})} x${item?.qty ?? 0}`).join(", "))}</td><td><span class="status-badge info">${escapeHtml(order.status || "pending")}</span></td><td><span class="status-badge ${String(order.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}">${escapeHtml(order.paymentStatus || "unpaid")}</span></td><td>${money(order.grandTotal || 0)}${Number(order.discountAmount || 0) ? `<br><small class="muted">Discount ${money(order.discountAmount || 0)}</small>` : ""}</td><td><button class="btn btn-sm btn-outline report-edit-btn" data-id="${order.id}">Edit</button></td></tr>`; }).join("") + showMoreMarkup(windowed.hidden, windowed.total, "orders", true, 10) : `<tr><td colspan="10"><div class="empty-state" style="padding:22px;"><i class="fas fa-inbox"></i><h4>No orders found for selected report period.</h4></div></td></tr>`;
+    setHtmlIfChanged(reportRowsEl, rowsHtml);
+    bindReportRowActions();
   } catch (error) {
     renderReportRowsError(error);
   }
+}
+
+function bindReportRowActions() {
+  if (!reportRowsEl || reportRowsEl.dataset.s2pActionsBound === "true") return;
+  reportRowsEl.dataset.s2pActionsBound = "true";
+  bindShowMore(reportRowsEl, () => renderReportRows());
+  reportRowsEl.addEventListener("click", event => {
+    const button = event.target.closest(".report-edit-btn");
+    if (button) loadOrderIntoManualBill(button.dataset.id || "");
+  });
 }
 
 function reportLabel() {
@@ -5706,6 +5986,20 @@ function reportLabel() {
   if (selectedReportType === "yearly") return reportYearEl?.value || "All years";
   if (selectedReportType === "custom") return `${reportStartDateEl?.value || "Start"} to ${reportEndDateEl?.value || "End"}`;
   return reportDateEl?.value || "All dates";
+}
+
+// Renders every row, runs `work`, then restores the on-screen window. Both
+// calls are synchronous, so the expanded table is never painted.
+function withFullReportRows(work) {
+  const filtered = getFilteredReportOrders();
+  openWindowFully(reportRowsEl, filtered.length);
+  renderReportRows(filtered);
+  try {
+    return work(filtered);
+  } finally {
+    resetWindow(reportRowsEl);
+    renderReportRows(filtered);
+  }
 }
 
 function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
@@ -5720,6 +6014,10 @@ function exportReportCSV(filteredOrders = getFilteredReportOrders()) {
 function printReport() {
   const report = document.getElementById("section-reports");
   if (!report) return;
+  return withFullReportRows(() => printReportDocument(report));
+}
+
+function printReportDocument(report) {
   const win = window.open("", "_blank", "width=1100,height=800");
   if (!win) return alert("Allow popups to print the report.");
   win.document.write(`<html><head><title>Scan2Plate Report - ${escapeHtml(reportLabel())}</title><style>body{font-family:Arial;padding:24px;color:#111}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #ddd;padding:8px;text-align:left}.btn,.tab-pills,#reportFilterInputs{display:none}.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat-card,.card{border:1px solid #ddd;padding:12px;margin-bottom:14px}h3{margin:0 0 10px}</style></head><body><h1>Scan2Plate Report</h1><p>${escapeHtml(reportLabel())}</p>${report.innerHTML}</body></html>`);
@@ -5744,15 +6042,16 @@ function renderKotSections() {
     : allOrders.filter(o => formatDateOnly(o.createdAt) === selectedDate);
 
   if (!pendingOrders.length) {
-    pendingKotListEl.innerHTML = `
+    setHtmlIfChanged(pendingKotListEl, `
       <div class="empty-state">
         <i class="fas fa-print"></i>
         <h4>No Pending KOTs</h4>
         <p>All kitchen orders are done</p>
       </div>
-    `;
+    `);
   } else {
-    pendingKotListEl.innerHTML = pendingOrders.map(order => `
+    const kotWindow = takeWindow(pendingKotListEl, pendingOrders);
+    setHtmlIfChanged(pendingKotListEl, kotWindow.visible.map(order => `
       <div class="order-card">
         <div class="order-header">
           <div>
@@ -5771,28 +6070,20 @@ function renderKotSections() {
           `).join("")}
         </div>
       </div>
-    `).join("");
-
-    pendingKotListEl.querySelectorAll(".kot-print-one").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const snap = await getDoc(doc(db, "orders", btn.dataset.id || ""));
-        if (!snap.exists()) return;
-        const order = snap.data();
-        printKOTFromOrder(order, order.items || []);
-      });
-    });
+    `).join("") + showMoreMarkup(kotWindow.hidden, kotWindow.total, "KOTs"));
   }
+  bindPendingKotActions();
 
   if (!historyOrders.length) {
-    kotHistoryListEl.innerHTML = `
+    setHtmlIfChanged(kotHistoryListEl, `
       <div class="empty-state">
         <i class="fas fa-history"></i>
         <h4>No KOT history</h4>
         <p>No orders found for selected date</p>
       </div>
-    `;
+    `);
   } else {
-    kotHistoryListEl.innerHTML = historyOrders.slice(0, 15).map(order => `
+    setHtmlIfChanged(kotHistoryListEl, historyOrders.slice(0, 15).map(order => `
       <div class="order-card">
         <div class="order-header">
           <div>
@@ -5802,8 +6093,22 @@ function renderKotSections() {
           <div class="order-status ${getStatusClass(order.status)}">${escapeHtml(order.status || "pending")}</div>
         </div>
       </div>
-    `).join("");
+    `).join(""));
   }
+}
+
+// Delegated once; prints from the copy already in memory instead of a
+// per-click getDoc.
+function bindPendingKotActions() {
+  if (!pendingKotListEl || pendingKotListEl.dataset.s2pActionsBound === "true") return;
+  pendingKotListEl.dataset.s2pActionsBound = "true";
+  bindShowMore(pendingKotListEl, renderKotSections);
+  pendingKotListEl.addEventListener("click", event => {
+    const button = event.target.closest(".kot-print-one");
+    if (!button) return;
+    const order = allOrders.find(item => item.id === button.dataset.id);
+    if (order) printKOTFromOrder(order, order.items || []);
+  });
 }
 
 /* =========================================================
@@ -5975,6 +6280,7 @@ function bindOrderFilterButtons() {
       document.querySelectorAll("[data-filter]").forEach(x => x.classList.remove("active"));
       btn.classList.add("active");
 
+      resetWindow(allOrdersListEl);
       renderOrdersList(allOrdersListEl, getFilteredActiveOrders());
     });
   });
@@ -6009,6 +6315,7 @@ refreshBtn?.addEventListener("click", () => {
 saveMenuBtn?.addEventListener("click", () => guardedAction(saveMenuBtn, saveMenuItem, { loadingText: "Saving...", timeoutMs: 25000 }));
 deleteMenuBtn?.addEventListener("click", () => guardedAction(deleteMenuBtn, deleteMenuItem, { loadingText: "Deleting...", timeoutMs: 25000 }));
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
+bindMenuImageControls();
 itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
 menuSearchEl?.addEventListener("input", debounce(renderMenuManagement, 180));
 menuFoodTypeFilterEl?.addEventListener("change", renderMenuManagement);
@@ -6223,19 +6530,20 @@ printAllKotBtn?.addEventListener("click", () => {
   });
 });
 
+const rerenderReportFromFilters = () => { resetWindow(reportRowsEl); renderReportRows(); };
 document.querySelectorAll("[data-report-type]").forEach(button => button.addEventListener("click", () => {
   selectedReportType = button.dataset.reportType || "daily";
   document.querySelectorAll("[data-report-type]").forEach(tab => tab.classList.toggle("active", tab === button));
   document.querySelectorAll("[data-report-input]").forEach(input => input.classList.toggle("hidden", input.dataset.reportInput !== selectedReportType));
-  renderReportRows();
+  rerenderReportFromFilters();
 }));
 // Wrapped in arrow functions so the browser's Event object (passed automatically by
 // addEventListener) never lands in renderReportRows' filteredOrders parameter and
 // suppresses its "recompute from current filters" default.
-reportDateEl?.addEventListener("change", () => renderReportRows());
-reportMonthEl?.addEventListener("change", () => renderReportRows());
-reportYearEl?.addEventListener("change", () => renderReportRows());
-applyReportRangeBtn?.addEventListener("click", () => renderReportRows());
+reportDateEl?.addEventListener("change", rerenderReportFromFilters);
+reportMonthEl?.addEventListener("change", rerenderReportFromFilters);
+reportYearEl?.addEventListener("change", rerenderReportFromFilters);
+applyReportRangeBtn?.addEventListener("click", rerenderReportFromFilters);
 exportReportBtn?.addEventListener("click", () => exportReportCSV());
 printReportBtn?.addEventListener("click", printReport);
 kotHistoryDateEl?.addEventListener("change", renderKotSections);
