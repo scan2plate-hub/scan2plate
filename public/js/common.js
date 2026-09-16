@@ -661,3 +661,137 @@ export function billDisplayNumber(order = {}) {
   if (legacy) return legacy;
   return String(order.orderId || "-");
 }
+
+/* =========================================================
+   WINDOWED LISTS
+
+   Several screens rendered EVERY matching record in one
+   synchronous pass: Online Orders built a card for every order
+   (its default "Dine-in" tab matches any order without an
+   explicit orderType), Reports built a row per order for the
+   period, Print Bills a card per bill. On a real restaurant's
+   order history that is thousands of cards plus thousands of
+   addEventListener calls per render — the work that made
+   switching sections feel slow.
+
+   Nothing is removed: the first page renders immediately and a
+   "Show more" control reveals the rest. Export/print paths call
+   openWindowFully first so they still cover every record.
+========================================================= */
+export const LIST_PAGE_SIZE = 60;
+
+const listWindows = new WeakMap();
+
+export function windowSize(container, pageSize = LIST_PAGE_SIZE) {
+  return listWindows.get(container) || pageSize;
+}
+
+export function takeWindow(container, items = [], pageSize = LIST_PAGE_SIZE) {
+  const size = windowSize(container, pageSize);
+  return { visible: items.slice(0, size), hidden: Math.max(0, items.length - size), total: items.length };
+}
+
+export function growWindow(container, pageSize = LIST_PAGE_SIZE) {
+  listWindows.set(container, windowSize(container, pageSize) + pageSize);
+}
+
+/** Used before export/print so the produced document is never truncated. */
+export function openWindowFully(container, total = Number.MAX_SAFE_INTEGER) {
+  listWindows.set(container, Math.max(Number(total) || 0, 1));
+}
+
+/** Called when a filter/search changes, so the new result set starts at page 1. */
+export function resetWindow(container) {
+  listWindows.delete(container);
+}
+
+export function showMoreMarkup(hidden, total, noun = "records", asTableRow = false, colspan = 10) {
+  if (hidden <= 0) return "";
+  const inner = `<div style="text-align:center;padding:14px;">
+      <button type="button" class="btn btn-outline s2p-show-more">Show more (${hidden} of ${total} ${noun} hidden)</button>
+    </div>`;
+  return asTableRow ? `<tr><td colspan="${colspan}">${inner}</td></tr>` : inner;
+}
+
+/**
+ * Binds the "Show more" control once per container. `rerender` is called after
+ * the window grows, so the caller keeps full control of how its list renders.
+ */
+export function bindShowMore(container, rerender, pageSize = LIST_PAGE_SIZE) {
+  if (!container || container.dataset.s2pShowMoreBound === "true") return;
+  container.dataset.s2pShowMoreBound = "true";
+  container.addEventListener("click", event => {
+    if (!event.target.closest(".s2p-show-more")) return;
+    growWindow(container, pageSize);
+    rerender();
+  });
+}
+
+/* =========================================================
+   KEYED LIST RECONCILER
+
+   For grids where one record changes at a time — the Tables
+   screen above all. Rebuilding the whole grid because Table 07
+   went from "Customer Sitting" to "Paid" costs the full grid on
+   every order write, which is what made returning to Tables slow
+   on a restaurant with many tables.
+
+   This replaces only the cards whose markup actually changed,
+   leaves the rest of the DOM untouched, and keeps child order in
+   step with `items`. Handlers must be delegated on the container
+   (they are), since individual cards are swapped.
+========================================================= */
+const keyedCaches = new WeakMap();
+
+export function resetKeyedList(container) {
+  if (container) keyedCaches.delete(container);
+}
+
+export function reconcileKeyedList(container, items = [], keyOf, htmlOf) {
+  if (!container) return { changed: 0, total: items.length };
+  const cache = keyedCaches.get(container) || new Map();
+  const existing = new Map();
+  [...container.children].forEach(child => {
+    const key = child.dataset?.s2pKey;
+    // Anything not produced by this reconciler (e.g. a previous empty state)
+    // is dropped, so the two rendering paths never fight over the container.
+    if (key === undefined) child.remove();
+    else existing.set(key, child);
+  });
+
+  const scratch = document.createElement("div");
+  const keep = new Set();
+  let previous = null;
+  let changed = 0;
+
+  items.forEach(item => {
+    const key = String(keyOf(item));
+    keep.add(key);
+    const html = htmlOf(item);
+    let node = existing.get(key);
+    if (!node || cache.get(key) !== html) {
+      scratch.innerHTML = html;
+      const fresh = scratch.firstElementChild;
+      if (!fresh) return;
+      fresh.dataset.s2pKey = key;
+      if (node) container.replaceChild(fresh, node);
+      else container.appendChild(fresh);
+      existing.set(key, fresh);
+      cache.set(key, html);
+      node = fresh;
+      changed += 1;
+    }
+    const expected = previous ? previous.nextElementSibling : container.firstElementChild;
+    if (expected !== node) container.insertBefore(node, expected);
+    previous = node;
+  });
+
+  existing.forEach((node, key) => {
+    if (keep.has(key)) return;
+    node.remove();
+    cache.delete(key);
+  });
+
+  keyedCaches.set(container, cache);
+  return { changed, total: items.length };
+}
