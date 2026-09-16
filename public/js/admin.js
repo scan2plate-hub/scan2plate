@@ -3292,6 +3292,7 @@ function renderMenuSortSelectors() {
 }
 
 function clearMenuForm() {
+  resetMenuImageState();
   if (itemNameEl) itemNameEl.value = "";
   if (itemCategoryEl) itemCategoryEl.value = "";
   if (itemPriceEl) itemPriceEl.value = "";
@@ -3311,6 +3312,220 @@ function clearMenuForm() {
   renderMenuSortSelectors();
 }
 
+/* =========================================================
+   MENU ITEM IMAGE
+
+   Upload or generate a picture for the item being added/edited.
+
+   - The provider API key lives only in backend env. The browser
+     calls our own backend, never the image provider.
+   - Generation returns the image for PREVIEW ONLY. Nothing is
+     written to Storage until "Use This Image", so Regenerate and
+     Cancel cannot leave orphaned files behind.
+   - Large images are downscaled and re-encoded before upload.
+   - Only imageUrl / image / imageStoragePath are ever written to
+     the menu document; no existing field is touched.
+========================================================= */
+const MENU_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+let menuImageState = { imageUrl: "", imageStoragePath: "", pendingDataUrl: "" };
+
+function menuImageEl(id) { return document.getElementById(id); }
+
+function setMenuImageStatus(message = "", tone = "muted") {
+  const el = menuImageEl("menuImageStatus");
+  if (!el) return;
+  const colors = { muted: "var(--text-3)", error: "#b43731", success: "#18794e", busy: "var(--text-3)" };
+  el.style.color = colors[tone] || colors.muted;
+  el.textContent = message;
+}
+
+function renderMenuImageState() {
+  const wrap = menuImageEl("menuImagePreviewWrap");
+  const img = menuImageEl("menuImagePreview");
+  const caption = menuImageEl("menuImageCaption");
+  const reviewing = Boolean(menuImageState.pendingDataUrl);
+  const src = menuImageState.pendingDataUrl || menuImageState.imageUrl || itemImageEl?.value.trim() || "";
+
+  if (wrap) wrap.style.display = src ? "block" : "none";
+  if (img && src && img.src !== src) img.src = src;
+  if (caption) caption.textContent = reviewing ? "Preview — not saved yet." : (src ? "Current image" : "");
+
+  menuImageEl("menuImageActions")?.classList.toggle("hidden", reviewing);
+  menuImageEl("menuImageReviewActions")?.classList.toggle("hidden", !reviewing);
+  menuImageEl("menuImageRemoveBtn")?.classList.toggle("hidden", reviewing || !src);
+  const uploadBtn = menuImageEl("menuImageUploadBtn");
+  if (uploadBtn) uploadBtn.innerHTML = src && !reviewing ? `<i class="fas fa-image"></i> Change Image` : `<i class="fas fa-upload"></i> Upload Image`;
+  const generateBtn = menuImageEl("menuImageGenerateBtn");
+  if (generateBtn) generateBtn.innerHTML = src && !reviewing ? "✨ Generate New AI Image" : "✨ Generate AI Image";
+}
+
+function resetMenuImageState({ imageUrl = "", imageStoragePath = "" } = {}) {
+  menuImageState = { imageUrl, imageStoragePath, pendingDataUrl: "" };
+  const input = menuImageEl("menuImageFileInput");
+  if (input) input.value = "";
+  setMenuImageStatus("");
+  renderMenuImageState();
+}
+
+// Downscales to a menu-sized picture and re-encodes as JPEG, stepping the
+// quality down until it is comfortably small enough to serve on a phone.
+async function compressMenuImage(source, fileName = "menu-item") {
+  const image = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Could not read this image."));
+    el.crossOrigin = "anonymous";
+    el.src = source;
+  });
+  const maxSide = 900;
+  const width0 = image.naturalWidth || image.width;
+  const height0 = image.naturalHeight || image.height;
+  const scale = Math.min(1, maxSide / Math.max(1, width0), maxSide / Math.max(1, height0));
+  const width = Math.max(1, Math.round(width0 * scale));
+  const height = Math.max(1, Math.round(height0 * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+
+  const targetBytes = 280 * 1024;
+  let blob = null;
+  for (const quality of [0.86, 0.78, 0.7, 0.6, 0.5]) {
+    blob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (blob && blob.size <= targetBytes) break;
+  }
+  if (!blob) throw new Error("Could not process this image.");
+  const base = String(fileName).replace(/\.[^.]+$/, "") || "menu-item";
+  return new File([blob], `${base}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+async function uploadMenuImageFile(file) {
+  const form = new FormData();
+  form.append("image", file, file.name || `menu-item-${Date.now()}.jpg`);
+  const response = await withTimeout(
+    fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/menu-image`, {
+      method: "POST",
+      headers: await purchaseAuthHeaders(),
+      body: form
+    }),
+    45000,
+    "Image upload timed out. Please try again."
+  );
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) throw new Error(result.error || "Could not save the image.");
+  if (!result.imageUrl) throw new Error("Upload did not return an image URL.");
+  return { imageUrl: result.imageUrl, imageStoragePath: result.imageStoragePath || "" };
+}
+
+async function applyMenuImageSource(source, fileName, busyMessage) {
+  setMenuImageStatus(busyMessage, "busy");
+  try {
+    const file = await compressMenuImage(source, fileName);
+    const stored = await uploadMenuImageFile(file);
+    menuImageState = { ...stored, pendingDataUrl: "" };
+    if (itemImageEl) itemImageEl.value = stored.imageUrl;
+    setMenuImageStatus("Image saved. Remember to save the item.", "success");
+    renderMenuImageState();
+    return true;
+  } catch (error) {
+    devError("menu image save failed", error);
+    setMenuImageStatus(error?.message || "Could not save the image. Please try again.", "error");
+    renderMenuImageState();
+    return false;
+  }
+}
+
+async function handleMenuImageFile(file) {
+  if (!file) return;
+  if (!MENU_IMAGE_TYPES.includes(String(file.type || "").toLowerCase())) {
+    return setMenuImageStatus("Use a JPG, PNG or WEBP image.", "error");
+  }
+  const reader = new FileReader();
+  const dataUrl = await new Promise((resolve, reject) => {
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read this file."));
+    reader.readAsDataURL(file);
+  }).catch(error => { devError("menu image read failed", error); return ""; });
+  if (!dataUrl) return setMenuImageStatus("Could not read this file.", "error");
+  await applyMenuImageSource(dataUrl, file.name, "Optimising and uploading…");
+}
+
+// Runs as an ordinary async request: the rest of the dashboard keeps rendering
+// and its listeners keep updating while the image is being generated.
+async function generateMenuImage() {
+  const itemName = itemNameEl?.value.trim() || "";
+  if (!itemName) return setMenuImageStatus("Enter the item name first.", "error");
+  setMenuImageStatus("Generating image…", "busy");
+  menuImageEl("menuImageGenerateBtn")?.setAttribute("disabled", "true");
+  try {
+    const response = await withTimeout(
+      fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/menu-image/generate`, {
+        method: "POST",
+        headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemName,
+          category: itemCategoryEl?.value.trim() || "",
+          description: itemDescriptionEl?.value.trim() || ""
+        })
+      }),
+      90000,
+      "Image generation timed out. Please try again."
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false || !result.dataUrl) throw new Error(result.error || "Unable to generate image. Please try again.");
+    menuImageState.pendingDataUrl = result.dataUrl;
+    setMenuImageStatus("Preview ready. Use this image, regenerate, or cancel.", "success");
+    renderMenuImageState();
+  } catch (error) {
+    devError("menu image generation failed", error);
+    setMenuImageStatus("Unable to generate image. Please try again, or upload an image instead.", "error");
+    renderMenuImageState();
+  } finally {
+    menuImageEl("menuImageGenerateBtn")?.removeAttribute("disabled");
+  }
+}
+
+function bindMenuImageControls() {
+  const fileInput = menuImageEl("menuImageFileInput");
+  menuImageEl("menuImageUploadBtn")?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", event => handleMenuImageFile(event.target.files?.[0]));
+  menuImageEl("menuImageGenerateBtn")?.addEventListener("click", generateMenuImage);
+  menuImageEl("menuImageRegenerateBtn")?.addEventListener("click", () => {
+    menuImageState.pendingDataUrl = "";
+    renderMenuImageState();
+    generateMenuImage();
+  });
+  menuImageEl("menuImageCancelBtn")?.addEventListener("click", () => {
+    menuImageState.pendingDataUrl = "";
+    setMenuImageStatus("");
+    renderMenuImageState();
+  });
+  menuImageEl("menuImageUseBtn")?.addEventListener("click", async () => {
+    const pending = menuImageState.pendingDataUrl;
+    if (!pending) return;
+    menuImageState.pendingDataUrl = "";
+    const saved = await applyMenuImageSource(pending, `${itemNameEl?.value.trim() || "menu-item"}`, "Saving image…");
+    if (!saved) { menuImageState.pendingDataUrl = pending; renderMenuImageState(); }
+  });
+  menuImageEl("menuImageRemoveBtn")?.addEventListener("click", () => {
+    // Clears the item's image. The stored file is left in place so any other
+    // item or older bill still referencing it keeps working.
+    menuImageState = { imageUrl: "", imageStoragePath: "", pendingDataUrl: "" };
+    if (itemImageEl) itemImageEl.value = "";
+    setMenuImageStatus("Image removed. Remember to save the item.", "muted");
+    renderMenuImageState();
+  });
+  itemImageEl?.addEventListener("input", () => {
+    menuImageState.imageUrl = itemImageEl.value.trim();
+    menuImageState.imageStoragePath = "";
+    renderMenuImageState();
+  });
+  renderMenuImageState();
+}
+
 async function saveMenuItem() {
   try {
     const name = itemNameEl?.value.trim() || "";
@@ -3321,7 +3536,7 @@ async function saveMenuItem() {
     const price = hasVariants ? fullPrice : Number(itemPriceEl?.value || 0);
     const available = itemAvailableEl?.value === "true";
     const foodType = normalizedFoodType(itemFoodTypeEl?.value || "veg");
-    const imageUrl = itemImageEl?.value.trim() || "";
+    const imageUrl = menuImageState.imageUrl || itemImageEl?.value.trim() || "";
     const sortOrder = Number(itemInCategorySortEl?.value || itemSortOrderEl?.value || 0);
     const description = itemDescriptionEl?.value.trim() || "";
     const customDocId = menuDocIdEl?.value.trim() || "";
@@ -3351,6 +3566,9 @@ async function saveMenuItem() {
       available,
       imageUrl,
       image: imageUrl,
+      // Recorded so the stored file can be traced back to its item. Existing
+      // items that never had an image simply store empty strings.
+      imageStoragePath: menuImageState.imageStoragePath || "",
       sortOrder,
       description,
       inventoryUsage,
@@ -3502,9 +3720,22 @@ function bindMenuListActions() {
       if (itemAvailableEl) itemAvailableEl.value = String(item.available !== false);
       if (itemFoodTypeEl) itemFoodTypeEl.value = normalizedFoodType(item.foodType || (item.isNonVeg ? "nonveg" : item.isEgg ? "egg" : "veg"));
       if (itemImageEl) itemImageEl.value = item.imageUrl || item.image || "";
+      resetMenuImageState({ imageUrl: item.imageUrl || item.image || "", imageStoragePath: item.imageStoragePath || "" });
       if (itemSortOrderEl) itemSortOrderEl.value = item.sortOrder || "";
       renderMenuSortSelectors();
-      if (itemInCategorySortEl && item.sortOrder) itemInCategorySortEl.value = String(item.sortOrder);
+      // The position dropdown only lists positions 1..n for the category. An
+      // item whose stored sortOrder is outside that range (a gap, or a value
+      // set elsewhere) could not be selected, so the select stayed blank and
+      // saving silently rewrote the item's sortOrder — reordering the menu on
+      // every plain edit. Offer the stored position so it round-trips intact.
+      if (itemInCategorySortEl && item.sortOrder) {
+        const stored = String(item.sortOrder);
+        if (![...itemInCategorySortEl.options].some(option => option.value === stored)) {
+          itemInCategorySortEl.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(stored)}">${escapeHtml(stored)}. Keep current position</option>`);
+        }
+        itemInCategorySortEl.value = stored;
+        if (itemSortOrderEl) itemSortOrderEl.value = stored;
+      }
       if (itemDescriptionEl) itemDescriptionEl.value = item.description || "";
       renderInventoryUsageRows(item.inventoryUsage || []);
       if (menuDocIdEl) menuDocIdEl.value = id;
@@ -6084,6 +6315,7 @@ refreshBtn?.addEventListener("click", () => {
 saveMenuBtn?.addEventListener("click", () => guardedAction(saveMenuBtn, saveMenuItem, { loadingText: "Saving...", timeoutMs: 25000 }));
 deleteMenuBtn?.addEventListener("click", () => guardedAction(deleteMenuBtn, deleteMenuItem, { loadingText: "Deleting...", timeoutMs: 25000 }));
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
+bindMenuImageControls();
 itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
 menuSearchEl?.addEventListener("input", debounce(renderMenuManagement, 180));
 menuFoodTypeFilterEl?.addEventListener("change", renderMenuManagement);
