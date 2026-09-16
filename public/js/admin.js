@@ -18,7 +18,8 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal, createCoalescedRunner } from "./common.js?v=freeze-fix-20260816";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, cleanupRegisteredListeners, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter } from "./common.js?v=freeze-fix-20260816";
+import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -69,7 +70,7 @@ function ensureLoadingNotice() {
   notice = document.createElement("div");
   notice.id = "adminLoadingNotice";
   notice.style.cssText = "position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:99999;display:none;max-width:min(92vw,520px);padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;box-shadow:0 14px 45px rgba(0,0,0,.12);font-size:13px;font-weight:700;";
-  notice.innerHTML = `<div id="adminLoadingNoticeText">Taking longer than expected. Please check internet and retry.</div><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;"><button id="adminRetryLoadBtn" class="btn btn-sm btn-primary" type="button">Retry</button><button id="adminLoginAgainBtn" class="btn btn-sm btn-outline" type="button">Logout/Login Again</button></div><details style="margin-top:8px;font-weight:500;"><summary>Debug</summary><pre id="adminLoadingDebug" style="white-space:pre-wrap;font-size:11px;margin:6px 0 0;"></pre></details>`;
+  notice.innerHTML = `<div id="adminLoadingNoticeText">Taking longer than expected. Please check internet and retry.</div><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;"><button id="adminRetryLoadBtn" class="btn btn-sm btn-primary" type="button">Retry</button><button id="adminLoginAgainBtn" class="btn btn-sm btn-outline" type="button">Logout/Login Again</button></div>`;
   document.body.appendChild(notice);
   document.getElementById("adminRetryLoadBtn")?.addEventListener("click", async event => {
     const button = event.currentTarget;
@@ -86,8 +87,9 @@ function ensureLoadingNotice() {
         try { await auth.currentUser.getIdToken(true); } catch (refreshErr) { console.error("Retry token refresh failed", refreshErr); }
       }
       await withTimeout(loadOrders(), 20000, "Retry timed out. Please refresh the page.");
+      hideLoadingNotice();
     } catch (retryErr) {
-      console.error("Manual retry failed", retryErr);
+      devError("Manual retry failed", retryErr);
       markInitialLoadFailed("Retry failed. Please refresh the page.", retryErr);
     } finally {
       button.disabled = false;
@@ -103,12 +105,14 @@ function ensureLoadingNotice() {
   return notice;
 }
 
+// Staff never see a raw Firebase error. The technical detail goes to the
+// console (for support/diagnosis); the panel only shows a plain-language
+// message plus the two things a user can actually do about it.
 function showLoadingNotice(message = "Taking longer than expected. Please check internet and retry.", error = null) {
   const notice = ensureLoadingNotice();
   const text = document.getElementById("adminLoadingNoticeText");
-  const debug = document.getElementById("adminLoadingDebug");
   if (text) text.textContent = message;
-  if (debug) debug.textContent = error ? String(error?.message || error) : `restaurantId: ${restaurantId || "missing"}`;
+  if (error) devError("Admin Dashboard load problem", { detail: String(error?.message || error), restaurantId });
   notice.style.display = "block";
 }
 
@@ -238,14 +242,17 @@ async function checkRestaurantSubscription() {
       return true;
     }
     if (restaurantSnap.exists()) applyPlanAccess(restaurantSnap.data());
+    // A renewed subscription used to hard-reload the page. The lock is just an
+    // overlay, so releasing it in place restores the dashboard instantly and
+    // keeps every live listener (and any half-typed bill) intact.
     if (isSubscriptionLocked) {
-      window.location.reload();
-      return false;
+      isSubscriptionLocked = false;
+      document.body.classList.remove("subscription-locked");
     }
     subscriptionLockEl?.classList.remove("show");
     return false;
   } catch (error) {
-    console.error("Subscription check failed", error);
+    devError("Subscription check failed", error);
     return false;
   }
 }
@@ -525,7 +532,6 @@ let selectedOrderFilter = "active";
 let selectedReportType = "daily";
 let manualDiscount = { discountType: "", discountValue: 0, discountReason: "" };
 
-let ordersUnsubscribe = null;
 let inventoryUnsubscribe = null;
 let inventoryLogsUnsubscribe = null;
 const adminAcceptedSnapshots = new Map();
@@ -555,29 +561,37 @@ async function auditLog(action, details = {}) {
   }
 }
 
+// A staff document may carry an explicit `permissions` list that overrides the
+// role default. When it is absent (every account created before per-staff
+// permissions existed) this falls back to exactly the previous role-based
+// behaviour, so no existing login loses or gains access.
+function currentPermissions() {
+  return Array.isArray(currentUser.permissions) && currentUser.permissions.length ? currentUser.permissions : null;
+}
+
 function applyStaffPermissions() {
   const role = currentRole() || "owner";
   const moduleMap = { dashboard: "dashboard", orders: "orders", billing: "billing", kot: "kot", tables: "tables", menu: "menu", inventory: "inventory", settings: "settings", reports: "reports", staff: "staff" };
   Object.entries(moduleMap).forEach(([section, moduleName]) => {
-    const allowed = canAccessModule(role, moduleName) || isOwnerLike();
+    const allowed = canAccessModule(role, moduleName, currentPermissions()) || isOwnerLike();
     document.querySelector(`.nav-item[data-section="${section}"]`)?.classList.toggle("hidden", !allowed);
     const sectionEl = document.getElementById(`section-${section}`);
     if (sectionEl && !allowed) sectionEl.innerHTML = `<div class="card"><div class="card-body" style="padding:28px;text-align:center;"><h3>Owner Only</h3><p class="muted">Owner access required. Please login with owner account.</p></div></div>`;
   });
-  if (!canAccessModule(role, "dashboard") && !isOwnerLike()) {
+  if (!canAccessModule(role, "dashboard", currentPermissions()) && !isOwnerLike()) {
     document.querySelector(".nav-item:not(.hidden)")?.click();
   }
   const quickActionModules = { "new-order": "billing", "print-kot": "kot", "print-bill": "billing", reports: "reports", settings: "settings" };
   Object.entries(quickActionModules).forEach(([action, moduleName]) => {
     document.querySelectorAll(`.quick-action[data-action="${action}"]`).forEach(button => {
-      button.classList.toggle("hidden", !(isOwnerLike() || canAccessModule(role, moduleName)));
+      button.classList.toggle("hidden", !(isOwnerLike() || canAccessModule(role, moduleName, currentPermissions())));
     });
   });
   if (!isOwnerLike()) document.getElementById("quickResetDataBtn")?.remove();
 }
 window.scan2plateCanOpenSection = section => {
   const role = currentRole() || "owner";
-  const allowed = isOwnerLike() || canAccessModule(role, section);
+  const allowed = isOwnerLike() || canAccessModule(role, section, currentPermissions());
   if (!allowed) auditLog("owner_only_access_blocked", { section });
   return allowed;
 };
@@ -612,6 +626,7 @@ function ensureStaffManagementUi() {
     `);
   }
   document.getElementById("createStaffBtn")?.addEventListener("click", createStaffUser);
+  ensureStaffEditorUi();
   loadStaffUsers();
 }
 
@@ -775,7 +790,6 @@ async function createStaffUser() {
     setStaffMessage("Staff user created successfully.", "success");
     ["staffNameField", "staffEmailField", "staffPasswordField", "staffPhoneField"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
     auditLog("staff_created", { email: payload.email, role: payload.role });
-    await loadStaffUsers();
   } catch (error) {
     setStaffMessage(error.message || "Could not create staff.", "danger");
   } finally {
@@ -787,36 +801,285 @@ function isStaffInactive(user = {}) {
   return String(user.status || "").toLowerCase() === "inactive" || user.isActive === false;
 }
 
-async function loadStaffUsers() {
+/* =========================================================
+   STAFF ACCOUNTS — live list + full edit
+
+   The list is a single onSnapshot on restaurants/<id>/users, so
+   editing one staff member updates only that row, immediately,
+   with no re-read of the whole collection.
+
+   Every edit goes through the backend's PATCH route, which
+   writes to the SAME existing Firestore document (matched by
+   uid) — editing can never create a second staff record.
+========================================================= */
+const STAFF_ROLE_OPTIONS = [
+  { value: "manager", label: "Manager" },
+  { value: "cashier", label: "Cashier" },
+  { value: "kitchen", label: "Kitchen" },
+  { value: "waiter", label: "Waiter" }
+];
+
+// Modules an owner can grant/revoke per staff member, labelled the way they
+// appear in the dashboard's own navigation.
+const STAFF_PERMISSION_OPTIONS = [
+  { value: "liveOrders", label: "Live Orders" },
+  { value: "orders", label: "Orders" },
+  { value: "quickBilling", label: "Quick Billing" },
+  { value: "billing", label: "Billing" },
+  { value: "printBills", label: "Print Bills" },
+  { value: "kot", label: "KOT" },
+  { value: "kotManagement", label: "KOT Management" },
+  { value: "kitchenDisplay", label: "Kitchen Display" },
+  { value: "tables", label: "Tables" },
+  { value: "menu", label: "Menu" },
+  { value: "inventory", label: "Inventory" },
+  { value: "reports", label: "Reports" }
+];
+
+let staffUsers = [];
+let staffUsersUnsubscribe = null;
+let editingStaffUid = "";
+
+function staffDisplayRole(user = {}) {
+  return String(user.role || "staff").toLowerCase();
+}
+
+// A staff member must not be able to change their OWN role, permissions or
+// active status — that is the one edit that could silently escalate or lock
+// out an account. Everything else about their own record stays editable.
+function isOwnStaffRecord(user = {}) {
+  const uid = String(user.uid || "");
+  const email = String(user.email || "").toLowerCase();
+  return (uid && uid === String(currentUser.uid || "")) ||
+    (email && email === String(currentUser.email || "").toLowerCase());
+}
+
+function renderStaffList() {
   const list = document.getElementById("staffList");
-  if (!list || !isOwnerLike()) return;
-  try {
-    const snap = await getDocs(collection(db, "restaurants", restaurantId, "users"));
-    const staff = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(user => !["owner", "admin"].includes(String(user.role || "").toLowerCase()));
-    list.innerHTML = staff.length ? staff.map(user => {
-      const inactive = isStaffInactive(user);
-      const label = escapeHtml(user.name || user.email || "");
-      const uid = escapeHtml(user.uid || "");
-      const actions = inactive
+  if (!list) return;
+  if (!staffUsers.length) {
+    setHtmlIfChanged(list, `<div class="empty-state"><i class="fas fa-users"></i><h4>No staff accounts yet</h4></div>`);
+    return;
+  }
+  const html = staffUsers.map(user => {
+    const inactive = isStaffInactive(user);
+    const label = escapeHtml(user.name || user.email || "");
+    const uid = escapeHtml(user.uid || "");
+    const allowed = resolveAllowedModules(staffDisplayRole(user), user.permissions);
+    const accessSummary = allowed === "all"
+      ? "Full access"
+      : `${allowed.length} module${allowed.length === 1 ? "" : "s"}`;
+    const assigned = [user.assignedSection, user.assignedTable ? `Table ${user.assignedTable}` : "", user.kitchenAccess === true ? "Kitchen" : ""].filter(Boolean).join(" · ");
+    // Staff actions are keyed by uid. A legacy document without one cannot be
+    // targeted safely, so those rows say so instead of offering buttons that
+    // would fail with a confusing error.
+    const actions = !uid
+      ? `<span class="small muted">Linked login missing — ask this staff member to log in once, then edit.</span>`
+      : [
+      `<button class="btn btn-sm btn-primary staff-action" data-uid="${uid}" data-name="${label}" data-action="edit">Edit</button>`,
+      inactive
         ? `<button class="btn btn-sm btn-outline staff-action" data-uid="${uid}" data-name="${label}" data-action="reactivate">Reactivate</button>
            <button class="btn btn-sm btn-danger staff-action" data-uid="${uid}" data-name="${label}" data-action="delete">Delete Permanently</button>`
-        : `<button class="btn btn-sm btn-outline staff-action" data-uid="${uid}" data-name="${label}" data-action="deactivate">Deactivate</button>`;
-      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-        <span><strong>${label}</strong><br><small class="muted">${escapeHtml(user.email || "")}</small></span>
-        <span class="status-badge info">${escapeHtml(user.role || "staff")}</span>
-        <span class="status-badge ${inactive ? "warning" : "success"}">${inactive ? "Inactive" : "Active"}</span>
-        <span class="btn-group">${actions}</span>
-      </div>`;
-    }).join("") : `<div class="empty-state"><i class="fas fa-users"></i><h4>No staff accounts yet</h4></div>`;
-    list.querySelectorAll(".staff-action").forEach(btn => btn.addEventListener("click", () => handleStaffAction(btn.dataset.uid || "", btn.dataset.action || "", btn.dataset.name || "")));
+        : `<button class="btn btn-sm btn-outline staff-action" data-uid="${uid}" data-name="${label}" data-action="deactivate">Deactivate</button>`
+    ].join("");
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+      <span><strong>${label}</strong><br><small class="muted">${escapeHtml(user.email || "")}</small>${user.phone ? `<br><small class="muted">${escapeHtml(user.phone)}</small>` : ""}${assigned ? `<br><small class="muted">${escapeHtml(assigned)}</small>` : ""}</span>
+      <span class="status-badge info">${escapeHtml(staffDisplayRole(user))}</span>
+      <span class="status-badge info">${escapeHtml(accessSummary)}</span>
+      <span class="status-badge ${inactive ? "warning" : "success"}">${inactive ? "Inactive" : "Active"}</span>
+      <span class="btn-group">${actions}</span>
+    </div>`;
+  }).join("");
+  setHtmlIfChanged(list, html);
+}
+
+function bindStaffListActions() {
+  const list = document.getElementById("staffList");
+  if (!list || list.dataset.s2pActionsBound === "true") return;
+  list.dataset.s2pActionsBound = "true";
+  list.addEventListener("click", event => {
+    const button = event.target.closest(".staff-action");
+    if (!button) return;
+    handleStaffAction(button.dataset.uid || "", button.dataset.action || "", button.dataset.name || "");
+  });
+}
+
+function loadStaffUsers() {
+  const list = document.getElementById("staffList");
+  if (!list || !isOwnerLike()) return;
+  bindStaffListActions();
+  if (staffUsersUnsubscribe) return;
+  staffUsersUnsubscribe = registerCleanup(onSnapshot(
+    collection(db, "restaurants", restaurantId, "users"),
+    snap => {
+      staffUsers = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(user => !["owner", "admin"].includes(String(user.role || "").toLowerCase()))
+        .sort((a, b) => String(a.name || a.email || "").localeCompare(String(b.name || b.email || "")));
+      renderStaffList();
+      // Keep an open edit form in sync with the document it is editing.
+      if (editingStaffUid) {
+        const stillExists = staffUsers.some(user => String(user.uid || "") === editingStaffUid);
+        if (!stillExists) closeStaffEditor();
+      }
+    },
+    error => {
+      devError("staff listener error", { code: error?.code, message: error?.message, restaurantId });
+      setHtmlIfChanged(list, `<div class="notice-box danger">Unable to load staff right now. Please check your connection.</div>`);
+    }
+  ));
+}
+
+/* ---------- Staff edit form ---------- */
+function ensureStaffEditorUi() {
+  if (document.getElementById("staffEditCard")) return;
+  const host = document.getElementById("staffList")?.closest(".card");
+  if (!host) return;
+  host.insertAdjacentHTML("afterend", `
+    <div class="card hidden" id="staffEditCard" style="margin-top:16px;">
+      <div class="card-header"><h3 class="card-title"><i class="fas fa-user-pen"></i> Edit Staff</h3></div>
+      <div class="card-body">
+        <div class="form-group"><label class="form-label">Email ID</label><input class="form-input" id="staffEditEmailField" disabled /><div class="small muted" style="margin-top:5px;">Login email cannot be changed here. Deactivate and create a new account instead.</div></div>
+        <div class="form-group"><label class="form-label">Staff Name</label><input class="form-input" id="staffEditNameField" /></div>
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="staffEditPhoneField" inputmode="numeric" /></div>
+        <div class="form-group"><label class="form-label">Role</label><select class="form-select" id="staffEditRoleField">${STAFF_ROLE_OPTIONS.map(role => `<option value="${role.value}">${role.label}</option>`).join("")}</select></div>
+        <div class="form-group">
+          <label class="form-label">Permissions</label>
+          <div class="small muted" style="margin-bottom:8px;">Leave all unticked to use the default access for the selected role.</div>
+          <div id="staffEditPermissions" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:7px;">
+            ${STAFF_PERMISSION_OPTIONS.map(option => `<label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;"><input type="checkbox" class="staff-permission-box" value="${option.value}" /> ${option.label}</label>`).join("")}
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Assigned Section</label><input class="form-input" id="staffEditSectionField" placeholder="e.g. Ground Floor" /></div>
+          <div class="form-group"><label class="form-label">Assigned Table</label><input class="form-input" id="staffEditTableField" placeholder="e.g. 05" /></div>
+        </div>
+        <div class="form-group"><label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:800;"><input id="staffEditKitchenAccessField" type="checkbox" /> Kitchen access</label></div>
+        <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="staffEditStatusField"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+        <div id="staffEditOwnRecordNotice" class="notice-box info hidden" style="margin-bottom:12px;"><i class="fas fa-circle-info"></i><span>This is your own account. Role, permissions and status are locked so you cannot remove your own access by accident.</span></div>
+        <div id="staffEditMessage" class="notice-box info hidden" style="margin-bottom:12px;"><i class="fas fa-info-circle"></i><span></span></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="staffEditSaveBtn" type="button"><i class="fas fa-floppy-disk"></i> Save Changes</button>
+          <button class="btn btn-outline" id="staffEditCancelBtn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `);
+  document.getElementById("staffEditSaveBtn")?.addEventListener("click", event => guardedAction(event.currentTarget, saveStaffEdits, { loadingText: "Saving...", timeoutMs: 25000, errorMessage: false }));
+  document.getElementById("staffEditCancelBtn")?.addEventListener("click", closeStaffEditor);
+}
+
+function setStaffEditMessage(message = "", type = "info") {
+  const el = document.getElementById("staffEditMessage");
+  if (!el) return;
+  el.className = `notice-box ${type}${message ? "" : " hidden"}`;
+  const span = el.querySelector("span");
+  if (span) span.textContent = message;
+}
+
+function openStaffEditor(uid) {
+  ensureStaffEditorUi();
+  const user = staffUsers.find(item => String(item.uid || "") === String(uid));
+  if (!user) return showAdminToast("This staff account is no longer available.", "danger");
+
+  editingStaffUid = String(user.uid || "");
+  const ownRecord = isOwnStaffRecord(user);
+  const setValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value ?? ""; };
+  setValue("staffEditEmailField", user.email || "");
+  setValue("staffEditNameField", user.name || "");
+  setValue("staffEditPhoneField", user.phone || "");
+  const roleField = document.getElementById("staffEditRoleField");
+  const role = staffDisplayRole(user);
+  // A role that predates the current option list (or was set by Super Admin)
+  // must stay selectable, not be silently rewritten to "waiter" on save. The
+  // previous staff member's legacy option is cleared first so opening several
+  // records in a row cannot pile up stale choices.
+  roleField?.querySelectorAll("option[data-legacy-role]").forEach(option => option.remove());
+  if (roleField && !STAFF_ROLE_OPTIONS.some(option => option.value === role)) {
+    roleField.insertAdjacentHTML("beforeend", `<option data-legacy-role="true" value="${escapeHtml(role)}">${escapeHtml(role)}</option>`);
+  }
+  setValue("staffEditRoleField", role);
+  setValue("staffEditSectionField", user.assignedSection || "");
+  setValue("staffEditTableField", user.assignedTable || "");
+  const kitchenField = document.getElementById("staffEditKitchenAccessField");
+  if (kitchenField) kitchenField.checked = user.kitchenAccess === true;
+  setValue("staffEditStatusField", isStaffInactive(user) ? "inactive" : "active");
+
+  const granted = new Set(Array.isArray(user.permissions) ? user.permissions.map(String) : []);
+  document.querySelectorAll(".staff-permission-box").forEach(box => { box.checked = granted.has(box.value); });
+
+  ["staffEditRoleField", "staffEditStatusField"].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = ownRecord; });
+  document.querySelectorAll(".staff-permission-box").forEach(box => { box.disabled = ownRecord; });
+  document.getElementById("staffEditOwnRecordNotice")?.classList.toggle("hidden", !ownRecord);
+
+  setStaffEditMessage("");
+  document.getElementById("staffEditCard")?.classList.remove("hidden");
+  document.getElementById("staffEditCard")?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function closeStaffEditor() {
+  editingStaffUid = "";
+  setStaffEditMessage("");
+  document.getElementById("staffEditCard")?.classList.add("hidden");
+}
+
+async function saveStaffEdits() {
+  if (!isOwnerLike()) return alert("Owner access required. Please login with owner account.");
+  if (!editingStaffUid) return;
+  const existing = staffUsers.find(item => String(item.uid || "") === editingStaffUid);
+  if (!existing) { closeStaffEditor(); return showAdminToast("This staff account is no longer available.", "danger"); }
+
+  const name = document.getElementById("staffEditNameField")?.value.trim() || "";
+  const phoneRaw = document.getElementById("staffEditPhoneField")?.value.trim() || "";
+  const phone = phoneRaw.replace(/[^\d+\s-]/g, "").trim();
+  const ownRecord = isOwnStaffRecord(existing);
+  const role = ownRecord ? staffDisplayRole(existing) : String(document.getElementById("staffEditRoleField")?.value || "waiter").toLowerCase();
+  const status = ownRecord
+    ? (isStaffInactive(existing) ? "inactive" : "active")
+    : (document.getElementById("staffEditStatusField")?.value === "inactive" ? "inactive" : "active");
+  const permissions = ownRecord
+    ? (Array.isArray(existing.permissions) ? existing.permissions : [])
+    : [...document.querySelectorAll(".staff-permission-box")].filter(box => box.checked).map(box => box.value);
+
+  if (!name) return setStaffEditMessage("Staff name is required.", "warning");
+  if (name.length < 2) return setStaffEditMessage("Enter the staff member's full name.", "warning");
+  if (phoneRaw && phoneRaw.replace(/\D/g, "").length < 10) return setStaffEditMessage("Enter a valid 10-digit phone number, or leave it empty.", "warning");
+
+  const payload = {
+    name,
+    phone,
+    role,
+    status,
+    permissions,
+    assignedSection: document.getElementById("staffEditSectionField")?.value.trim() || "",
+    assignedTable: document.getElementById("staffEditTableField")?.value.trim() || "",
+    kitchenAccess: document.getElementById("staffEditKitchenAccessField")?.checked === true
+  };
+
+  try {
+    // PATCH updates the existing document for this uid. It never creates a
+    // new staff record, so repeated edits cannot produce duplicates.
+    const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff/${encodeURIComponent(editingStaffUid)}`, {
+      method: "PATCH",
+      headers: { ...(await purchaseAuthHeaders()), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false) throw new Error(result.error || "Could not save staff changes.");
+    auditLog("staff_updated", { staffUid: editingStaffUid, role: payload.role, status: payload.status });
+    showAdminToast("Staff details updated.", "success");
+    closeStaffEditor();
+    // No reload: the staff listener already has the updated document.
   } catch (error) {
-    list.innerHTML = `<div class="notice-box danger">Unable to load staff: ${escapeHtml(error.message || error)}</div>`;
+    devError("saveStaffEdits failed", error);
+    setStaffEditMessage(error?.message || "Could not save staff changes. Please try again.", "danger");
   }
 }
 
 async function handleStaffAction(uid, action, name) {
   if (!isOwnerLike()) return alert("Owner access required. Please login with owner account.");
   if (!uid || !action) return;
+  if (action === "edit") return openStaffEditor(uid);
   if (action === "delete") return openStaffDeleteModal(uid, name);
   const confirmMessages = {
     deactivate: `Deactivate ${name}? They will not be able to log in, but their attendance and payroll history stays intact. You can reactivate them anytime.`,
@@ -830,9 +1093,10 @@ async function handleStaffAction(uid, action, name) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok === false) throw new Error(result.error || `Could not ${action} staff.`);
-    await loadStaffUsers();
+    // The staff listener re-renders just this row.
   } catch (error) {
-    alert(error.message || `Could not ${action} staff.`);
+    devError(`staff ${action} failed`, error);
+    showAdminToast(error.message || `Could not ${action} staff.`, "danger");
   }
 }
 
@@ -900,7 +1164,6 @@ async function handleStaffDeletePrimaryAction() {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok === false) throw new Error(result.error || `Could not delete ${name}.`);
     closeStaffDeleteModal();
-    await loadStaffUsers();
   } catch (error) {
     setStaffDeleteError(error.message || `Could not delete ${name}.`);
     if (staffDeleteActionBtn) { staffDeleteActionBtn.disabled = false; staffDeleteActionBtn.textContent = "Yes, Permanently Delete"; }
@@ -1292,7 +1555,7 @@ async function importReviewedMenuItems() {
     }
     alert(`Menu import complete: Imported: ${added + updated}, Skipped duplicates: ${skipped}, Invalid rows: ${invalidRows}.`);
     menuImportItems = []; menuImportInvalidCount = 0; menuImportWarning = ""; if (menuPdfInput) menuPdfInput.value = ""; if (menuExcelInput) menuExcelInput.value = ""; if (menuImportUpdateDuplicatesEl) menuImportUpdateDuplicatesEl.checked = false;
-    await loadMenuData(); renderMenuManagement(); renderManualMenuPicker(); renderMenuImportReview();
+    renderMenuImportReview();
   } catch (error) { console.error("Menu import failed", error); alert("Menu import failed. Please check Excel format and try again."); }
   finally { importMenuBtn.disabled = false; importMenuBtn.innerHTML = '<i class="fas fa-file-import"></i> Import Menu'; }
 }
@@ -1383,18 +1646,58 @@ function timestampBusinessDate(value) {
   return date ? todayDateStr(date) : "";
 }
 
+/* ---------------------------------------------------------
+   DAILY ORDER + BILL SERIAL ALLOCATION
+
+   This restaurant's numbering has always been per business day
+   (counters/<businessDate>, reset at the configured business-day
+   start time), so the bill serial follows the same daily cycle:
+   15 March -> 001, 002, 003; 16 March -> 001, 002, 003.
+
+   Both numbers are allocated inside ONE Firestore transaction on
+   ONE counter document, which is what makes them safe against
+   simultaneous billing from several staff, several devices, a
+   page refresh, a reopened browser, and offline/online resync:
+   Firestore retries the transaction on contention, so two bills
+   created at the same instant can never receive the same serial.
+
+   A deleted or cancelled bill never releases its number — the
+   counter only ever moves forward, so serials are never reused.
+--------------------------------------------------------- */
 async function nextDailyOrderMeta() {
   const resetTime = dailyResetTime();
   const timezone = restaurantTimezone();
   const businessDate = getBusinessDate(resetTime, timezone);
   const counterRef = doc(db, "restaurants", restaurantId, "counters", businessDate);
-  const dailyOrderNo = await runTransaction(db, async transaction => {
+  const allocated = await runTransaction(db, async transaction => {
     const snap = await transaction.get(counterRef);
-    const next = Number(snap.exists() ? snap.data().lastDailyOrderNo || 0 : 0) + 1;
-    transaction.set(counterRef, { businessDate, dailyOrderDate: businessDate, dailyResetTime: resetTime, businessTimezone: timezone, lastDailyOrderNo: next, updatedAt: serverTimestamp() }, { merge: true });
-    return next;
+    const { dailyOrderNo: nextOrderNo, billSerialNumber: nextBillSerial } = allocateFromCounter(snap.exists() ? snap.data() : {});
+    transaction.set(counterRef, {
+      businessDate,
+      dailyOrderDate: businessDate,
+      dailyResetTime: resetTime,
+      businessTimezone: timezone,
+      lastDailyOrderNo: nextOrderNo,
+      lastBillSerialNumber: nextBillSerial,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    return { nextOrderNo, nextBillSerial };
   });
-  return { dailyOrderNo, businessDate, orderNumberLabel: `Order No ${dailyOrderNo}`, dailyResetTime: resetTime, dailyOrderDate: businessDate, businessTimezone: timezone, displayOrderNo: String(dailyOrderNo) };
+  const dailyOrderNo = allocated.nextOrderNo;
+  const billSerialNumber = allocated.nextBillSerial;
+  return {
+    dailyOrderNo,
+    businessDate,
+    orderNumberLabel: `Order No ${dailyOrderNo}`,
+    dailyResetTime: resetTime,
+    dailyOrderDate: businessDate,
+    businessTimezone: timezone,
+    displayOrderNo: String(dailyOrderNo),
+    billSerialNumber,
+    billSerialLabel: formatBillSerial(billSerialNumber),
+    billNo: formatBillSerial(billSerialNumber),
+    billDate: businessDate
+  };
 }
 
 function timestampToDate(ts) {
@@ -1840,7 +2143,9 @@ function logoUploadErrorMessage(error = {}) {
   if (/cors|cross-origin/i.test(message)) {
     return "Storage CORS issue.";
   }
-  return `${code ? `${code}: ` : ""}${message}`;
+  // Anything else is an internal failure: the code/message is already in the
+  // console for support, so the owner only gets a plain-language message.
+  return "Could not upload the logo. Please try a smaller image, or try again in a moment.";
 }
 
 function detailedErrorMessage(error = {}) {
@@ -1967,7 +2272,7 @@ async function uploadRestaurantLogoWithBackend(file) {
 }
 
 async function uploadRestaurantLogo(file) {
-  console.log("[Settings Save] Logo upload start", {
+  devLog("[Settings Save] Logo upload start", {
     restaurantId,
     hasSelectedLogoFile: Boolean(file),
     fileName: file?.name || "",
@@ -1975,14 +2280,14 @@ async function uploadRestaurantLogo(file) {
     fileSize: file?.size || 0
   });
   try {
-    console.log("[Settings Save] upload method: backend");
+    devLog("[Settings Save] upload method: backend");
     const uploaded = await withTimeout(
       uploadRestaurantLogoWithBackend(file),
       45000,
       "Logo upload timed out. Please try a smaller image or check Firebase Storage/backend.",
       "logo-upload-timeout"
     );
-    console.log("[Settings Save] upload success URL", uploaded?.url || "");
+    devLog("[Settings Save] upload success URL", uploaded?.url || "");
     return uploaded;
   } catch (backendError) {
     console.warn("[Settings Save] backend logo upload failed", detailedErrorMessage(backendError));
@@ -2129,7 +2434,7 @@ async function unlockAdminAudio() {
 
     adminAudioUnlocked = true;
   } catch (err) {
-    console.log("Admin audio locked until user interaction");
+    devLog("Admin audio locked until user interaction");
   }
 }
 
@@ -2228,9 +2533,9 @@ function startAdminAlert(type = "new_order") {
   try {
     const audio = type === "updated_order" ? adminAudioUpdatedOrder : adminAudioNewOrder;
     audio.currentTime = 0;
-    audio.play().catch(err => console.log("Admin audio blocked", err));
+    audio.play().catch(err => devLog("Admin audio blocked", err));
   } catch (err) {
-    console.log(err);
+    devLog("Admin audio unlock failed", err);
   }
 
   document.title = type === "updated_order" ? "🆕 Order Updated!" : "🚨 New Order!";
@@ -2467,7 +2772,32 @@ async function loadSettings() {
   }
   ensureBackendUrlControl();
   ensureOcrStatusControl();
-  testOcrConnection();
+  scheduleOcrStatusCheck();
+}
+
+// The OCR status panel costs two backend round-trips. It used to run on every
+// page load and again on every settings save, even for the many owners who
+// never open Settings. Now it runs at most once, the first time Settings is
+// actually on screen; the "Test OCR Connection" button re-runs it on demand.
+let ocrStatusChecked = false;
+function scheduleOcrStatusCheck() {
+  if (ocrStatusChecked) return;
+  const settingsSection = document.getElementById("section-settings");
+  if (!settingsSection) return;
+  if (settingsSection.classList.contains("active")) {
+    ocrStatusChecked = true;
+    testOcrConnection();
+    return;
+  }
+  const observer = new MutationObserver(() => {
+    if (!settingsSection.classList.contains("active")) return;
+    observer.disconnect();
+    if (ocrStatusChecked) return;
+    ocrStatusChecked = true;
+    testOcrConnection();
+  });
+  observer.observe(settingsSection, { attributes: true, attributeFilter: ["class"] });
+  registerCleanup(() => observer.disconnect());
 }
 
 async function saveSettings() {
@@ -2500,7 +2830,7 @@ async function saveSettings() {
       restaurantLogoPreviewObjectUrl = URL.createObjectURL(logoFile);
       setLogoPreview(restaurantLogoPreviewObjectUrl);
     }
-    console.log("[Settings Save] start", {
+    devLog("[Settings Save] start", {
       restaurantId,
       hasSelectedLogoFile: Boolean(logoFile),
       fileName: logoFile?.name || "",
@@ -2602,7 +2932,7 @@ async function saveSettings() {
       updatedAt: serverTimestamp()
     };
 
-    console.log("[Settings Save] saving Firestore settings", { restaurantId, logoUrl: payload.logoUrl || "", restaurantLogoUrl: payload.restaurantLogoUrl || "" });
+    devLog("[Settings Save] saving Firestore settings", { restaurantId, logoUrl: payload.logoUrl || "", restaurantLogoUrl: payload.restaurantLogoUrl || "" });
     setSaveSettingsProgress("Saving settings...", true);
     await withTimeout(
       Promise.all([
@@ -2639,7 +2969,7 @@ async function saveSettings() {
       "Settings save timed out. Please check your network and try again.",
       "settings-save-timeout"
     );
-    console.log("[Settings Save] settings save success", { restaurantId });
+    devLog("[Settings Save] settings save success", { restaurantId });
     restaurantSettings = { ...restaurantSettings, ...payload };
     if (restaurantLogoMarkedForRemoval || previousLogoUrl !== configuredRestaurantLogoUrl()) clearCachedRestaurantLogo();
     if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
@@ -2655,9 +2985,8 @@ async function saveSettings() {
     });
     alert("Settings saved successfully.");
   } catch (err) {
-    console.error("saveSettings error", err);
-    console.error("[Settings Save] settings save failed", err);
-    alert("Failed to save settings: " + detailedErrorMessage(err));
+    devError("saveSettings failed", { detail: detailedErrorMessage(err), error: err });
+    alert("Could not save settings. Please check your connection and try again.");
   } finally {
     setSaveSettingsProgress("Save Settings", false);
   }
@@ -2707,26 +3036,62 @@ function useAdminCurrentLocation() {
 /* =========================================================
    MENU DATA
 ========================================================= */
-async function loadMenuData() {
-  try {
-    const snap = await getDocs(collection(db, "restaurants", restaurantId, "menu"));
+/* ---------------------------------------------------------
+   MENU — one live listener instead of a full re-read
 
-    const items = snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => {
-        const catCmp = normalizeCategory(a.category).localeCompare(normalizeCategory(b.category));
-        if (catCmp !== 0) return catCmp;
-        return Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
-      });
+   Editing a single item used to re-download the entire menu
+   collection with getDocs() and rebuild every card. The menu is
+   now a single onSnapshot: Firestore applies a local write
+   immediately (before the server acknowledges it), so saving an
+   item updates its card in the same frame, with zero extra
+   reads, and a change made on another device shows up here on
+   its own.
+--------------------------------------------------------- */
+let menuUnsubscribe = null;
+let menuFirstLoad = null;
 
-    allMenuItems = items;
-    manualMenuItems = items.filter(item => item.available !== false);
+function applyMenuDocs(docs) {
+  const items = docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => {
+      const catCmp = normalizeCategory(a.category).localeCompare(normalizeCategory(b.category));
+      if (catCmp !== 0) return catCmp;
+      return Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+    });
 
-    renderMenuCategoryHelpers();
-    renderMenuSortSelectors();
-  } catch (err) {
-    console.error("loadMenuData error", err);
-  }
+  allMenuItems = items;
+  manualMenuItems = items.filter(item => item.available !== false);
+
+  renderMenuCategoryHelpers();
+  renderMenuSortSelectors();
+  renderMenuManagement();
+  renderManualMenuPicker();
+}
+
+// Resolves on the first snapshot so startup can await the menu exactly once;
+// every later update arrives through the same listener.
+function loadMenuData() {
+  if (menuFirstLoad) return menuFirstLoad;
+  menuFirstLoad = new Promise(resolve => {
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; resolve(); } };
+    menuUnsubscribe = registerCleanup(onSnapshot(
+      collection(db, "restaurants", restaurantId, "menu"),
+      snap => {
+        try {
+          applyMenuDocs(snap.docs);
+        } catch (error) {
+          devError("menu render failed", error);
+        }
+        settle();
+      },
+      error => {
+        devError("menu listener error", { code: error?.code, message: error?.message, restaurantId });
+        settle();
+      }
+    ));
+  });
+  return menuFirstLoad;
 }
 
 /* =========================================================
@@ -2977,14 +3342,12 @@ async function saveMenuItem() {
       });
     }
 
-    alert("Menu item saved successfully.");
+    // The menu listener re-renders just this item's card on its own.
+    showAdminToast("Menu item saved.", "success");
     clearMenuForm();
-    await loadMenuData();
-    renderMenuManagement();
-    renderManualMenuPicker();
   } catch (err) {
-    console.error("saveMenuItem error", err);
-    alert("Failed to save menu item: " + err.message);
+    devError("saveMenuItem error", err);
+    showAdminToast("Could not save this menu item. Please try again.", "danger");
   }
 }
 
@@ -2996,14 +3359,11 @@ async function deleteMenuItem() {
 
     await deleteDoc(doc(db, "restaurants", restaurantId, "menu", docId));
 
-    alert("Menu item deleted successfully.");
+    showAdminToast("Menu item deleted.", "success");
     clearMenuForm();
-    await loadMenuData();
-    renderMenuManagement();
-    renderManualMenuPicker();
   } catch (err) {
-    console.error("deleteMenuItem error", err);
-    alert("Failed to delete item: " + err.message);
+    devError("deleteMenuItem error", err);
+    showAdminToast("Could not delete this menu item. Please try again.", "danger");
   }
 }
 
@@ -3049,17 +3409,18 @@ function renderMenuManagement() {
   if (!menuListEl) return;
 
   if (!filteredItems.length) {
-    menuListEl.innerHTML = `
+    setHtmlIfChanged(menuListEl, `
       <div class="empty-state">
         <i class="fas fa-utensils"></i>
         <h4>${search ? "No matching menu items found." : "No menu items found"}</h4>
         <p>${search ? "Clear search or change category filter." : "Add menu items or change filter"}</p>
       </div>
-    `;
+    `);
+    bindMenuListActions();
     return;
   }
 
-  menuListEl.innerHTML = filteredItems.map(item => `
+  setHtmlIfChanged(menuListEl, filteredItems.map(item => `
     <div class="menu-item-card edit-menu-btn" data-id="${item.id}">
       <img
         class="menu-item-img"
@@ -3079,17 +3440,25 @@ function renderMenuManagement() {
         </div>
       </div>
     </div>
-  `).join("");
+  `).join(""));
 
-  menuListEl.querySelectorAll(".edit-menu-btn").forEach(card => {
-    card.addEventListener("click", async () => {
+  bindMenuListActions();
+}
+
+// Bound once on the container; the card to edit is read from the live
+// in-memory menu, so clicking a card costs no Firestore read and cannot
+// accumulate duplicate listeners across re-renders.
+function bindMenuListActions() {
+  if (!menuListEl || menuListEl.dataset.s2pActionsBound === "true") return;
+  menuListEl.dataset.s2pActionsBound = "true";
+  menuListEl.addEventListener("click", event => {
+      const card = event.target.closest(".edit-menu-btn");
+      if (!card) return;
       const id = card.dataset.id;
       if (!id) return;
 
-      const snap = await getDoc(doc(db, "restaurants", restaurantId, "menu", id));
-      if (!snap.exists()) return;
-
-      const item = snap.data();
+      const item = allMenuItems.find(menuItem => menuItem.id === id);
+      if (!item) return;
 
       if (itemNameEl) itemNameEl.value = item.name || "";
       if (itemCategoryEl) itemCategoryEl.value = item.category || "";
@@ -3114,7 +3483,6 @@ function renderMenuManagement() {
       deleteMenuBtn?.classList.remove("hidden");
       renderMenuCategoryHelpers();
       window.scrollTo({ top: 0, behavior: "smooth" });
-    });
   });
 }
 
@@ -3209,8 +3577,8 @@ async function saveInventoryItem() {
     clearInventoryForm();
     alert("Inventory item saved.");
   } catch (error) {
-    console.error("saveInventoryItem error", error);
-    alert("Inventory save failed: " + (error.message || "Unknown error"));
+    devError("saveInventoryItem error", error);
+    alert("Could not save this inventory item. Please try again.");
   }
 }
 
@@ -3295,7 +3663,10 @@ function ensureBackendUrlControl() {
     localStorage.removeItem("scan2plateBackendUrlFixed");
     backendUrlFieldEl.value = getBackendBaseUrl();
     ensureBackendUrlControl();
-    location.reload();
+    // Re-test the connection in place instead of reloading the dashboard:
+    // nothing else on the page depends on the stored backend URL at load time.
+    testOcrConnection();
+    showAdminToast("Backend connection reset.", "success");
   });
 }
 
@@ -3501,7 +3872,7 @@ async function saveInventoryAdjustment() {
     });
     if (adjustmentQuantityEl) adjustmentQuantityEl.value = "";
     if (adjustmentReasonEl) adjustmentReasonEl.value = "";
-  } catch (error) { alert("Could not save adjustment: " + error.message); }
+  } catch (error) { devError("saveInventoryAdjustment error", error); alert("Could not save this stock adjustment. Please try again."); }
 }
 
 async function deductInventoryForCompletedOrder(orderDocId) {
@@ -4083,8 +4454,8 @@ async function loadOrderIntoManualBill(orderDocId) {
     if (typeof window.switchSection === "function") window.switchSection("billing");
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
-    console.error("loadOrderIntoManualBill error", err);
-    alert("Failed to load order: " + err.message);
+    devError("loadOrderIntoManualBill error", err);
+    showAdminToast("Could not open this order. Please try again.", "danger");
   }
 }
 
@@ -4173,7 +4544,7 @@ function fillBillPreview(order) {
     billFooterMessageEl.textContent = footer;
     billFooterMessageEl.style.display = footer ? "block" : "none";
   }
-  if (billNumberEl) billNumberEl.textContent = order.orderId || "";
+  if (billNumberEl) billNumberEl.textContent = billSerialText(order);
   if (billTableEl) billTableEl.textContent = order.tableNo || "-";
   if (billDateEl) billDateEl.textContent = formatDateTime(order.createdAt);
   if (billCustomerEl) billCustomerEl.textContent = displayCustomerName(order);
@@ -4246,9 +4617,7 @@ function fillBillPreview(order) {
     }
   }
 
-  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-    console.log("[Bill UPI QR]", { restaurantId, upiId, billAmount: Number(order.grandTotal || 0), qrGenerated: showQr });
-  }
+  devLog("[Bill UPI QR]", { restaurantId, upiId, billAmount: Number(order.grandTotal || 0), qrGenerated: showQr });
 
   // Refresh a UPI ID saved elsewhere without changing the order document.
   getDoc(doc(db, "restaurants", restaurantId, "settings", "general")).then(snap => {
@@ -4263,6 +4632,14 @@ function fillBillPreview(order) {
 
 function billDisplayOrderNo(order = {}) {
   return order.displayOrderNo || order.dailyOrderNo || "-";
+}
+
+// The serial that prints as "Bill No: 024". Old documents without
+// billSerialNumber fall back to their daily order number (which is what the
+// bill number effectively was before), then to the order ID — an old bill
+// must still open and print, never blank out or throw.
+function billSerialText(order = {}) {
+  return billDisplayNumber(order);
 }
 
 function thermalBillItemRows(items = []) {
@@ -4336,7 +4713,7 @@ function buildThermalBillHtml(order, qrDataUrl = "", logoSrc = "") {
     </header>
 
     <section>
-      <div class="detail-row"><span>Bill #:</span><span>${escapeHtml(order.orderId || "-")}</span></div>
+      <div class="detail-row"><span>Bill No:</span><span>${escapeHtml(billSerialText(order))}</span></div>
       <div class="detail-row"><span>Order No:</span><span>${escapeHtml(billDisplayOrderNo(order))}</span></div>
       <div class="detail-row"><span>Table:</span><span>${escapeHtml(order.tableNo || order.tokenNo || "-")}</span></div>
       <div class="detail-row"><span>Date:</span><span>${escapeHtml(formatBillDate(order.createdAt))}</span></div>
@@ -4462,7 +4839,8 @@ async function createManualBill() {
         updatedAt: serverTimestamp(),
         isManualBill: true,
         isManualOrder: oldData.isManualOrder === true,
-        source: oldData.source || "manual_admin"
+        source: oldData.source || "manual_admin",
+        updatedBy: currentUser.email || currentUser.name || currentUser.uid || ""
       });
       if (newKotItems.length) await auditLog("add_more_items", { orderId: editingOrderPublicId, tableNo, addonCount: newKotItems.length, addedFrom: "admin_open_bill" });
 
@@ -4479,6 +4857,8 @@ async function createManualBill() {
         customerName,
         customerPhone,
         tableNo,
+        createdBy: currentUser.email || currentUser.name || currentUser.uid || "",
+        staffId: currentUser.uid || "",
         items: cartItems,
         itemsText: cartItems.map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
         note: "Manual order from admin",
@@ -4515,14 +4895,17 @@ async function createManualBill() {
       });
 
       fillKotPreviewFromCart(orderId);
-      setNotice(`Order created and sent to kitchen: ${orderId}`, "success");
+      setNotice(`Order created and sent to kitchen: Bill No ${dailyOrder.billSerialLabel}`, "success");
     }
 
-    await loadOrders();
+    // No reload here. The shared orders listener already delivers this write
+    // back (Firestore applies the local change immediately, before the server
+    // even acknowledges it), so the order card, the table grid and the
+    // dashboard counters update on their own within the same frame.
     if (!wasEditingOrder) setTimeout(() => resetManualBillForm(), 700);
   } catch (err) {
-    console.error("createManualBill error", err);
-    alert("Failed to create/update bill: " + err.message);
+    devError("createManualBill error", err);
+    showAdminToast("Could not save this bill. Please check your connection and try again.", "danger");
   }
 }
 
@@ -4701,8 +5084,8 @@ async function handleAdminOrderAction(orderDocId, action) {
       return;
     }
   } catch (err) {
-    console.error("handleAdminOrderAction error", err);
-    alert("Failed: " + err.message);
+    devError("handleAdminOrderAction error", err);
+    showAdminToast("Could not update this order. Please check your connection and try again.", "danger");
   }
 }
 
@@ -4751,8 +5134,8 @@ async function updatePaymentStatus(orderDocId, status, selectedMethod = "cash") 
     renderTablesSection();
     return true;
   } catch (err) {
-    console.error("updatePaymentStatus error", err);
-    showAdminToast("Payment update failed: " + err.message, "danger");
+    devError("updatePaymentStatus error", err);
+    showAdminToast("Could not update the payment status. Please try again.", "danger");
     return false;
   } finally {
     paymentUpdateLocks.delete(orderDocId);
@@ -4992,8 +5375,10 @@ async function printManualKotItems(mode = "all") {
     await markManualKotItemsPrinted(itemsToPrint);
     setNotice(mode === "new" ? "New item KOT printed." : "All item KOT printed.", "success");
   } catch (error) {
-    console.error("markManualKotItemsPrinted error", error);
-    alert("KOT printed, but item print status could not be saved: " + error.message);
+    devError("markManualKotItemsPrinted error", error);
+    // The print itself succeeded — only the "already printed" flag failed, so
+    // say exactly that rather than implying the KOT did not print.
+    showAdminToast("KOT printed, but its printed status could not be saved. Please refresh before reprinting.", "warning");
   }
 }
 
@@ -5009,21 +5394,54 @@ function getFilteredActiveOrders() {
   });
 }
 
+// Handlers are attached ONCE per container and resolve their target from the
+// clicked button, so re-rendering a list can never stack duplicate listeners
+// (which is what previously made a single click fire an action several times).
+function bindOrderListActions(targetEl) {
+  if (!targetEl || targetEl.dataset.s2pActionsBound === "true") return;
+  targetEl.dataset.s2pActionsBound = "true";
+  targetEl.addEventListener("click", async event => {
+    const paymentBtn = event.target.closest(".payment-btn");
+    if (paymentBtn) {
+      const orderId = paymentBtn.dataset.id || "";
+      if (paymentBtn.dataset.status === "paid") showPaymentMethodModal(orderId);
+      else updatePaymentStatus(orderId, "unpaid");
+      return;
+    }
+    const payBillBtn = event.target.closest(".pay-bill-btn");
+    if (payBillBtn) return loadOrderIntoManualBill(payBillBtn.dataset.id || "");
+
+    const printBtn = event.target.closest(".print-bill-btn");
+    if (printBtn) {
+      // Print from the copy already in memory — the live listener keeps it
+      // current, so there is nothing to re-read from Firestore here.
+      const order = allOrders.find(item => item.id === printBtn.dataset.id);
+      if (!order) return;
+      fillBillPreview(order);
+      billModal?.classList.add("active");
+      return;
+    }
+    const actionBtn = event.target.closest(".admin-order-action");
+    if (actionBtn) handleAdminOrderAction(actionBtn.dataset.id || "", actionBtn.dataset.action || "");
+  });
+}
+
 function renderOrdersList(targetEl, orders) {
   if (!targetEl) return;
+  bindOrderListActions(targetEl);
 
   if (!orders.length) {
-    targetEl.innerHTML = `
+    setHtmlIfChanged(targetEl, `
       <div class="empty-state">
         <i class="fas fa-inbox"></i>
         <h4>No orders found</h4>
         <p>Orders will appear here</p>
       </div>
-    `;
+    `);
     return;
   }
 
-  targetEl.innerHTML = orders.map(o => {
+  const html = orders.map(o => {
     const remaining = getRemainingSeconds(o);
     const hasNewItems = o.hasNewItems === true;
     const workflowClosed = isOrderWorkflowClosed(o);
@@ -5118,39 +5536,9 @@ function renderOrdersList(targetEl, orders) {
     `;
   }).join("");
 
-  targetEl.querySelectorAll(".payment-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const orderId = btn.dataset.id || "";
-      const status = btn.dataset.status || "unpaid";
-
-      if (status === "paid") {
-        showPaymentMethodModal(orderId);
-      } else {
-        updatePaymentStatus(orderId, "unpaid");
-      }
-    });
-  });
-
-  targetEl.querySelectorAll(".pay-bill-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      loadOrderIntoManualBill(btn.dataset.id || "");
-    });
-  });
-
-  targetEl.querySelectorAll(".print-bill-btn").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const snap = await getDoc(doc(db, "orders", btn.dataset.id || ""));
-      if (!snap.exists()) return;
-      fillBillPreview(snap.data());
-      billModal?.classList.add("active");
-    });
-  });
-
-  targetEl.querySelectorAll(".admin-order-action").forEach(btn => {
-    btn.addEventListener("click", () => {
-      handleAdminOrderAction(btn.dataset.id || "", btn.dataset.action || "");
-    });
-  });
+  // Skips the write entirely when this snapshot did not change what this list
+  // shows: no flicker, no lost scroll position, no rebuilt DOM.
+  setHtmlIfChanged(targetEl, html);
 }
 
 /* =========================================================
@@ -5399,9 +5787,83 @@ function renderKotSections() {
 /* =========================================================
    SNAPSHOT PROCESSOR
 ========================================================= */
-function processOrdersSnapshot(snap) {
-  allOrders = snap.docs
-    .map(d => ({ id: d.id, ...d.data() }))
+/* ---------------------------------------------------------
+   A snapshot used to re-render EVERY section synchronously —
+   dashboard, all-orders, best sellers, reports, KOT, tables and
+   online orders — even though at most one of them is on screen.
+   With a few hundred orders that is hundreds of milliseconds of
+   DOM work per write, which is exactly what made the dashboard
+   feel like it was constantly reloading.
+
+   Now a hidden section is only marked dirty and re-rendered the
+   moment it is opened, and every write goes through
+   setHtmlIfChanged so a section whose markup did not actually
+   change is left alone (no flicker, no lost scroll position).
+--------------------------------------------------------- */
+const orderSectionRenderers = {
+  dashboard: () => {
+    renderOrdersList(orderListEl, dashboardOrdersCache);
+    if (!dashboardOrdersCache.length && orderListEl) {
+      setHtmlIfChanged(orderListEl, `
+        <div class="empty-state">
+          <i class="fas fa-inbox"></i>
+          <h4>No orders today yet</h4>
+          <p>New orders appear here automatically</p>
+        </div>
+      `);
+    }
+    renderBestSelling(todayOrdersCache);
+  },
+  orders: () => renderOrdersList(allOrdersListEl, getFilteredActiveOrders()),
+  reports: () => renderReportRows(),
+  kot: () => renderKotSections(),
+  tables: () => renderTablesSection(),
+  "online-orders": () => renderOnlineOrders()
+};
+
+const dirtyOrderSections = new Set();
+let dashboardOrdersCache = [];
+let todayOrdersCache = [];
+
+function isSectionVisible(name) {
+  const el = document.getElementById(`section-${name}`);
+  return Boolean(el && el.classList.contains("active"));
+}
+
+function runSectionRenderer(name) {
+  const render = orderSectionRenderers[name];
+  if (!render) return;
+  // One bad/legacy record in a section must never stop the others — most
+  // importantly the live orders and tables views — from updating.
+  try {
+    render();
+  } catch (error) {
+    devError(`Section render failed: ${name}`, error);
+  }
+}
+
+function renderOrderSections() {
+  Object.keys(orderSectionRenderers).forEach(name => {
+    if (isSectionVisible(name) || name === "dashboard") {
+      dirtyOrderSections.delete(name);
+      runSectionRenderer(name);
+    } else {
+      dirtyOrderSections.add(name);
+    }
+  });
+}
+
+// Called when a section is opened: render it immediately if an order update
+// arrived while it was hidden.
+function flushDirtyOrderSection(name) {
+  if (!dirtyOrderSections.has(name)) return;
+  dirtyOrderSections.delete(name);
+  runSectionRenderer(name);
+}
+window.scan2plateFlushSection = flushDirtyOrderSection;
+
+function processOrdersSnapshot(orderDocs) {
+  allOrders = (orderDocs || [])
     .filter(o => String(o.restaurantId || "") === restaurantId)
     .sort((a, b) => tsToMs(orderCreatedDate(b)) - tsToMs(orderCreatedDate(a)));
 
@@ -5418,116 +5880,64 @@ function processOrdersSnapshot(snap) {
   const todayCashCollection = amountForMethod(method => method === "cash" || method.includes("cash"));
   const todayUpiCollection = amountForMethod(method => method === "upi" || method.includes("upi"));
   const todayRazorpayCollection = amountForMethod(method => method.includes("razorpay") || method.includes("online") || method.includes("card"));
-  const dashboardOrders = todayOrders.length ? todayOrders.slice(0, 5) : activeOrders.slice(0, 5);
 
-  if (todayOrdersEl) todayOrdersEl.textContent = String(todayOrders.length);
-  if (pendingOrdersEl) pendingOrdersEl.textContent = String(todayActiveOrders.length);
-  if (todayRevenueEl) todayRevenueEl.textContent = money(todayRevenue);
-  if (completedOrdersEl) completedOrdersEl.textContent = String(completedOrders.length);
-  if (todayCashCollectionEl) todayCashCollectionEl.textContent = money(todayCashCollection);
-  if (todayUpiCollectionEl) todayUpiCollectionEl.textContent = money(todayUpiCollection);
-  if (todayRazorpayCollectionEl) todayRazorpayCollectionEl.textContent = money(todayRazorpayCollection);
-  if (pendingOrdersBadgeEl) pendingOrdersBadgeEl.textContent = String(activeOrders.length);
+  todayOrdersCache = todayOrders;
+  dashboardOrdersCache = todayOrders.length ? todayOrders.slice(0, 5) : activeOrders.slice(0, 5);
 
-  // Each render step runs in isolation: a bad/legacy record in one section
-  // (e.g. an old order missing a newer field) must not stop the other
-  // sections — including the live orders/tables views — from updating.
-  const safeRender = (label, fn) => {
-    try {
-      fn();
-    } catch (error) {
-      console.error(`processOrdersSnapshot: ${label} failed`, error);
-    }
-  };
+  // Counters are single text nodes — always cheap, and they must stay live
+  // even while the user is looking at another section.
+  const setText = (el, value) => { if (el && el.textContent !== value) el.textContent = value; };
+  setText(todayOrdersEl, String(todayOrders.length));
+  setText(pendingOrdersEl, String(todayActiveOrders.length));
+  setText(todayRevenueEl, money(todayRevenue));
+  setText(completedOrdersEl, String(completedOrders.length));
+  setText(todayCashCollectionEl, money(todayCashCollection));
+  setText(todayUpiCollectionEl, money(todayUpiCollection));
+  setText(todayRazorpayCollectionEl, money(todayRazorpayCollection));
+  setText(pendingOrdersBadgeEl, String(activeOrders.length));
 
-  safeRender("renderOrdersList(dashboard)", () => {
-    renderOrdersList(orderListEl, dashboardOrders);
-    if (!dashboardOrders.length && orderListEl) {
-      orderListEl.innerHTML = `
-        <div class="empty-state">
-          <i class="fas fa-inbox"></i>
-          <h4>No orders today yet</h4>
-          <p>New orders appear here automatically</p>
-        </div>
-      `;
-    }
-  });
-  safeRender("renderOrdersList(all)", () => renderOrdersList(allOrdersListEl, getFilteredActiveOrders()));
-  safeRender("renderBestSelling", () => renderBestSelling(todayOrders));
-  safeRender("renderReportRows", () => renderReportRows());
-  safeRender("renderKotSections", () => renderKotSections());
-  safeRender("renderTablesSection", () => renderTablesSection());
-  safeRender("renderOnlineOrders", () => renderOnlineOrders());
+  renderOrderSections();
   markInitialLoadDone();
-  devLog("orders snapshot loaded", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
+  devLog("orders snapshot applied", { restaurantId, count: allOrders.length, today: todayOrders.length, active: activeOrders.length });
 
-  safeRender("deductInventoryForCompletedOrder", () => {
+  try {
     allOrders.filter(order => ["completed", "served"].includes(String(order.status || "").toLowerCase()) && !order.inventoryDeductedAt)
       .forEach(order => deductInventoryForCompletedOrder(order.id));
-  });
+  } catch (error) {
+    devError("deductInventoryForCompletedOrder failed", error);
+  }
 
-  safeRender("handleRealtimeAdminAlerts", () => handleRealtimeAdminAlerts(activeOrders));
+  try {
+    handleRealtimeAdminAlerts(activeOrders);
+  } catch (error) {
+    devError("handleRealtimeAdminAlerts failed", error);
+  }
 }
 
 /* =========================================================
    REALTIME LOADER
+   One shared listener for the whole dashboard (see
+   orders-store.js). admin.js and admin-modules.js used to run
+   two separate live queries over the same collection.
 ========================================================= */
-let ordersTokenRefreshRetried = false;
-
-// processOrdersSnapshot re-sorts the full order history and re-renders the
-// dashboard, all-orders list, reports, KOT, tables and online-orders sections
-// synchronously. Firestore can deliver several snapshot events within
-// milliseconds of each other (e.g. a burst of new orders, or a local write
-// followed immediately by its server ack) — without coalescing, each one
-// re-runs that entire pipeline back-to-back and the tab visibly freezes.
-// createCoalescedRunner renders the first snapshot after (re)subscribing
-// immediately so initial load isn't delayed; only rapid-fire follow-ups
-// get batched. Re-created on every (re)subscribe in loadOrders() so a
-// resubscribe (e.g. after a token-refresh retry) also renders its first
-// snapshot immediately rather than inheriting stale coalescing state.
-let scheduleOrdersRender = createCoalescedRunner(processOrdersSnapshot, 200);
+let ordersStoreUnsubscribe = null;
 
 async function loadOrders() {
   try {
-    cleanupFirestoreListeners(ordersUnsubscribe);
-    ordersUnsubscribe = null;
-    scheduleOrdersRender = createCoalescedRunner(processOrdersSnapshot, 200);
-
-    devLog("orders query started", {
-      uid: auth.currentUser?.uid || null,
-      role: currentUser?.role || null,
+    if (ordersStoreUnsubscribe) {
+      // Already subscribed: ask the shared store for a fresh stream rather
+      // than stacking a second listener on top of the first.
+      refreshOrders();
+      return;
+    }
+    devLog("orders subscription started", { uid: auth.currentUser?.uid || null, role: currentUser?.role || null, restaurantId });
+    ordersStoreUnsubscribe = subscribeOrders(
       restaurantId,
-      collectionPath: "orders",
-      whereClause: `restaurantId == ${restaurantId}`
-    });
-    ordersUnsubscribe = registerCleanup(onSnapshot(
-      query(collection(db, "orders"), where("restaurantId", "==", restaurantId)),
-      snap => {
-        ordersTokenRefreshRetried = false;
-        devLog("orders query result", { restaurantId, resultCount: snap.docs.length });
-        scheduleOrdersRender(snap);
-      },
-      async err => {
-        console.error("orders listener error", { code: err?.code, message: err?.message, restaurantId });
-        // A stale/expired ID token on cold load can surface as permission-denied
-        // even for a legitimately authorized user. Force one token refresh and
-        // resubscribe before surfacing an error — this is transparent to the
-        // user and does not loop (guarded by ordersTokenRefreshRetried).
-        if (err?.code === "permission-denied" && auth.currentUser && !ordersTokenRefreshRetried) {
-          ordersTokenRefreshRetried = true;
-          devLog("orders listener permission-denied, refreshing ID token and retrying once", { restaurantId });
-          try {
-            await auth.currentUser.getIdToken(true);
-            return loadOrders();
-          } catch (refreshErr) {
-            console.error("Token refresh retry failed", refreshErr);
-          }
-        }
-        markInitialLoadFailed("Unable to load data. Please retry.", err);
-      }
-    ));
+      processOrdersSnapshot,
+      error => markInitialLoadFailed("Unable to load data. Please retry.", error)
+    );
   } catch (err) {
-    console.error("loadOrders error", err);
+    devError("loadOrders error", err);
     markInitialLoadFailed("Unable to load data. Please retry.", err);
   }
 }
@@ -5564,22 +5974,25 @@ logoutBtn?.addEventListener("click", async () => {
   window.location.href = "./admin-login.html";
 });
 
-refreshBtn?.addEventListener("click", () => guardedAction(refreshBtn, async () => {
+// Menu, orders and tables are all live listeners now, so this button only has
+// to re-render from data already in memory — instant, and with no visible
+// "Refreshing..." state, because nothing is actually being re-fetched.
+refreshBtn?.addEventListener("click", () => {
   stopAdminAlert();
-  await loadMenuData();
   renderMenuManagement();
   renderManualMenuPicker();
-}, { loadingText: "Refreshing...", timeoutMs: 25000 }));
+  renderOrderSections();
+});
 
 saveMenuBtn?.addEventListener("click", () => guardedAction(saveMenuBtn, saveMenuItem, { loadingText: "Saving...", timeoutMs: 25000 }));
 deleteMenuBtn?.addEventListener("click", () => guardedAction(deleteMenuBtn, deleteMenuItem, { loadingText: "Deleting...", timeoutMs: 25000 }));
 clearMenuFormBtn?.addEventListener("click", clearMenuForm);
 itemHasVariantsEl?.addEventListener("change", () => setVariantFieldsEnabled(itemHasVariantsEl.checked === true));
-menuSearchEl?.addEventListener("input", renderMenuManagement);
+menuSearchEl?.addEventListener("input", debounce(renderMenuManagement, 180));
 menuFoodTypeFilterEl?.addEventListener("change", renderMenuManagement);
 menuPriceFilterEl?.addEventListener("change", renderMenuManagement);
-menuMinPriceFilterEl?.addEventListener("input", renderMenuManagement);
-menuMaxPriceFilterEl?.addEventListener("input", renderMenuManagement);
+menuMinPriceFilterEl?.addEventListener("input", debounce(renderMenuManagement, 180));
+menuMaxPriceFilterEl?.addEventListener("input", debounce(renderMenuManagement, 180));
 menuSortFilterEl?.addEventListener("change", renderMenuManagement);
 clearMenuSearchBtn?.addEventListener("click", () => {
   if (menuSearchEl) menuSearchEl.value = "";
@@ -5590,8 +6003,8 @@ clearMenuSearchBtn?.addEventListener("click", () => {
   if (menuSortFilterEl) menuSortFilterEl.value = "default";
   renderMenuManagement();
 });
-tableSearchEl?.addEventListener("input", renderTablesSection);
-manualMenuSearchEl?.addEventListener("input", renderManualMenuPicker);
+tableSearchEl?.addEventListener("input", debounce(renderTablesSection, 180));
+manualMenuSearchEl?.addEventListener("input", debounce(renderManualMenuPicker, 180));
 clearManualMenuSearchBtn?.addEventListener("click", () => {
   if (manualMenuSearchEl) manualMenuSearchEl.value = "";
   renderManualMenuPicker();
@@ -5743,7 +6156,7 @@ restaurantLogoUploadEl?.addEventListener("change", async () => {
     if (restaurantLogoPreviewObjectUrl) URL.revokeObjectURL(restaurantLogoPreviewObjectUrl);
     restaurantLogoPreviewObjectUrl = URL.createObjectURL(compressedFile);
     setLogoPreview(restaurantLogoPreviewObjectUrl);
-    console.log("[Settings Save] logo compressed", {
+    devLog("[Settings Save] logo compressed", {
       originalName: file.name || "",
       originalType: file.type || "",
       originalSize: file.size || 0,
@@ -5755,7 +6168,8 @@ restaurantLogoUploadEl?.addEventListener("change", async () => {
     selectedRestaurantLogoFile = null;
     window.scan2plateSelectedRestaurantLogoFile = null;
     restaurantLogoUploadEl.value = "";
-    alert("Logo upload failed: " + (error.message || String(error)));
+    devError("Logo upload failed", error);
+    alert(logoUploadErrorMessage(error));
   } finally {
     setSaveSettingsProgress("Save Settings", false);
   }
@@ -6062,7 +6476,8 @@ async function createAiSupportTicket() {
     renderAiHelpMessages();
     saveAiHelpChatHistory();
   } catch (error) {
-    alert("Could not create support ticket: " + (error.message || error));
+    devError("createAiSupportTicket failed", error);
+    alert("Could not create the support ticket. Please try again in a moment.");
   } finally {
     if (button) { button.disabled = false; button.textContent = "Create Support Ticket"; }
   }
@@ -6156,7 +6571,7 @@ try {
         renderTablesSection();
       },
       error => {
-        console.error("tables listener error", { code: error?.code, message: error?.message, restaurantId });
+        devError("tables listener error", { code: error?.code, message: error?.message, restaurantId });
         showLoadingNotice("Unable to load data. Please retry.", error);
       }
     ));
@@ -6168,6 +6583,6 @@ try {
     markInitialLoadDone();
   }
 } catch (error) {
-  console.error("Admin startup failed", { code: error?.code, message: error?.message, restaurantId });
+  devError("Admin startup failed", { code: error?.code, message: error?.message, restaurantId });
   markInitialLoadFailed("Unable to load data. Please retry.", error);
 }

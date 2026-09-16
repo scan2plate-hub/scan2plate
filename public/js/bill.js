@@ -13,7 +13,8 @@ import {
   fmtCurrency,
   nowStr,
   escapeHtml,
-  calculateOrderTotals
+  calculateOrderTotals,
+  billDisplayNumber
 } from './common.js';
 
 const billRoot = qs('#billRoot');
@@ -267,6 +268,7 @@ async function load() {
             ${settings.phone ? `<div class="muted">Phone: ${escapeHtml(settings.phone)}</div>` : ''}
             ${signature ? `<div class="muted"><strong>${escapeHtml(signature)}</strong></div>` : ''}
             <div class="muted"><strong>TAX INVOICE</strong></div>
+            <div class="muted">Bill No: ${escapeHtml(billDisplayNumber(billOrder))}</div>
             <div class="muted">Order No: ${escapeHtml(billOrder.displayOrderNo || billOrder.dailyOrderNo || '-')}</div>
             <div class="muted">Order ID: ${escapeHtml(billOrder.orderId || '-')}</div>
             <div class="muted">Date: ${nowStr(billOrder.createdAt)}</div>

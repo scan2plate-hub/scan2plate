@@ -1350,7 +1350,7 @@
             <div style="margin-top:8px;font-size:10px;letter-spacing:1px;">TAX INVOICE</div>
           </div>
           <div class="kot-details">
-            <div><span>Bill #:</span><span id="billNumber">001</span></div>
+            <div><span>Bill No:</span><span id="billNumber">001</span></div>
             <div><span>Table:</span><span id="billTable">01</span></div>
             <div><span>Date:</span><span id="billDate">--</span></div>
             <div><span>Customer:</span><span id="billCustomer">Walk-in</span></div>
@@ -1485,6 +1485,10 @@
           if (pageTitle)    pageTitle.textContent    = sectionMeta[name].title;
           if (pageSubtitle) pageSubtitle.textContent = sectionMeta[name].subtitle;
         }
+        // Order updates that arrived while this section was hidden are applied
+        // now, so opening a section is instant and always shows current data
+        // without re-reading anything from Firestore.
+        window.scan2plateFlushSection?.(name);
         window.closeSidebarOnMobile();
       }
 

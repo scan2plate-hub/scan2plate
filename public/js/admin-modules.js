@@ -1,7 +1,8 @@
 import { app, auth, db } from "./firebase.js";
 import { collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, limit, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, devError, showStuckFallback, createCoalescedRunner } from "./common.js?v=freeze-fix-20260816";
+import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, devError, showStuckFallback, debounce, setHtmlIfChanged, billDisplayNumber } from "./common.js?v=freeze-fix-20260816";
+import { subscribeOrders } from "./orders-store.js?v=fast-refresh-20260916";
 
 installAppSafety({ pageName: "Admin Modules", stuckTimeoutMs: 18000 });
 
@@ -64,13 +65,13 @@ function sortBills(list, sortMode = "newest") {
     return sortMode === "oldest" ? createdMs(a) - createdMs(b) : createdMs(b) - createdMs(a);
   });
 }
-const billSearchText = o => [o.orderId,o.id,o.tableNo,o.tokenNumber,o.dailyOrderNumber,o.dailyOrderNo,o.orderNumber,o.orderNo,o.displayOrderNumber,o.displayOrderNo,o.customerName,o.customerPhone].join(" ").toLowerCase();
+const billSearchText = o => [o.orderId,o.id,o.tableNo,o.tokenNumber,o.dailyOrderNumber,o.dailyOrderNo,o.orderNumber,o.orderNo,o.displayOrderNumber,o.displayOrderNo,o.billSerialNumber,billDisplayNumber(o),o.customerName,o.customerPhone].join(" ").toLowerCase();
 const billCard = (o, viewClass = "pb-view", printClass = "pb-print") => {
   const paid = String(o.paymentStatus || "unpaid").toLowerCase() === "paid";
   const tableOrToken = o.businessMode === "vendor" || o.orderMode === "token" ? `Token ${esc(o.tokenNo || o.tokenNumber || "-")}` : `Table ${esc(o.tableNo || "-")}`;
   return `<div class="card" style="padding:12px;margin:8px 0">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
-      <div><strong>${esc(orderNoLabel(o))}</strong><div class="small muted">Order ID: ${esc(o.orderId || o.id)}</div></div>
+      <div><strong>Bill No. ${esc(billDisplayNumber(o))}</strong><div class="small muted">${esc(orderNoLabel(o))}</div><div class="small muted">Order ID: ${esc(o.orderId || o.id)}</div></div>
       <span class="status-badge ${paid ? "success" : "warning"}">${paid ? "PAID" : "UNPAID"}</span>
     </div>
     <div class="small" style="margin-top:6px;">${tableOrToken} · ${esc(o.customerName || "Walk-in Customer")}</div>
@@ -111,8 +112,68 @@ function print(id,title){const w=window.open("","_blank");if(!w)return;w.documen
 
 function renderAccounts(){const paid=orders.filter(o=>String(o.paymentStatus).toLowerCase()==="paid"), todayPaid=paid.filter(o=>businessDateOf(o)===today()), rev=paid.reduce((s,o)=>s+Number(o.grandTotal||0),0), exp=expenses.reduce((s,x)=>s+Number(x.amount||0),0), cash=todayPaid.filter(o=>o.paymentMethod==="cash").reduce((s,o)=>s+Number(o.grandTotal||0),0),upi=todayPaid.filter(o=>o.paymentMethod==="upi").reduce((s,o)=>s+Number(o.grandTotal||0),0);document.getElementById("acc-stats").innerHTML=[["Total Revenue",rev],["Today's Revenue",todayPaid.reduce((s,o)=>s+Number(o.grandTotal||0),0)],["Cash",cash],["UPI",upi],["Paid Bills",paid.length],["Unpaid Bills",orders.length-paid.length],["Expenses",exp],["Net Profit",rev-exp]].map(x=>`<div class="stat-card blue"><div class="stat-label">${x[0]}</div><div class="stat-value">${typeof x[1]==="number"&&x[0]!=="Paid Bills"&&x[0]!=="Unpaid Bills"?money(x[1]):x[1]}</div></div>`).join(""); const rows=[...paid.map(o=>[dateOf(o)?.toLocaleDateString()||"", "Revenue",o.orderId||"",o.paymentMethod||"",o.grandTotal]),...expenses.map(e=>[e.date,"Expense",e.expenseName||e.category,e.paymentMode,-Number(e.amount)])];document.getElementById("acc-table").innerHTML=`<table class="data-table"><tr><th>Date</th><th>Type</th><th>Reference</th><th>Mode</th><th>Amount</th></tr>${rows.map(r=>`<tr>${r.map((x,i)=>`<td>${i===4?money(x):esc(x)}</td>`).join("")}</tr>`).join("")}</table>`;}
 async function saveExpense(){const amt=Number(document.getElementById("ex-amount").value||0);if(!amt)return alert("Enter amount");const f=document.getElementById("ex-file").files[0];let receiptUrl="";if(f){const p=`restaurants/${restaurantId}/expense-receipts/${Date.now()}-${f.name}`;await uploadBytes(ref(getStorage(app),p),f);receiptUrl=await getDownloadURL(ref(getStorage(app),p));}await addDoc(collection(db,"restaurants",restaurantId,"expenses"),{expenseName:document.getElementById("ex-name").value||document.getElementById("ex-category").value,category:document.getElementById("ex-category").value,amount:amt,date:document.getElementById("ex-date").value||today(),paymentMode:document.getElementById("ex-mode").value,vendorName:document.getElementById("ex-vendor").value,note:document.getElementById("ex-note").value,receiptUrl,createdAt:serverTimestamp(),createdBy:user.email||user.uid||"admin"});}
-function renderBills(){const q=(document.getElementById("bill-q")?.value||"").toLowerCase(),status=document.getElementById("bill-status")?.value||"", date=document.getElementById("bill-date")?.value||"",method=document.getElementById("bill-method")?.value||"",sortMode=document.getElementById("bill-sort")?.value||"newest";const rows=sortBills(orders.filter(o=>billSearchText(o).includes(q)&&(!status||String(o.paymentStatus||"unpaid").toLowerCase()===status)&&(!method||String(o.paymentMethod||"cash").toLowerCase()===method)&&(!date||businessDateOf(o)===date)),sortMode);document.getElementById("bill-list").innerHTML=rows.map(o=>billCard(o,"bill-view","bill-print")).join("")||"<p class='muted'>No orders.</p>";document.querySelectorAll(".bill-view,.bill-print").forEach(b=>b.onclick=()=>{const o=orders.find(x=>x.id===b.dataset.id);window.fillBillPreview?.(o);document.getElementById("billModal")?.classList.add("active");if(b.classList.contains("bill-print"))setTimeout(()=>document.getElementById("printBillBtn")?.click(),100);});}
-async function saveStaff(){const n=document.getElementById("st-name").value.trim(),sal=Number(document.getElementById("st-salary").value||0);if(!n||!sal)return alert("Name and salary required");await addDoc(collection(db,"restaurants",restaurantId,"staff"),{name:n,phone:document.getElementById("st-phone").value,role:document.getElementById("st-role").value,joiningDate:document.getElementById("st-join").value,salaryType:document.getElementById("st-type").value,salary:sal,isActive:true,status:"active",createdAt:serverTimestamp()});}
+function renderBills(){const q=(document.getElementById("bill-q")?.value||"").toLowerCase(),status=document.getElementById("bill-status")?.value||"", date=document.getElementById("bill-date")?.value||"",method=document.getElementById("bill-method")?.value||"",sortMode=document.getElementById("bill-sort")?.value||"newest";const rows=sortBills(orders.filter(o=>billSearchText(o).includes(q)&&(!status||String(o.paymentStatus||"unpaid").toLowerCase()===status)&&(!method||String(o.paymentMethod||"cash").toLowerCase()===method)&&(!date||businessDateOf(o)===date)),sortMode);setHtmlIfChanged(document.getElementById("bill-list"),rows.map(o=>billCard(o,"bill-view","bill-print")).join("")||"<p class='muted'>No orders.</p>");document.getElementById("bill-list")?.querySelectorAll(".bill-view,.bill-print").forEach(b=>b.onclick=()=>{const o=orders.find(x=>x.id===b.dataset.id);window.fillBillPreview?.(o);document.getElementById("billModal")?.classList.add("active");if(b.classList.contains("bill-print"))setTimeout(()=>document.getElementById("printBillBtn")?.click(),100);});}
+/* ---------------------------------------------------------
+   STAFF MASTER (attendance / payroll records)
+
+   The form doubles as an editor. When editingStaffMasterId is
+   set, the save writes back to THAT document with setDoc(merge)
+   instead of addDoc — so editing a staff member updates the
+   existing record and never creates a duplicate. The live
+   `staff` listener re-renders just that row afterwards; nothing
+   is re-fetched.
+--------------------------------------------------------- */
+let editingStaffMasterId = "";
+
+function staffMasterFormValues(){
+  return {
+    name: document.getElementById("st-name").value.trim(),
+    phone: document.getElementById("st-phone").value.trim(),
+    role: document.getElementById("st-role").value.trim(),
+    joiningDate: document.getElementById("st-join").value,
+    salaryType: document.getElementById("st-type").value,
+    salary: Number(document.getElementById("st-salary").value||0)
+  };
+}
+
+function resetStaffMasterForm(){
+  editingStaffMasterId="";
+  ["st-name","st-phone","st-role","st-join","st-salary"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+  const type=document.getElementById("st-type");if(type)type.value="monthly";
+  const save=document.getElementById("st-save");if(save)save.textContent="Add Staff";
+  document.getElementById("st-cancel")?.classList.add("hidden");
+}
+
+function editStaffMaster(id){
+  const member=staff.find(x=>x.id===id);
+  if(!member)return;
+  editingStaffMasterId=id;
+  const set=(elId,value)=>{const el=document.getElementById(elId);if(el)el.value=value??"";};
+  set("st-name",member.name);set("st-phone",member.phone);set("st-role",member.role);
+  set("st-join",member.joiningDate);set("st-type",member.salaryType||"monthly");set("st-salary",member.salary);
+  const save=document.getElementById("st-save");if(save)save.textContent="Save Changes";
+  document.getElementById("st-cancel")?.classList.remove("hidden");
+  document.getElementById("st-name")?.scrollIntoView({behavior:"smooth",block:"center"});
+}
+
+async function saveStaff(){
+  const values=staffMasterFormValues();
+  if(!values.name||!values.salary)return alert("Name and salary are required.");
+  if(values.salary<0)return alert("Salary cannot be negative.");
+  if(values.phone&&values.phone.replace(/\D/g,"").length<10)return alert("Enter a valid phone number, or leave it empty.");
+  try{
+    if(editingStaffMasterId){
+      // Updates the existing document — never creates a second record.
+      await setDoc(doc(db,"restaurants",restaurantId,"staff",editingStaffMasterId),{...values,updatedAt:serverTimestamp(),updatedBy:user.email||user.uid||"admin"},{merge:true});
+    }else{
+      await addDoc(collection(db,"restaurants",restaurantId,"staff"),{...values,isActive:true,status:"active",createdAt:serverTimestamp(),createdBy:user.email||user.uid||"admin"});
+    }
+    resetStaffMasterForm();
+  }catch(error){
+    devError("saveStaff failed",error);
+    alert("Could not save this staff record. Please check your connection and try again.");
+  }
+}
 async function deactivateStaffMaster(id,name){if(!confirm(`Deactivate ${name}?\n\nThey will lose staff access but historical attendance and payroll records will remain. You can reactivate them anytime.`))return;await setDoc(doc(db,"restaurants",restaurantId,"staff",id),{isActive:false,status:"inactive",deactivatedAt:serverTimestamp()},{merge:true});}
 async function reactivateStaffMaster(id,name){if(!confirm(`Reactivate ${name}? Their access and attendance marking will be restored.`))return;await setDoc(doc(db,"restaurants",restaurantId,"staff",id),{isActive:true,status:"active",reactivatedAt:serverTimestamp()},{merge:true});}
 async function deleteStaffMaster(id,name){
@@ -129,25 +190,30 @@ function renderStaff(){
   const d=document.getElementById("at-date").value||today();
   const activeStaff=staff.filter(s=>s.isActive!==false);
   const inactiveStaff=staff.filter(s=>s.isActive===false);
-  const activeHtml=activeStaff.map(s=>{const a=attendance.find(x=>x.staffId===s.id&&x.date===d);return `<div class="card" style="padding:9px;margin:7px 0"><strong>${esc(s.name)}</strong> <small>${esc(s.role)}</small> · ${esc(a?.status||"Not marked")}<div class="btn-group" style="margin-top:5px"><button class="btn btn-sm btn-primary at" data-id="${s.id}" data-s="Present">Check In</button><button class="btn btn-sm btn-outline at" data-id="${s.id}" data-s="Half Day">Half Day</button><button class="btn btn-sm btn-outline at" data-id="${s.id}" data-s="Paid Leave">Paid Leave</button><button class="btn btn-sm btn-danger at" data-id="${s.id}" data-s="Absent">Absent</button>${a?.checkIn&&!a?.checkOut?`<button class="btn btn-sm btn-primary checkout" data-id="${s.id}">Check Out</button>`:""}<button class="btn btn-sm btn-outline deactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Deactivate</button></div></div>`}).join("");
-  const inactiveHtml=inactiveStaff.length?`<div style="margin-top:14px"><div class="muted small" style="margin-bottom:6px">Inactive staff</div>${inactiveStaff.map(s=>`<div class="card" style="padding:9px;margin:7px 0;opacity:.75"><strong>${esc(s.name)}</strong> <small>${esc(s.role)}</small> · <span class="status-badge warning">Inactive</span><div class="btn-group" style="margin-top:5px"><button class="btn btn-sm btn-outline reactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Reactivate</button><button class="btn btn-sm btn-danger delete-staff" data-id="${s.id}" data-name="${esc(s.name)}">Delete Permanently</button></div></div>`).join("")}</div>`:"";
-  document.getElementById("at-list").innerHTML=activeHtml+inactiveHtml;
+  const activeHtml=activeStaff.map(s=>{const a=attendance.find(x=>x.staffId===s.id&&x.date===d);return `<div class="card" style="padding:9px;margin:7px 0"><strong>${esc(s.name)}</strong> <small>${esc(s.role)}</small> · ${esc(a?.status||"Not marked")}<div class="btn-group" style="margin-top:5px"><button class="btn btn-sm btn-primary at" data-id="${s.id}" data-s="Present">Check In</button><button class="btn btn-sm btn-outline at" data-id="${s.id}" data-s="Half Day">Half Day</button><button class="btn btn-sm btn-outline at" data-id="${s.id}" data-s="Paid Leave">Paid Leave</button><button class="btn btn-sm btn-danger at" data-id="${s.id}" data-s="Absent">Absent</button>${a?.checkIn&&!a?.checkOut?`<button class="btn btn-sm btn-primary checkout" data-id="${s.id}">Check Out</button>`:""}<button class="btn btn-sm btn-primary edit-staff" data-id="${s.id}">Edit</button><button class="btn btn-sm btn-outline deactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Deactivate</button></div></div>`}).join("");
+  const inactiveHtml=inactiveStaff.length?`<div style="margin-top:14px"><div class="muted small" style="margin-bottom:6px">Inactive staff</div>${inactiveStaff.map(s=>`<div class="card" style="padding:9px;margin:7px 0;opacity:.75"><strong>${esc(s.name)}</strong> <small>${esc(s.role)}</small> · <span class="status-badge warning">Inactive</span><div class="btn-group" style="margin-top:5px"><button class="btn btn-sm btn-primary edit-staff" data-id="${s.id}">Edit</button><button class="btn btn-sm btn-outline reactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Reactivate</button><button class="btn btn-sm btn-danger delete-staff" data-id="${s.id}" data-name="${esc(s.name)}">Delete Permanently</button></div></div>`).join("")}</div>`:"";
+  setHtmlIfChanged(document.getElementById("at-list"),activeHtml+inactiveHtml);
   document.querySelectorAll(".at").forEach(b=>b.onclick=()=>setDoc(doc(db,"restaurants",restaurantId,"attendance",`${b.dataset.id}_${d}`),{staffId:b.dataset.id,date:d,status:b.dataset.s,checkIn:b.dataset.s==="Present"?new Date().toISOString():null,checkOut:null,totalHours:0,updatedAt:serverTimestamp()},{merge:true}));
   document.querySelectorAll(".checkout").forEach(b=>b.onclick=async()=>{const a=attendance.find(x=>x.staffId===b.dataset.id&&x.date===d),h=(Date.now()-new Date(a.checkIn))/36e5;await setDoc(doc(db,"restaurants",restaurantId,"attendance",`${b.dataset.id}_${d}`),{checkOut:new Date().toISOString(),totalHours:+h.toFixed(2),updatedAt:serverTimestamp()},{merge:true})});
-  document.querySelectorAll(".deactivate-staff").forEach(b=>b.onclick=()=>deactivateStaffMaster(b.dataset.id,b.dataset.name));
-  document.querySelectorAll(".reactivate-staff").forEach(b=>b.onclick=()=>reactivateStaffMaster(b.dataset.id,b.dataset.name));
-  document.querySelectorAll(".delete-staff").forEach(b=>b.onclick=()=>deleteStaffMaster(b.dataset.id,b.dataset.name));
+  // Scoped to this list so these bindings cannot clash with the identically
+  // classed buttons in the payroll table below.
+  const host=document.getElementById("at-list");
+  host?.querySelectorAll(".edit-staff").forEach(b=>b.onclick=()=>editStaffMaster(b.dataset.id));
+  host?.querySelectorAll(".deactivate-staff").forEach(b=>b.onclick=()=>deactivateStaffMaster(b.dataset.id,b.dataset.name));
+  host?.querySelectorAll(".reactivate-staff").forEach(b=>b.onclick=()=>reactivateStaffMaster(b.dataset.id,b.dataset.name));
+  host?.querySelectorAll(".delete-staff").forEach(b=>b.onclick=()=>deleteStaffMaster(b.dataset.id,b.dataset.name));
 }
 function renderPayroll(){
   const m=document.getElementById("pay-month").value||today().slice(0,7);
   document.getElementById("pay-table").innerHTML=`<table class="data-table"><tr><th>Staff</th><th>Type</th><th>Present</th><th>Half</th><th>Leave</th><th>Absent</th><th>Advance</th><th>Bonus</th><th>Deductions</th><th>Final</th><th>Status</th><th>Actions</th></tr>${staff.map(s=>{
     const a=attendance.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)),p=a.filter(x=>x.status==="Present").length,h=a.filter(x=>x.status==="Half Day").length,l=a.filter(x=>x.status==="Paid Leave").length,ab=a.filter(x=>x.status==="Absent").length,ad=advances.filter(x=>x.staffId===s.id&&x.date?.startsWith(m)).reduce((z,x)=>z+Number(x.amount||0),0),base=s.salaryType==="daily"?s.salary*(p+h*.5+l):s.salary,final=Math.max(0,base-ad);
     const inactive=s.isActive===false;
-    const actions=inactive
+    const actions=`<button class="btn btn-sm btn-primary edit-staff" data-id="${s.id}">Edit</button>`+(inactive
       ?`<button class="btn btn-sm btn-outline reactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Reactivate</button><button class="btn btn-sm btn-danger delete-staff" data-id="${s.id}" data-name="${esc(s.name)}">Delete</button>`
-      :`<button class="btn btn-sm btn-outline deactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Deactivate</button>`;
+      :`<button class="btn btn-sm btn-outline deactivate-staff" data-id="${s.id}" data-name="${esc(s.name)}">Deactivate</button>`);
     return `<tr><td>${esc(s.name)}</td><td>${esc(s.salaryType)}</td><td>${p}</td><td>${h}</td><td>${l}</td><td>${ab}</td><td>${money(ad)}</td><td>0</td><td>0</td><td>${money(final)}</td><td>${inactive?"Inactive":"Unpaid"}</td><td><div class="btn-group">${actions}</div></td></tr>`;
   }).join("")}</table>`;
+  document.querySelectorAll("#pay-table .edit-staff").forEach(b=>b.onclick=()=>{open("staff","Staff Attendance","");editStaffMaster(b.dataset.id);});
   document.querySelectorAll("#pay-table .deactivate-staff").forEach(b=>b.onclick=()=>deactivateStaffMaster(b.dataset.id,b.dataset.name));
   document.querySelectorAll("#pay-table .reactivate-staff").forEach(b=>b.onclick=()=>reactivateStaffMaster(b.dataset.id,b.dataset.name));
   document.querySelectorAll("#pay-table .delete-staff").forEach(b=>b.onclick=()=>deleteStaffMaster(b.dataset.id,b.dataset.name));
@@ -160,10 +226,10 @@ async function saveIntegration(){const p=document.getElementById("del-platform")
 nav("accounts","fa-wallet","Accounts");nav("print-bills","fa-print","Print Bills");nav("staff","fa-users","Staff Attendance");nav("payroll","fa-money-check-dollar","Payroll");nav("delivery","fa-motorcycle","Delivery Integrations");
 section("accounts",`<div id="acc-stats" class="stats-grid"></div><div class="grid-2" style="margin-top:18px"><div class="card"><div class="card-header"><h3 class="card-title">Expense Management</h3></div><div class="card-body"><input id="ex-name" class="form-input" placeholder="Expense name"/><select id="ex-category" class="form-select"><option>Electricity Bill</option><option>Rent</option><option>Raw Material Purchase</option><option>Staff Salary</option><option>Grocery Purchase</option><option>Gas Cylinder</option><option>Water Bill</option><option>Internet/WiFi</option><option>Cleaning</option><option>Maintenance</option><option>Packaging</option><option>Marketing</option><option>Fuel</option><option>Delivery Expense</option><option>Miscellaneous</option></select><input id="ex-amount" class="form-input" type="number" placeholder="Amount"/><input id="ex-date" class="form-input" type="date" value="${today()}"/><select id="ex-mode" class="form-select"><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank">Bank Transfer</option></select><input id="ex-vendor" class="form-input" placeholder="Vendor name"/><input id="ex-note" class="form-input" placeholder="Notes"/><input id="ex-file" class="form-input" type="file" accept="image/*,application/pdf"/><button id="ex-save" class="btn btn-primary">Save Expense</button></div></div><div class="card"><div class="card-header"><h3 class="card-title">Accounts Report</h3><button id="acc-csv" class="btn btn-outline btn-sm">Excel CSV</button><button id="acc-print" class="btn btn-outline btn-sm">PDF / Print</button></div><div class="card-body" id="acc-table"></div></div></div>`);
 section("print-bills",`<div class="card"><div class="card-header"><h3 class="card-title">Select an Order</h3></div><div class="card-body"><div class="form-row"><input id="bill-q" class="form-input" placeholder="Order no, order ID, table, customer, phone"/><input id="bill-date" class="form-input" type="date"/><select id="bill-status" class="form-select"><option value="">All payments</option><option value="paid">Paid</option><option value="unpaid">Unpaid</option></select><select id="bill-method" class="form-select"><option value="">All methods</option><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="online">Online</option></select><select id="bill-sort" class="form-select"><option value="newest">Newest Order First</option><option value="oldest">Oldest Order First</option><option value="order-asc">Order Number: Low to High</option><option value="order-desc">Order Number: High to Low</option><option value="amount-asc">Amount: Low to High</option><option value="amount-desc">Amount: High to Low</option></select></div><div id="bill-list"></div></div></div>`);
-section("staff",`<div class="grid-2"><div class="card"><div class="card-header"><h3 class="card-title">Staff Master</h3></div><div class="card-body"><input id="st-name" class="form-input" placeholder="Name"/><input id="st-phone" class="form-input" placeholder="Phone"/><input id="st-role" class="form-input" placeholder="Role"/><input id="st-join" class="form-input" type="date"/><select id="st-type" class="form-select"><option value="monthly">Monthly Salary</option><option value="daily">Daily Wage</option></select><input id="st-salary" class="form-input" type="number" placeholder="Salary"/><button id="st-save" class="btn btn-primary">Add Staff</button></div></div><div class="card"><div class="card-header"><h3 class="card-title">Daily Attendance</h3></div><div class="card-body"><input id="at-date" class="form-input" type="date" value="${today()}"/><div id="at-list"></div></div></div></div>`);
+section("staff",`<div class="grid-2"><div class="card"><div class="card-header"><h3 class="card-title">Staff Master</h3></div><div class="card-body"><input id="st-name" class="form-input" placeholder="Name"/><input id="st-phone" class="form-input" placeholder="Phone"/><input id="st-role" class="form-input" placeholder="Role"/><input id="st-join" class="form-input" type="date"/><select id="st-type" class="form-select"><option value="monthly">Monthly Salary</option><option value="daily">Daily Wage</option></select><input id="st-salary" class="form-input" type="number" placeholder="Salary"/><div class="btn-group"><button id="st-save" class="btn btn-primary">Add Staff</button><button id="st-cancel" class="btn btn-outline hidden" type="button">Cancel</button></div></div></div><div class="card"><div class="card-header"><h3 class="card-title">Daily Attendance</h3></div><div class="card-body"><input id="at-date" class="form-input" type="date" value="${today()}"/><div id="at-list"></div></div></div></div>`);
 section("payroll",`<div class="card"><div class="card-header"><h3 class="card-title">Attendance-based Payroll</h3><button id="pay-print" class="btn btn-outline btn-sm">Salary Slips / Print</button></div><div class="card-body"><input id="pay-month" class="form-input" type="month" value="${today().slice(0,7)}"/><div class="form-row"><select id="adv-staff" class="form-select"></select><input id="adv-amount" class="form-input" type="number" placeholder="Advance salary"/><button id="adv-save" class="btn btn-outline">Add Advance</button></div><div id="pay-table"></div></div></div>`);
 section("delivery",`<div class="grid-2"><div class="card"><div class="card-header"><h3 class="card-title">Integration Settings</h3></div><div class="card-body"><select id="del-platform" class="form-select"><option>Zomato</option><option>Swiggy</option><option>ONDC</option><option>Magicpin</option><option>Manual Orders</option><option>Other Platform</option></select><label><input id="del-enabled" type="checkbox"/> Enable platform</label><input id="del-merchant" class="form-input" placeholder="Merchant ID"/><input id="del-key" class="form-input" placeholder="API key"/><input id="del-webhook" class="form-input" placeholder="Webhook URL"/><input id="del-commission" class="form-input" type="number" placeholder="Commission %"/><button id="del-save" class="btn btn-primary">Save Integration</button></div></div><div class="card"><div class="card-header"><h3 class="card-title">Platform Reports</h3></div><div class="card-body"><table class="data-table"><thead><tr><th>Platform</th><th>Status</th><th>Merchant</th><th>Commission</th></tr></thead><tbody id="del-list"></tbody></table><p class="small muted">Gross sales, commission, net receivable and settlement reports become available as platform orders are imported.</p></div></div></div>`);
-document.querySelectorAll(".module-nav").forEach(a=>a.onclick=e=>{e.preventDefault();open(a.dataset.module,a.textContent.trim(),"")});document.getElementById("ex-save").onclick=saveExpense;document.getElementById("st-save").onclick=saveStaff;document.getElementById("adv-save").onclick=addAdvance;document.getElementById("del-save").onclick=saveIntegration;["bill-q","bill-date","bill-status","bill-method","bill-sort"].forEach(id=>document.getElementById(id).oninput=renderBills);document.getElementById("at-date").onchange=renderStaff;document.getElementById("pay-month").onchange=renderPayroll;document.getElementById("pay-print").onclick=()=>print("pay-table","Salary Slip / Payroll");document.getElementById("acc-print").onclick=()=>print("acc-table","Accounts Report");document.getElementById("acc-csv").onclick=()=>exportCsv([["Report","Generated"],["Accounts",today()]],"accounts-report.csv");
+document.querySelectorAll(".module-nav").forEach(a=>a.onclick=e=>{e.preventDefault();open(a.dataset.module,a.textContent.trim(),"")});document.getElementById("ex-save").onclick=saveExpense;document.getElementById("st-save").onclick=saveStaff;document.getElementById("st-cancel").onclick=resetStaffMasterForm;document.getElementById("adv-save").onclick=addAdvance;document.getElementById("del-save").onclick=saveIntegration;const debouncedRenderBills=debounce(renderBills,180);["bill-q","bill-date","bill-status","bill-method","bill-sort"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=debouncedRenderBills;});document.getElementById("at-date").onchange=renderStaff;document.getElementById("pay-month").onchange=renderPayroll;document.getElementById("pay-print").onclick=()=>print("pay-table","Salary Slip / Payroll");document.getElementById("acc-print").onclick=()=>print("acc-table","Accounts Report");document.getElementById("acc-csv").onclick=()=>exportCsv([["Report","Generated"],["Accounts",today()]],"accounts-report.csv");
 // Every onSnapshot below previously had no error callback: a transient
 // permission-denied — e.g. the ID token not yet restored from IndexedDB on
 // a cold page load (this file fires all of these synchronously at module
@@ -198,8 +264,15 @@ function subscribeWithAuthRetry(label, ref, onNext) {
   start();
   registerCleanup(() => unsub());
 }
-const scheduleModuleOrdersRender = createCoalescedRunner(snap => { orders=snap.docs.map(d=>({id:d.id,...d.data()}));renderAccounts();renderBills(); }, 200);
-subscribeWithAuthRetry("orders",query(collection(db,"orders"),where("restaurantId","==",restaurantId)),scheduleModuleOrdersRender);
+// This file used to open its OWN live query over the whole `orders`
+// collection, duplicating the one admin.js already runs: two full copies of
+// the same data, twice the Firestore reads, and two render pipelines firing
+// on every single write. Both now read from one shared listener.
+registerCleanup(subscribeOrders(restaurantId, liveOrders => {
+  orders = liveOrders;
+  renderAccounts();
+  renderBills();
+}));
 subscribeWithAuthRetry("expenses",collection(db,"restaurants",restaurantId,"expenses"),s=>{expenses=s.docs.map(d=>d.data());renderAccounts()});
 subscribeWithAuthRetry("staff",collection(db,"restaurants",restaurantId,"staff"),s=>{staff=s.docs.map(d=>({id:d.id,...d.data()}));document.getElementById("adv-staff").innerHTML=staff.filter(x=>x.isActive!==false).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");renderStaff();renderPayroll()});
 subscribeWithAuthRetry("attendance",collection(db,"restaurants",restaurantId,"attendance"),s=>{attendance=s.docs.map(d=>d.data());renderStaff();renderPayroll()});
