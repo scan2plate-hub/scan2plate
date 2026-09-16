@@ -3994,7 +3994,7 @@ function renderTablesSection() {
   const disabledCount = tableStatuses.filter(table => table.disabled).length;
   const availableCount = tableStatuses.length - openCount - disabledCount;
 
-  tableSummaryEl.innerHTML = `
+  setHtmlIfChanged(tableSummaryEl, `
     <div class="stat-card">
       <div class="stat-icon orange"><i class="fas fa-chair"></i></div>
       <div class="stat-info"><h3>Occupied Tables</h3><div class="value">${openCount}</div></div>
@@ -4005,7 +4005,7 @@ function renderTablesSection() {
     </div>
     <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-table"></i></div><div class="stat-info"><h3>Total Tables</h3><div class="value">${tableOptions.length}</div></div></div>
     <div class="stat-card"><div class="stat-icon danger"><i class="fas fa-ban"></i></div><div class="stat-info"><h3>Disabled Tables</h3><div class="value">${disabledCount}</div></div></div>
-  `;
+  `);
 
   const tableSearch = String(tableSearchEl?.value || "").trim().toLowerCase();
   const visibleTableStatuses = tableStatuses.filter(table => {
@@ -4016,16 +4016,17 @@ function renderTablesSection() {
   });
 
   if (!visibleTableStatuses.length) {
-    tablesGridEl.innerHTML = `
+    setHtmlIfChanged(tablesGridEl, `
       <div class="empty-state" style="grid-column:1/-1;">
         <i class="fas fa-table"></i>
         <h4>No matching tables found.</h4>
       </div>
-    `;
+    `);
+    bindTableGridActions();
     return;
   }
 
-  tablesGridEl.innerHTML = visibleTableStatuses.map(table => {
+  setHtmlIfChanged(tablesGridEl, visibleTableStatuses.map(table => {
     const { tableNo, order, occupied, disabled, lastOrder } = table;
     const cardClass = table.state;
     const statusText = table.label;
@@ -4067,38 +4068,59 @@ function renderTablesSection() {
         <div class="table-actions">${actionBtn}${paymentAction}${disabled ? "" : `<button class="btn btn-sm btn-outline table-toggle-btn" data-table="${escapeHtml(tableNo)}" data-disabled="true">Disable</button>`}<button class="btn btn-sm btn-outline table-qr-btn" data-table="${escapeHtml(tableNo)}">QR</button></div>
       </div>
     `;
-  }).join("");
+  }).join(""));
 
-  tablesGridEl.querySelectorAll(".table-open-bill-btn").forEach(btn => {
-    btn.addEventListener("click", () => loadOrderIntoManualBill(btn.dataset.id || ""));
-  });
-
-  tablesGridEl.querySelectorAll(".table-paid-btn").forEach(btn => {
-    btn.addEventListener("click", () => showPaymentMethodModal(btn.dataset.id || ""));
-  });
-
-  tablesGridEl.querySelectorAll(".table-new-bill-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const selectedTable = String(btn.dataset.table || "01").padStart(2, "0");
-
-resetManualBillForm();
-renderTableNumberOptions(selectedTable);
-
-if (manualTableNoEl) {
-  manualTableNoEl.value = selectedTable;
+  bindTableGridActions();
 }
+
+// Bound ONCE on the grid. The grid used to re-attach a click handler to every
+// table card on every order write; combined with the write guard above (which
+// keeps the existing nodes when nothing changed) that would have stacked
+// duplicate handlers and fired "Paid" twice. Delegation makes both safe.
+function bindTableGridActions() {
+  if (!tablesGridEl || tablesGridEl.dataset.s2pActionsBound === "true") return;
+  tablesGridEl.dataset.s2pActionsBound = "true";
+  tablesGridEl.addEventListener("click", async event => {
+    const openBill = event.target.closest(".table-open-bill-btn");
+    if (openBill) return loadOrderIntoManualBill(openBill.dataset.id || "");
+
+    const paid = event.target.closest(".table-paid-btn");
+    if (paid) return showPaymentMethodModal(paid.dataset.id || "");
+
+    const newBill = event.target.closest(".table-new-bill-btn");
+    if (newBill) {
+      const selectedTable = String(newBill.dataset.table || "01").padStart(2, "0");
+      resetManualBillForm();
+      renderTableNumberOptions(selectedTable);
+      if (manualTableNoEl) manualTableNoEl.value = selectedTable;
       if (typeof window.switchSection === "function") window.switchSection("billing");
       window.scrollTo({ top: 0, behavior: "smooth" });
-    });
+      return;
+    }
+
+    const toggle = event.target.closest(".table-toggle-btn");
+    if (toggle) {
+      const tableNo = String(toggle.dataset.table || "").padStart(2, "0");
+      try {
+        await setDoc(doc(db, "restaurants", restaurantId, "tables", tableNo), { tableNo, disabled: toggle.dataset.disabled === "true", active: toggle.dataset.disabled !== "true", updatedAt: serverTimestamp() }, { merge: true });
+      } catch (error) {
+        devError("table toggle failed", error);
+        showAdminToast("Could not update this table. Please try again.", "danger");
+      }
+      return;
+    }
+
+    const qr = event.target.closest(".table-qr-btn");
+    if (qr) {
+      const tableNo = String(qr.dataset.table || "").padStart(2, "0");
+      const url = `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`;
+      const link = document.createElement("a");
+      link.href = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}`;
+      link.download = `${restaurantId}-table-${tableNo}-qr.png`;
+      link.target = "_blank";
+      link.click();
+    }
   });
-  tablesGridEl.querySelectorAll(".table-toggle-btn").forEach(btn => btn.addEventListener("click", async () => {
-    const tableNo = String(btn.dataset.table || "").padStart(2,"0");
-    await setDoc(doc(db,"restaurants",restaurantId,"tables",tableNo), { tableNo, disabled: btn.dataset.disabled === "true", active: btn.dataset.disabled !== "true", updatedAt: serverTimestamp() }, { merge:true });
-  }));
-  tablesGridEl.querySelectorAll(".table-qr-btn").forEach(btn => btn.addEventListener("click", () => {
-    const tableNo = String(btn.dataset.table || "").padStart(2,"0"); const url = `${location.origin}/index.html?restaurantId=${encodeURIComponent(restaurantId)}&table=${encodeURIComponent(tableNo)}`;
-    const link = document.createElement("a"); link.href = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(url)}`; link.download = `${restaurantId}-table-${tableNo}-qr.png`; link.target = "_blank"; link.click();
-  }));
 }
 
 /* =========================================================

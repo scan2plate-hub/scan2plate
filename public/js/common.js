@@ -134,7 +134,16 @@ export function closeStaleOverlays() {
   document.body.classList.remove("modal-open");
 }
 
+// The admin dashboard loads admin.js AND admin-modules.js, and both called
+// this. That installed two window error handlers, two document click handlers
+// and — the expensive one — two 5-second watchdog intervals, each running four
+// full-document querySelectorAll sweeps forever. One install per page is
+// enough; the first caller's page name wins.
+let appSafetyInstalled = false;
+
 export function installAppSafety(options = {}) {
+  if (appSafetyInstalled) return;
+  appSafetyInstalled = true;
   const timeoutMs = Number(options.stuckTimeoutMs || 15000);
   const pageName = options.pageName || "Scan2Plate";
   window.addEventListener("error", event => {
@@ -360,6 +369,52 @@ export function resolveAllowedModules(userRole = "", customPermissions = null) {
 export function canAccessModule(userRole = "", moduleName = "", customPermissions = null) {
   const allowed = resolveAllowedModules(userRole, customPermissions);
   return allowed === "all" || allowed.includes(moduleName);
+}
+
+/* =========================================================
+   CURRENT vs PAST STAFF
+
+   Staff records carry `status` ("active"/"inactive") and the
+   older boolean `isActive`. saveStaff and the deactivate path
+   have always written BOTH, so they agree; this reads `status`
+   first and falls back to `isActive`, and treats a record with
+   neither as active so staff created before either field
+   existed are still current employees.
+
+   Every current-staff surface (Attendance, current Payroll,
+   advance-salary and staff dropdowns) must decide membership
+   with this — never with "a Firestore document exists".
+========================================================= */
+export function isActiveStaffRecord(staffMember = {}) {
+  const status = String(staffMember.status || "").trim().toLowerCase();
+  if (status) return status === "active";
+  return staffMember.isActive !== false;
+}
+
+/**
+ * Who appears on a payroll month.
+ *
+ * Current (or future) month -> current staff only. A person who has left is
+ * not a current employee, so they must not appear in payroll being generated
+ * now, even though their documents and history remain.
+ *
+ * A PAST month -> current staff PLUS any past staff who actually have
+ * attendance or advance records in that month. That is historical accounting
+ * data and has to stay reportable; it is never deleted to hide someone from
+ * the current list.
+ *
+ * `historical: true` marks a row as a closed record, which the UI renders
+ * without edit/delete actions.
+ */
+export function selectPayrollStaff({ staff = [], attendance = [], advances = [], month = "", currentMonth = "" } = {}) {
+  const active = staff.filter(isActiveStaffRecord).map(member => ({ member, historical: false }));
+  if (!month || !currentMonth || month >= currentMonth) return active;
+  const inMonth = (rows, id) => rows.some(row => row.staffId === id && String(row.date || "").startsWith(month));
+  const past = staff
+    .filter(member => !isActiveStaffRecord(member))
+    .filter(member => inMonth(attendance, member.id) || inMonth(advances, member.id))
+    .map(member => ({ member, historical: true }));
+  return [...active, ...past];
 }
 
 export function renderStatus(status = "pending") {
