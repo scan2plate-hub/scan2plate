@@ -1,7 +1,7 @@
 import { app, auth, db } from "./firebase.js";
 import { collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, limit, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, devError, showStuckFallback, debounce, setHtmlIfChanged, billDisplayNumber, isActiveStaffRecord, selectPayrollStaff, takeWindow, resetWindow, showMoreMarkup, bindShowMore } from "./common.js?v=freeze-fix-20260816";
+import { getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, devError, debounce, setHtmlIfChanged, billDisplayNumber, isActiveStaffRecord, selectPayrollStaff, takeWindow, resetWindow, showMoreMarkup, bindShowMore } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders } from "./orders-store.js?v=fast-refresh-20260916";
 
 installAppSafety({ pageName: "Admin Modules", stuckTimeoutMs: 18000 });
@@ -556,8 +556,10 @@ function subscribeWithAuthRetry(label, ref, onNext) {
           devError(`${label} token refresh retry failed`, refreshError);
         }
       }
+      // Logged for diagnosis only. A transient listener error must not put a
+      // "refresh the page" banner over a working dashboard — the affected
+      // section keeps its last data and recovers when the listener does.
       devError(`${label} listener failed`, error);
-      showStuckFallback("Unable to load this data. Refresh if needed.");
     });
   };
   start();

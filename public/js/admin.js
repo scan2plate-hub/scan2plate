@@ -18,7 +18,7 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
@@ -1208,12 +1208,11 @@ staffDeletePasswordField?.addEventListener("keydown", event => {
 /* =========================================================
    UTILS
 ========================================================= */
+// money() is called for every amount on every card, row and bill line. It was
+// building a fresh Intl.NumberFormat each time; the shared formatter is built
+// once. Output is byte-identical.
 function money(v) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0
-  }).format(Number(v || 0));
+  return currencyFormatter(0).format(Number(v || 0));
 }
 
 function escapeHtml(str = "") {
