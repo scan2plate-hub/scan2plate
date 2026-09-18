@@ -237,7 +237,9 @@ function showSubscriptionLock(restaurantData = {}) {
   try {
     const support = JSON.parse(localStorage.getItem("scan2plate_super_settings") || "{}");
     const contact = [support.supportPhone, support.supportEmail].filter(Boolean).join(" · ");
-    if (contact) subscriptionSupportEl.textContent = `For renewal, contact Scan2Plate Support: ${contact}`;
+    // Renewal is self-service now, so support is an alternative rather than
+    // the only route.
+    if (contact) subscriptionSupportEl.textContent = `Renew below, or contact Scan2Plate Support: ${contact}`;
   } catch {}
   subscriptionLockEl?.classList.add("show");
 }
@@ -267,10 +269,12 @@ async function checkRestaurantSubscription() {
 }
 
 renewSubscriptionBtn?.addEventListener("click", () => {
-  const support = (() => { try { return JSON.parse(localStorage.getItem("scan2plate_super_settings") || "{}"); } catch { return {}; } })();
-  const subject = encodeURIComponent(`Renew Scan2Plate subscription — ${restaurantId}`);
-  if (support.supportEmail) window.location.href = `mailto:${encodeURIComponent(support.supportEmail)}?subject=${subject}`;
-  else alert("Please contact your Super Admin to renew this subscription.");
+  // This used to open a mailto, or tell the owner to contact their Super
+  // Admin — a dead end for someone who is trying to pay. It now goes to the
+  // renewal page, which sells the plans for this business type and takes the
+  // payment. "Contact Super Admin" beside it is still there for anyone who
+  // would rather ask a human.
+  window.location.assign("./renew.html");
 });
 contactSuperAdminBtn?.addEventListener("click", () => {
   const support = (() => { try { return JSON.parse(localStorage.getItem("scan2plate_super_settings") || "{}"); } catch { return {}; } })();
