@@ -24,6 +24,7 @@ import {
   formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive
 } from "./subscription-core.js";
 import { savePlan, clearSubscriptionCache } from "./subscription-client.js";
+import { getBackendBaseUrl } from "./common.js";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -75,6 +76,7 @@ export function mountSuperAdminBilling() {
       <div class="sa-card">
         <div class="sa-card-head"><h2>Subscription Plans</h2><button class="sa-btn" id="newPlanBtn" type="button"><i class="fa-solid fa-plus"></i>New Plan</button></div>
         <div class="sa-card-body">
+          <div id="razorpayStatus" class="sa-alert" style="margin-bottom:16px">Checking payment configuration…</div>
           <p class="sa-sub" style="margin-top:0">Pricing for every business type. Saving syncs the plan with Razorpay: renaming a plan reuses its existing Razorpay plan, and only a real price change creates a new one.</p>
           <div id="planEditor"></div>
           <div class="sa-table-wrap" style="margin-top:18px">
@@ -162,6 +164,47 @@ export function mountSuperAdminBilling() {
   });
 
   watchCollections();
+  renderRazorpayStatus();
+}
+
+/* ---------------------------------------------------------
+   PAYMENT CONFIGURATION STATUS
+
+   Read-only. Razorpay credentials live in backend environment
+   variables and are never entered, stored or displayed here —
+   this only reports WHETHER the backend has them, so a
+   misconfigured deployment is obvious before anyone tries to
+   sell a plan.
+--------------------------------------------------------- */
+async function renderRazorpayStatus() {
+  const host = $("#razorpayStatus");
+  if (!host) return;
+  let health = null;
+  try {
+    const response = await fetch(`${getBackendBaseUrl()}/api/health`, { cache: "no-store" });
+    health = await response.json();
+  } catch {
+    host.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span><strong>Backend unreachable.</strong> Payment configuration could not be checked.</span>`;
+    return;
+  }
+  const line = (ok, label, detail) =>
+    `<div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+       <i class="fa-solid ${ok ? "fa-circle-check" : "fa-circle-xmark"}" style="color:${ok ? "#167541" : "#b3342f"}"></i>
+       <span>${esc(label)}${detail ? ` — <span class="sa-sub" style="display:inline">${esc(detail)}</span>` : ""}</span>
+     </div>`;
+
+  const ready = health.razorpayConfigured === true;
+  const webhook = health.razorpayWebhookConfigured === true;
+  const mode = String(health.razorpayMode || "unset");
+  host.style.background = ready && webhook ? "#eaf8ef" : "#fff8ef";
+  host.style.color = ready && webhook ? "#167541" : "#80520c";
+  host.innerHTML = `
+    <div style="width:100%">
+      <strong>Payment configuration${mode === "live" ? " · LIVE mode" : mode === "test" ? " · TEST mode" : ""}</strong>
+      ${line(ready, "RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET", health.razorpayKeyIdPreview || "not set")}
+      ${line(webhook, "RAZORPAY_WEBHOOK_SECRET", webhook ? "set" : "not set — webhooks will be rejected")}
+      ${ready && webhook ? "" : `<div class="sa-sub" style="margin-top:8px">Set these as environment variables on the backend and redeploy. See <code>docs/SUBSCRIPTIONS.md</code>. They are never entered here: a secret typed into a browser would be exposed.</div>`}
+    </div>`;
 }
 
 function showBillingSection(name, [title, subtitle]) {

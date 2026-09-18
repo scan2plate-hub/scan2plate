@@ -439,6 +439,13 @@ app.get("/api/health", (_, res) => res.json({
   firebaseAdminReady: adminReady,
   logoUploadRoute: true,
   ocrKeyConfigured: Boolean(ocrKey()),
+  // Booleans only. The values themselves are never exposed, and the key id is
+  // reported as a masked prefix so a wrong-account mix-up is spottable without
+  // revealing anything secret.
+  razorpayConfigured: razorpayReady,
+  razorpayKeyIdPreview: razorpayKeyId ? `${razorpayKeyId.slice(0, 11)}…` : "",
+  razorpayMode: razorpayKeyId.startsWith("rzp_live") ? "live" : razorpayKeyId.startsWith("rzp_test") ? "test" : "unset",
+  razorpayWebhookConfigured: Boolean(String(process.env.RAZORPAY_WEBHOOK_SECRET || "").trim()),
   ocrKeyLength: ocrKey().length,
   ocrTestRoute: true,
   ocrScanRoute: true,

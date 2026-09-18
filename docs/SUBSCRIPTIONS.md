@@ -183,6 +183,30 @@ RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx     # SECRET — backend only
 RAZORPAY_WEBHOOK_SECRET=xxxxxxxxxxxx     # SECRET — backend only
 ```
 
+### Where to put them
+
+| Where | How |
+| --- | --- |
+| Production | Your backend host's dashboard → Environment / Config Vars → add the three keys → **redeploy** (env changes only take effect on restart) |
+| Local development | `backend/.env`, copied from `backend/.env.example`. It is already in `.gitignore` |
+
+There is **no admin screen for entering these**, and there deliberately never
+will be. A secret typed into a browser form travels through the page, the
+network tab and usually the browser's autofill store, which is exactly what
+"backend only" rules out. Super Admin → Subscription Plans instead shows a
+read-only panel that reports *whether* the backend has each value, the live/test
+mode, and a masked prefix of the key id — enough to spot a wrong account or a
+missing webhook secret without ever displaying a secret.
+
+### `RAZORPAY_PLAN_ID` is not used
+
+Razorpay plan ids are not global configuration. Each Scan2Plate plan gets its
+own Razorpay plan, created by the backend when a Super Admin saves the plan and
+stored on that plan document as `razorpayMonthlyPlanId` / `razorpayYearlyPlanId`.
+A single env-var plan id would force every business type onto one price, which
+is the opposite of what this system is for. If you have that variable set
+somewhere, it is ignored; remove it.
+
 Already required by the existing deployment:
 
 ```bash
