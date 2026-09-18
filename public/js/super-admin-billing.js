@@ -19,11 +19,12 @@ import { db } from "./firebase.js";
 import {
   collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { listBusinessTypes, businessTypeLabel, normalizeBusinessType, MODULES } from "./business-types.js";
+import { listBusinessTypes, businessTypeLabel, normalizeBusinessType } from "./business-types.js";
 import {
   formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive
 } from "./subscription-core.js";
 import { savePlan, clearSubscriptionCache } from "./subscription-client.js";
+import { getBackendBaseUrl } from "./common.js";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -38,9 +39,27 @@ const LIMIT_FIELDS = [
 
 // Feature flags offered per plan, drawn from the shared module vocabulary so
 // the plan editor and the dashboard speak about the same things.
+// [stored key, label shown to a Super Admin].
+//
+// The labels are explicit rather than looked up in MODULES, because three of
+// these keys (tableManagement, kitchen, hotelRooms) have no MODULES entry and
+// were falling through to the raw field name — a Super Admin was being shown
+// "tableManagement" next to "QR Ordering". The keys are deliberately left
+// alone: they are what gets written into a plan's `features` map, and
+// renaming them would silently orphan the flags on every plan already saved.
 const FEATURE_FIELDS = [
-  "qrOrdering", "tableManagement", "kitchen", "kot", "inventory", "reports",
-  "onlineOrders", "preOrder", "whatsapp", "advancedReports", "hotelRooms", "appointments"
+  ["qrOrdering", "QR Ordering"],
+  ["tableManagement", "Table Management"],
+  ["kitchen", "Kitchen Display"],
+  ["kot", "KOT / Kitchen"],
+  ["inventory", "Inventory"],
+  ["reports", "Reports"],
+  ["onlineOrders", "Online Orders"],
+  ["preOrder", "Pre-Orders"],
+  ["whatsapp", "WhatsApp Alerts"],
+  ["advancedReports", "Advanced Reports"],
+  ["hotelRooms", "Rooms"],
+  ["appointments", "Appointments"]
 ];
 
 let plans = [];
@@ -75,6 +94,7 @@ export function mountSuperAdminBilling() {
       <div class="sa-card">
         <div class="sa-card-head"><h2>Subscription Plans</h2><button class="sa-btn" id="newPlanBtn" type="button"><i class="fa-solid fa-plus"></i>New Plan</button></div>
         <div class="sa-card-body">
+          <div id="razorpayStatus" class="sa-alert" style="margin-bottom:16px">Checking payment configuration…</div>
           <p class="sa-sub" style="margin-top:0">Pricing for every business type. Saving syncs the plan with Razorpay: renaming a plan reuses its existing Razorpay plan, and only a real price change creates a new one.</p>
           <div id="planEditor"></div>
           <div class="sa-table-wrap" style="margin-top:18px">
@@ -162,6 +182,47 @@ export function mountSuperAdminBilling() {
   });
 
   watchCollections();
+  renderRazorpayStatus();
+}
+
+/* ---------------------------------------------------------
+   PAYMENT CONFIGURATION STATUS
+
+   Read-only. Razorpay credentials live in backend environment
+   variables and are never entered, stored or displayed here —
+   this only reports WHETHER the backend has them, so a
+   misconfigured deployment is obvious before anyone tries to
+   sell a plan.
+--------------------------------------------------------- */
+async function renderRazorpayStatus() {
+  const host = $("#razorpayStatus");
+  if (!host) return;
+  let health = null;
+  try {
+    const response = await fetch(`${getBackendBaseUrl()}/api/health`, { cache: "no-store" });
+    health = await response.json();
+  } catch {
+    host.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span><strong>Backend unreachable.</strong> Payment configuration could not be checked.</span>`;
+    return;
+  }
+  const line = (ok, label, detail) =>
+    `<div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+       <i class="fa-solid ${ok ? "fa-circle-check" : "fa-circle-xmark"}" style="color:${ok ? "#167541" : "#b3342f"}"></i>
+       <span>${esc(label)}${detail ? ` — <span class="sa-sub" style="display:inline">${esc(detail)}</span>` : ""}</span>
+     </div>`;
+
+  const ready = health.razorpayConfigured === true;
+  const webhook = health.razorpayWebhookConfigured === true;
+  const mode = String(health.razorpayMode || "unset");
+  host.style.background = ready && webhook ? "#eaf8ef" : "#fff8ef";
+  host.style.color = ready && webhook ? "#167541" : "#80520c";
+  host.innerHTML = `
+    <div style="width:100%">
+      <strong>Payment configuration${mode === "live" ? " · LIVE mode" : mode === "test" ? " · TEST mode" : ""}</strong>
+      ${line(ready, "RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET", health.razorpayKeyIdPreview || "not set")}
+      ${line(webhook, "RAZORPAY_WEBHOOK_SECRET", webhook ? "set" : "not set — webhooks will be rejected")}
+      ${ready && webhook ? "" : `<div class="sa-sub" style="margin-top:8px">Set these as environment variables on the backend and redeploy. See <code>docs/SUBSCRIPTIONS.md</code>. They are never entered here: a secret typed into a browser would be exposed.</div>`}
+    </div>`;
 }
 
 function showBillingSection(name, [title, subtitle]) {
@@ -205,7 +266,12 @@ function renderPlans() {
   const body = $("#planRows");
   if (!body) return;
   body.innerHTML = plans.length ? plans.map(plan => {
-    const rzp = [plan.razorpayMonthlyPlanId ? "M" : "", plan.razorpayYearlyPlanId ? "Y" : ""].filter(Boolean).join(" + ") || "—";
+    // The ids themselves are not printed in the list: knowing WHETHER each
+    // cycle is configured is what this column is for, and a screenshot of the
+    // plan list should not carry identifiers out of the console.
+    const configured = [plan.razorpayMonthlyPlanId ? "M" : "", plan.razorpayYearlyPlanId ? "Y" : ""].filter(Boolean).join(" + ");
+    const planMode = String(plan.razorpayMonthlyPlanMode || plan.razorpayYearlyPlanMode || "").toUpperCase();
+    const rzp = configured ? `${configured}${planMode ? ` · ${planMode}` : ""}` : "not configured";
     return `<tr>
       <td><strong>${esc(plan.name || plan.id)}</strong>${plan.featured ? ' <span class="sa-badge active">Featured</span>' : ""}${plan.badgeText ? ` <span class="sa-badge">${esc(plan.badgeText)}</span>` : ""}<span class="sa-sub">${esc(plan.description || "")}</span></td>
       <td>${esc(plan.businessType === "all" ? "All business types" : businessTypeLabel(plan.businessType))}</td>
@@ -220,6 +286,21 @@ function renderPlans() {
       </div></td>
     </tr>`;
   }).join("") : `<tr><td colspan="8"><div class="sa-empty">No plans yet. Create one to start selling.</div></td></tr>`;
+}
+
+/**
+ * Whether a cycle's Razorpay plan id is configured, and which mode it was
+ * configured for. Shown so a deployment that was switched from test to live
+ * keys is visible here rather than discovered at a customer's checkout.
+ */
+function planIdStatus(plan, cycle) {
+  const id = cycle === "yearly" ? plan.razorpayYearlyPlanId : plan.razorpayMonthlyPlanId;
+  if (!id) return "Not configured — this cycle cannot be sold yet.";
+  const mode = String((cycle === "yearly" ? plan.razorpayYearlyPlanMode : plan.razorpayMonthlyPlanMode) || "").toUpperCase();
+  const source = String((cycle === "yearly" ? plan.razorpayYearlyPlanSource : plan.razorpayMonthlyPlanSource) || "") === "manual"
+    ? "entered manually" : "created by Scan2Plate";
+  const paise = Number(cycle === "yearly" ? plan.razorpayYearlyAmountPaise : plan.razorpayMonthlyAmountPaise) || 0;
+  return `Configured${mode ? ` · ${mode} mode` : ""} · ${source}${paise ? ` · charges ${formatMoney(paise / 100)}` : ""}`;
 }
 
 function openPlanEditor(planId) {
@@ -249,10 +330,35 @@ function openPlanEditor(planId) {
         <div class="sa-field" style="margin-top:12px"><label>Description</label><input id="planDescription" class="sa-input" value="${esc(plan.description || "")}" /></div>
         <div class="sa-field" style="margin-top:12px"><label>Featured</label><select id="planFeatured" class="sa-select"><option value="no">No</option><option value="yes" ${plan.featured ? "selected" : ""}>Yes</option></select></div>
 
+        <h3 style="margin:18px 0 8px">Razorpay plan IDs</h3>
+        <p class="sa-sub" style="margin:0 0 10px">
+          Create the plan in Razorpay Dashboard &rarr; Subscriptions &rarr; Plans, then paste its ID here.
+          The backend verifies each ID against Razorpay before saving: a wrong period, a price that does not
+          match, or an ID from the other mode is rejected with the reason. Leave a field blank to keep what is
+          already stored. Plan IDs are identifiers, not secrets &mdash; no Razorpay key or secret is ever sent
+          to this page.
+        </p>
+        <div class="sa-form-grid">
+          <div class="sa-field">
+            <label>Monthly Razorpay Plan ID</label>
+            <input id="planRzpMonthly" class="sa-input" value="${esc(plan.razorpayMonthlyPlanId || "")}" placeholder="plan_XXXXXXXXXXXX" spellcheck="false" autocomplete="off" />
+            <span class="sa-sub">${planIdStatus(plan, "monthly")}</span>
+          </div>
+          <div class="sa-field">
+            <label>Yearly Razorpay Plan ID</label>
+            <input id="planRzpYearly" class="sa-input" value="${esc(plan.razorpayYearlyPlanId || "")}" placeholder="plan_XXXXXXXXXXXX" spellcheck="false" autocomplete="off" />
+            <span class="sa-sub">${planIdStatus(plan, "yearly")}</span>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px">
+          <input type="checkbox" id="planAutoCreate" checked />
+          Let Scan2Plate create a Razorpay plan automatically for any cycle with a price but no ID
+        </label>
+
         <h3 style="margin:18px 0 8px">Features</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
-          ${FEATURE_FIELDS.map(key => `<label style="display:flex;align-items:center;gap:7px;font-size:13px">
-            <input type="checkbox" class="plan-feature" value="${key}" ${features[key] !== false ? "checked" : ""} /> ${esc(MODULES[key] || key)}
+          ${FEATURE_FIELDS.map(([key, label]) => `<label style="display:flex;align-items:center;gap:7px;font-size:13px">
+            <input type="checkbox" class="plan-feature" value="${key}" ${features[key] !== false ? "checked" : ""} /> ${esc(label)}
           </label>`).join("")}
         </div>
 
@@ -298,18 +404,28 @@ async function submitPlan() {
     displayOrder: Number($("#planOrder")?.value || 0),
     badgeText: $("#planBadge")?.value.trim() || "",
     featured: $("#planFeatured")?.value === "yes",
+    // Blank means "leave the stored id alone", so an ordinary rename never
+    // disturbs a plan id that is already billing customers.
+    razorpayMonthlyPlanId: $("#planRzpMonthly")?.value.trim() || "",
+    razorpayYearlyPlanId: $("#planRzpYearly")?.value.trim() || "",
+    autoCreateRazorpayPlans: $("#planAutoCreate")?.checked !== false,
     features,
     limits,
     active: true
   };
   if (!payload.name) return setMessage("Enter a plan name.");
-  if (!payload.monthlyPrice && !payload.yearlyPrice) return setMessage("Set a monthly or yearly price.");
+  if (!payload.monthlyPrice && !payload.yearlyPrice && !payload.razorpayMonthlyPlanId && !payload.razorpayYearlyPlanId) {
+    return setMessage("Set a monthly or yearly price, or paste a Razorpay plan ID.");
+  }
 
   try {
     if (button) { button.disabled = true; button.textContent = "Saving…"; }
     setMessage("Saving and syncing with Razorpay…", true);
     const result = await savePlan(payload);
-    setMessage(result.createdRazorpayPlans ? "Saved. New Razorpay plan created for the new price." : "Saved. Existing Razorpay plan reused.", true);
+    const mode = result.razorpayMode && result.razorpayMode !== "unset" ? ` (${String(result.razorpayMode).toUpperCase()} mode)` : "";
+    setMessage(result.createdRazorpayPlans
+      ? `Saved. New Razorpay plan created for the new price${mode}.`
+      : `Saved and verified against Razorpay${mode}.`, true);
     editingPlanId = result.planId || "";
     // The plans listener re-renders the table on its own.
   } catch (error) {

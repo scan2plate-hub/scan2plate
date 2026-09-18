@@ -110,7 +110,8 @@ export function watchSubscription(businessId, onChange, onError) {
 // status so a stale cancelled record never hides a live subscription.
 function pickCurrent(rows = []) {
   if (!rows.length) return null;
-  const rank = status => (["active", "trial"].includes(status) ? 2 : ["pending", "payment_failed", "paused"].includes(status) ? 1 : 0);
+  const rank = status => (["active", "trial"].includes(status) ? 2
+    : ["created", "authenticated", "pending", "payment_failed", "paused"].includes(status) ? 1 : 0);
   return [...rows].sort((a, b) => {
     const byRank = rank(String(b.status || "")) - rank(String(a.status || ""));
     if (byRank) return byRank;

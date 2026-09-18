@@ -9,6 +9,12 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+// The single source of truth for what a business type is. Imported rather
+// than re-implemented so "RestaurantAdmin", "Street Vendor" and
+// "street_vendor" resolve identically on the server and in the browser — a
+// second copy of this table would eventually disagree with the first, and
+// the thing it guards is which plan a business is allowed to buy.
+import { normalizeBusinessType } from "../public/js/business-types.js";
 
 dotenv.config();
 const app = express();
@@ -47,6 +53,11 @@ const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
 const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
 const razorpayReady = Boolean(razorpayKeyId && razorpayKeySecret);
 const razorpayClient = razorpayReady ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret }) : null;
+// Test and live are entirely separate Razorpay universes: a plan created in
+// one does not exist in the other, and the ids look identical. The key id is
+// the only thing that says which one we are in, so it is recorded alongside
+// every plan id we store and checked before anything is billed.
+const razorpayMode = razorpayKeyId.startsWith("rzp_live") ? "live" : razorpayKeyId.startsWith("rzp_test") ? "test" : "unset";
 if (!razorpayReady) console.warn("Razorpay not configured: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing. Payment routes will return 503.");
 // Trusted server-side plan catalog. Never accept an amount from the client.
 const SUBSCRIPTION_PLANS = {
@@ -439,6 +450,13 @@ app.get("/api/health", (_, res) => res.json({
   firebaseAdminReady: adminReady,
   logoUploadRoute: true,
   ocrKeyConfigured: Boolean(ocrKey()),
+  // Booleans only. The values themselves are never exposed, and the key id is
+  // reported as a masked prefix so a wrong-account mix-up is spottable without
+  // revealing anything secret.
+  razorpayConfigured: razorpayReady,
+  razorpayKeyIdPreview: razorpayKeyId ? `${razorpayKeyId.slice(0, 11)}…` : "",
+  razorpayMode,
+  razorpayWebhookConfigured: Boolean(String(process.env.RAZORPAY_WEBHOOK_SECRET || "").trim()),
   ocrKeyLength: ocrKey().length,
   ocrTestRoute: true,
   ocrScanRoute: true,
@@ -954,47 +972,158 @@ function planCycleAmountPaise(planDoc, billingCycle) {
   return Math.round(numeric * 100);
 }
 
+function billingError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  error.safe = true;   // safe to show to the Super Admin who caused it
+  return error;
+}
+
+// Razorpay plan ids look like plan_PabC12dEf34GhI. Checking the shape before
+// calling out means a pasted price, URL or subscription id fails with a
+// sentence the admin can act on instead of a Razorpay API error.
+const RAZORPAY_PLAN_ID_SHAPE = /^plan_[A-Za-z0-9]{6,}$/;
+
+const CYCLE_FIELDS = {
+  monthly: { id: "razorpayMonthlyPlanId", amount: "razorpayMonthlyAmountPaise", mode: "razorpayMonthlyPlanMode", source: "razorpayMonthlyPlanSource", price: "monthlyPrice" },
+  yearly:  { id: "razorpayYearlyPlanId",  amount: "razorpayYearlyAmountPaise",  mode: "razorpayYearlyPlanMode",  source: "razorpayYearlyPlanSource",  price: "yearlyPrice" }
+};
+
 /**
- * Returns the Razorpay plan id to bill against, creating one only when it is
- * genuinely needed.
+ * Checks a Razorpay plan id a Super Admin created in the Razorpay dashboard
+ * and pasted in, BEFORE it is ever billed against.
+ *
+ * The fetch is the whole point. Test and live are separate universes, and a
+ * plan id carries no marker of which one it belongs to — so the only way to
+ * know a live plan id was not pasted into a test-key deployment is to ask
+ * Razorpay, on the current keys, whether it exists. That same call also
+ * returns the real period and amount, which is how a monthly id pasted into
+ * the yearly box, or a plan that actually charges a different price from the
+ * one being advertised, is caught here rather than on a customer's card.
+ */
+async function verifyRazorpayPlan(rawId, billingCycle) {
+  const id = String(rawId || "").trim();
+  if (!RAZORPAY_PLAN_ID_SHAPE.test(id)) {
+    throw billingError(`"${id}" is not a Razorpay plan id. Plan ids start with "plan_" — copy it from Razorpay Dashboard → Subscriptions → Plans.`);
+  }
+  if (!razorpayReady) throw billingError("Razorpay is not configured on the server.", 503);
+
+  let fetched;
+  try {
+    fetched = await razorpayClient.plans.fetch(id);
+  } catch {
+    // Deliberately not forwarding Razorpay's message: for a cross-mode id it
+    // says only "id provided does not exist", which sends people hunting for
+    // a typo in an id that is perfectly valid — in the other mode.
+    throw billingError(
+      `Razorpay does not recognise plan ${id} on the ${razorpayMode.toUpperCase()} keys this server is using. ` +
+      `A plan created in ${razorpayMode === "live" ? "TEST" : "LIVE"} mode cannot be billed with ${razorpayMode.toUpperCase()} keys — ` +
+      `create the plan in ${razorpayMode.toUpperCase()} mode and paste that id instead.`
+    );
+  }
+
+  const period = String(fetched?.period || "").toLowerCase();
+  const interval = Number(fetched?.interval || 1);
+  const wanted = billingCycle === "yearly" ? "yearly" : "monthly";
+  if (period !== wanted || interval !== 1) {
+    throw billingError(
+      `Plan ${id} bills every ${interval} ${period || "?"}, but it was entered as the ${wanted} plan id. ` +
+      `Paste it into the ${period === "yearly" ? "yearly" : period === "monthly" ? "monthly" : "matching"} field, or create a plan with the right period.`
+    );
+  }
+
+  const amountPaise = Number(fetched?.item?.amount || 0);
+  if (!amountPaise) throw billingError(`Plan ${id} has no amount at Razorpay.`);
+  const currency = String(fetched?.item?.currency || "INR").toUpperCase();
+  if (currency !== "INR") throw billingError(`Plan ${id} is priced in ${currency}. Scan2Plate bills in INR.`);
+  return { planId: id, amountPaise };
+}
+
+/**
+ * Returns the Razorpay plan id to bill this Scan2Plate plan against for one
+ * billing cycle.
  *
  * Razorpay plans are immutable — a plan's amount cannot be edited — so a real
  * price change requires a new Razorpay plan. Editing a plan's NAME, features
  * or description must not create one. We therefore remember the amount each
- * stored Razorpay plan was created for, and only create a new plan when the
- * amount actually differs. Existing subscribers keep billing on the plan they
- * signed up to, which is the correct behaviour for a price change.
+ * stored Razorpay plan was created for, and only act when the amount actually
+ * differs. Existing subscribers keep billing on the plan they signed up to,
+ * which is the correct behaviour for a price change.
+ *
+ * There are two ways a plan id gets here, and they are treated differently on
+ * a price change:
+ *
+ *   manual — a Super Admin created the plan in the Razorpay dashboard and
+ *            pasted its id. We NEVER silently replace one of these: quietly
+ *            creating a second plan behind someone who is managing plans by
+ *            hand would leave two plans for the same price and no sign of it.
+ *            The save is rejected and they are told to paste the new id.
+ *   auto   — we created it, so we may create the replacement too.
  */
-async function ensureRazorpayPlan(planDoc, billingCycle) {
-  const amountPaise = planCycleAmountPaise(planDoc, billingCycle);
-  if (!amountPaise) return { planId: "", amountPaise: 0, created: false };
+async function ensureRazorpayPlan(planDoc, billingCycle, { manualId = "", allowCreate = true } = {}) {
+  const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+  const fields = CYCLE_FIELDS[cycle];
+  const amountPaise = planCycleAmountPaise(planDoc, cycle);
+  const pasted = String(manualId || "").trim();
+  const existingId = String(planDoc[fields.id] || "").trim();
+  const existingAmount = Number(planDoc[fields.amount] || 0);
+  const existingMode = String(planDoc[fields.mode] || "").trim();
+  const existingSource = String(planDoc[fields.source] || "").trim();
 
-  const idField = billingCycle === "yearly" ? "razorpayYearlyPlanId" : "razorpayMonthlyPlanId";
-  const amountField = billingCycle === "yearly" ? "razorpayYearlyAmountPaise" : "razorpayMonthlyAmountPaise";
-  const existingId = String(planDoc[idField] || "").trim();
-  const existingAmount = Number(planDoc[amountField] || 0);
+  // A pasted id is authoritative: verify it and make the advertised price
+  // match what Razorpay will actually charge, or refuse.
+  if (pasted && pasted !== existingId) {
+    const verified = await verifyRazorpayPlan(pasted, cycle);
+    if (amountPaise && amountPaise !== verified.amountPaise) {
+      throw billingError(
+        `Plan ${pasted} charges ₹${(verified.amountPaise / 100).toLocaleString("en-IN")} per ${cycle === "yearly" ? "year" : "month"}, ` +
+        `but this plan advertises ₹${(amountPaise / 100).toLocaleString("en-IN")}. ` +
+        `Razorpay plan amounts cannot be edited, so set the ${cycle} price to ₹${(verified.amountPaise / 100).toLocaleString("en-IN")} or use a different plan id.`
+      );
+    }
+    return { planId: verified.planId, amountPaise: verified.amountPaise, created: false, source: "manual", mode: razorpayMode };
+  }
 
-  if (existingId && existingAmount === amountPaise) {
-    return { planId: existingId, amountPaise, created: false };
+  if (!amountPaise) return { planId: "", amountPaise: 0, created: false, source: "", mode: "" };
+
+  if (existingId) {
+    // A stored id from the other mode must never be billed against. This is
+    // what makes switching a deployment between test and live keys fail
+    // loudly at save time instead of at a customer's checkout.
+    if (existingMode && existingMode !== razorpayMode && razorpayMode !== "unset") {
+      throw billingError(
+        `The stored ${cycle} plan id ${existingId} was configured for ${existingMode.toUpperCase()} mode, but this server now uses ${razorpayMode.toUpperCase()} keys. ` +
+        `Create the ${cycle} plan in ${razorpayMode.toUpperCase()} mode and paste its id.`
+      );
+    }
+    if (existingAmount === amountPaise) {
+      return { planId: existingId, amountPaise, created: false, source: existingSource || "auto", mode: existingMode || razorpayMode };
+    }
+    if (existingSource === "manual") {
+      throw billingError(
+        `The ${cycle} price changed, but ${existingId} was entered by hand and Razorpay plan amounts cannot be edited. ` +
+        `Create a new ${cycle} plan in Razorpay at ₹${(amountPaise / 100).toLocaleString("en-IN")} and paste its id, or restore the previous price.`
+      );
+    }
   }
-  if (!razorpayReady) {
-    const error = new Error("Razorpay is not configured on the server.");
-    error.status = 503;
-    throw error;
+
+  if (!allowCreate) {
+    throw billingError(`No Razorpay ${cycle} plan is configured for "${safeString(planDoc.name, 80) || "this plan"}". Enter its Razorpay ${cycle} plan id in Super Admin → Subscription Plans.`);
   }
+  if (!razorpayReady) throw billingError("Razorpay is not configured on the server.", 503);
 
   const created = await razorpayClient.plans.create({
-    period: billingCycle === "yearly" ? "yearly" : "monthly",
+    period: cycle === "yearly" ? "yearly" : "monthly",
     interval: 1,
     item: {
-      name: `${safeString(planDoc.name, 80)} (${billingCycle})`,
+      name: `${safeString(planDoc.name, 80)} (${cycle})`,
       amount: amountPaise,
       currency: "INR",
-      description: safeString(planDoc.description, 200) || `${safeString(planDoc.name, 80)} ${billingCycle} plan`
+      description: safeString(planDoc.description, 200) || `${safeString(planDoc.name, 80)} ${cycle} plan`
     },
-    notes: { businessType: safeString(planDoc.businessType, 40), billingCycle }
+    notes: { businessType: safeString(planDoc.businessType, 40), billingCycle: cycle }
   });
-  return { planId: created.id, amountPaise, created: true };
+  return { planId: created.id, amountPaise, created: true, source: "auto", mode: razorpayMode };
 }
 
 /* ---------- Super Admin: plan catalogue ---------- */
@@ -1003,12 +1132,24 @@ app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
     const { planId = "", name = "", businessType = "restaurant", businessTypes = [], description = "",
       monthlyPrice = 0, yearlyPrice = 0, features = {}, limits = {}, trialDays = 0,
       active = true, featured = false, displayOrder = 0, badgeText = "", gracePeriodDays = 7,
-      totalCountMonthly = 0, totalCountYearly = 0 } = req.body || {};
+      totalCountMonthly = 0, totalCountYearly = 0,
+      // Plan ids a Super Admin created in the Razorpay dashboard and pasted
+      // in. Blank means "leave whatever is stored alone", which is what an
+      // ordinary edit (rename, feature change) sends.
+      razorpayMonthlyPlanId = "", razorpayYearlyPlanId = "",
+      // Default true so existing callers keep the behaviour they had. Set
+      // false to manage plans entirely by hand in the Razorpay dashboard.
+      autoCreateRazorpayPlans = true } = req.body || {};
 
     if (!String(name).trim()) return res.status(400).json({ ok: false, error: "Plan name is required." });
     const monthly = Number(monthlyPrice) || 0;
     const yearly = Number(yearlyPrice) || 0;
-    if (monthly <= 0 && yearly <= 0) return res.status(400).json({ ok: false, error: "Set a monthly or yearly price." });
+    // A pasted Razorpay plan id carries its own amount, so a price left blank
+    // is filled in from Razorpay below rather than rejected here.
+    const hasManualPlanId = Boolean(String(razorpayMonthlyPlanId || "").trim() || String(razorpayYearlyPlanId || "").trim());
+    if (monthly <= 0 && yearly <= 0 && !hasManualPlanId) {
+      return res.status(400).json({ ok: false, error: "Set a monthly or yearly price, or enter a Razorpay plan id." });
+    }
 
     const db = getFirestore();
     const ref = String(planId).trim()
@@ -1019,7 +1160,10 @@ app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
     const draft = {
       ...existing,
       name: safeString(name, 80),
-      businessType: String(businessType || "restaurant").trim().toLowerCase(),
+      // "all" is a real value (a global plan offered to every type), so it is
+      // kept as-is; anything else is resolved through the shared registry, so
+      // a plan can never be filed under a business type that does not exist.
+      businessType: String(businessType).trim().toLowerCase() === "all" ? "all" : normalizeBusinessType(businessType),
       businessTypes: Array.isArray(businessTypes) ? businessTypes.map(v => String(v).trim().toLowerCase()).filter(Boolean) : [],
       description: safeString(description, 300),
       monthlyPrice: monthly,
@@ -1027,13 +1171,25 @@ app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
     };
 
     // Sync each cycle independently: a plan may be monthly-only or yearly-only.
+    const manualIds = { monthly: String(razorpayMonthlyPlanId || "").trim(), yearly: String(razorpayYearlyPlanId || "").trim() };
     const sync = {};
     for (const cycle of ["monthly", "yearly"]) {
-      const result = await ensureRazorpayPlan(draft, cycle);
+      const fields = CYCLE_FIELDS[cycle];
+      const result = await ensureRazorpayPlan(draft, cycle, {
+        manualId: manualIds[cycle],
+        // A pasted id is always honoured. Auto-creation is only the fallback
+        // for a cycle with no id, and can be switched off entirely.
+        allowCreate: autoCreateRazorpayPlans !== false
+      });
       if (!result.planId) continue;
-      sync[cycle === "yearly" ? "razorpayYearlyPlanId" : "razorpayMonthlyPlanId"] = result.planId;
-      sync[cycle === "yearly" ? "razorpayYearlyAmountPaise" : "razorpayMonthlyAmountPaise"] = result.amountPaise;
+      sync[fields.id] = result.planId;
+      sync[fields.amount] = result.amountPaise;
+      sync[fields.mode] = result.mode;
+      sync[fields.source] = result.source;
       if (result.created) sync[`${cycle}PlanCreatedAt`] = FieldValue.serverTimestamp();
+      // A manually entered id may set the price, when the plan was saved with
+      // that cycle's price left blank.
+      if (!Number(draft[fields.price]) && result.source === "manual") draft[fields.price] = Math.round(result.amountPaise / 100);
     }
 
     const payload = {
@@ -1059,11 +1215,14 @@ app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
       ok: true, success: true, planId: ref.id,
       razorpayMonthlyPlanId: payload.razorpayMonthlyPlanId || "",
       razorpayYearlyPlanId: payload.razorpayYearlyPlanId || "",
+      razorpayMode,
+      monthlyPrice: payload.monthlyPrice,
+      yearlyPrice: payload.yearlyPrice,
       createdRazorpayPlans: Object.keys(sync).filter(k => k.endsWith("PlanCreatedAt")).length
     });
   } catch (error) {
     console.error("admin/plans failed:", error.message);
-    res.status(error.status || 500).json({ ok: false, error: error.message || "Could not save the plan." });
+    res.status(error.status || 500).json({ ok: false, error: error.safe ? error.message : (error.message || "Could not save the plan.") });
   }
 });
 
@@ -1082,9 +1241,42 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
     const plan = planSnap.data();
     if (plan.active === false) return res.status(400).json({ ok: false, error: "This plan is no longer available." });
 
+    // BUSINESS TYPE ISOLATION.
+    //
+    // The client sends a planId, and until this check it was trusted to send
+    // one meant for its own business type — so a hostel could be billed on a
+    // restaurant's Razorpay plan by passing the id, and a mistyped id in the
+    // UI would go through silently. The plan's own businessType is the
+    // authority, matched against the BUSINESS RECORD's type (never the type
+    // in the request body, which the caller controls).
+    const businessType = businessTypeOfDoc(business.data());
+    if (!planAppliesToBusinessType(plan, businessType)) {
+      return res.status(403).json({
+        ok: false,
+        error: "This plan is not available for your business type.",
+        code: "plan_business_type_mismatch"
+      });
+    }
+
+    // MODE ISOLATION. A plan id stored under test keys cannot be billed with
+    // live keys, and vice versa. Caught here so the owner sees a clear
+    // message rather than a failed checkout.
+    const storedMode = String(plan[CYCLE_FIELDS[cycle].mode] || "").trim();
+    if (storedMode && razorpayMode !== "unset" && storedMode !== razorpayMode) {
+      console.warn(`plan ${planId} is configured for ${storedMode} mode but the server uses ${razorpayMode} keys`);
+      return res.status(409).json({
+        ok: false,
+        error: "This plan is not available right now. Please contact support.",
+        code: "razorpay_mode_mismatch"
+      });
+    }
+
     // The Razorpay plan is resolved here, server-side, from the stored
-    // catalogue — the client never chooses which plan id gets billed.
-    const { planId: razorpayPlanId, amountPaise } = await ensureRazorpayPlan(plan, cycle);
+    // catalogue — the client never chooses which plan id gets billed. No new
+    // Razorpay plan is ever created on a customer's checkout: a plan that is
+    // not configured is a Super Admin problem, not something to paper over by
+    // inventing a plan mid-payment.
+    const { planId: razorpayPlanId, amountPaise } = await ensureRazorpayPlan(plan, cycle, { allowCreate: false });
     if (!razorpayPlanId) return res.status(400).json({ ok: false, error: `This plan has no ${cycle} price.` });
 
     // The offer is re-validated here. A discount or bonus the client claims is
@@ -1093,7 +1285,7 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
     if (offerId) {
       const offerSnap = await db.collection("offers").doc(String(offerId)).get();
       const candidate = offerSnap.exists ? { id: offerSnap.id, ...offerSnap.data() } : null;
-      if (candidate && candidate.active !== false && offerMatches(candidate, String(planId), cycle, businessTypeOfDoc(business.data()))) {
+      if (candidate && candidate.active !== false && offerMatches(candidate, String(planId), cycle, businessType)) {
         offer = candidate;
       }
     }
@@ -1120,24 +1312,49 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
     const paidMonths = cycle === "yearly" ? 12 : 1;
     const startDate = startAt ? new Date(startAt * 1000) : new Date();
 
+    const businessData = business.data() || {};
     await subscriptionRef.set({
       businessId: String(restaurantId),
-      businessType: businessTypeOfDoc(business.data()),
+      businessType,
       planId: String(planId),
       planName: plan.name || "",
       razorpaySubscriptionId: razorpaySubscription.id,
       razorpayPlanId,
-      status: trialDays > 0 ? "trial" : "pending",
+      // Which Razorpay universe this subscription belongs to. Without it an
+      // audit of a live-mode ledger cannot tell a real subscription from one
+      // created while the deployment was pointed at test keys.
+      razorpayMode,
+      // "created" means the mandate was never approved — the customer closed
+      // the checkout. It is not the same as a failed charge, and keeping them
+      // apart is what makes an unconverted subscription readable later.
+      status: trialDays > 0 ? "trial" : "created",
       billingCycle: cycle,
       amount: Math.round(amountPaise / 100),
       currency: "INR",
       paidMonths,
       bonusMonths,
       offerId: offer?.id || null,
+      offerName: offer?.name || "",
       gracePeriodDays: Math.max(0, Number(plan.gracePeriodDays ?? 7)),
       startDate,
+      // The billing period Razorpay reports. Filled in by the webhook on the
+      // first charge; kept separate from endDate, which includes any bonus
+      // months the offer granted and is therefore an ACCESS date, not a
+      // billing one.
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
       nextBillingDate: null,
       endDate: null,
+      expiryDate: null,
+      paymentId: null,
+      // Who this subscription belongs to, captured at creation so the record
+      // is auditable even if the business record is later edited.
+      customer: {
+        businessName: safeString(businessData.restaurantName || businessData.businessName || "", 120),
+        email: safeString(businessData.ownerEmail || businessData.email || req.user.email || "", 120),
+        phone: safeString(businessData.phone || businessData.ownerPhone || "", 20),
+        uid: String(req.user.uid || "")
+      },
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       createdBy: req.user.email || req.user.uid
@@ -1154,13 +1371,47 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
       trialDays
     });
   } catch (error) {
+    // The detail stays in the server log. A business owner cannot act on
+    // "no Razorpay plan id is configured" — that is a Super Admin's job — so
+    // they get a message that tells them what to do instead.
     console.error("subscriptions/create failed:", error.message);
-    res.status(error.status || 500).json({ ok: false, error: "Could not start the subscription. Please try again." });
+    const notConfigured = error.safe && /not configured|plan id/i.test(error.message);
+    res.status(error.status || 500).json({
+      ok: false,
+      error: notConfigured
+        ? "This plan is not ready for purchase yet. Please contact Scan2Plate support."
+        : "Could not start the subscription. Please try again.",
+      ...(notConfigured ? { code: "plan_not_configured" } : {})
+    });
   }
 });
 
 function businessTypeOfDoc(data = {}) {
-  return String(data.businessType || data.restaurantType || "restaurant").trim().toLowerCase().replace(/\s+/g, "_");
+  // Resolved through the shared registry so every spelling in existing data
+  // ("Restaurant", "Street Vendor", "RestaurantAdmin") lands on one id, and a
+  // record with no businessType reads as restaurant — the product was
+  // restaurant-only before the field existed.
+  return normalizeBusinessType(data.businessType || data.restaurantType || "");
+}
+
+/**
+ * Is this plan on sale to this business type?
+ *
+ * Mirrors planAppliesTo() in public/js/subscription-core.js, which decides
+ * what the owner is SHOWN. This is the one that decides what they can be
+ * CHARGED for, so it is enforced server-side regardless of what the browser
+ * sent.
+ */
+function planAppliesToBusinessType(plan = {}, businessType = "") {
+  const type = normalizeBusinessType(businessType);
+  const planType = String(plan.businessType || "").trim().toLowerCase();
+  const subset = Array.isArray(plan.businessTypes)
+    ? plan.businessTypes.map(value => normalizeBusinessType(value)).filter(Boolean)
+    : [];
+  // A global plan may be narrowed to a named subset of types.
+  if (planType === "all" || planType === "") return subset.length ? subset.includes(type) : true;
+  if (normalizeBusinessType(planType) === type) return true;
+  return subset.includes(type);
 }
 
 // Server-side re-validation of an offer. The client may claim any offerId;
@@ -1175,7 +1426,7 @@ function offerMatches(offer, planId, billingCycle, businessType) {
   const max = Number(offer.maxRedemptions);
   if (Number.isFinite(max) && max > 0 && Number(offer.redemptions || 0) >= max) return false;
   const offerType = String(offer.businessType || "").trim().toLowerCase();
-  if (offerType && offerType !== "all" && offerType.replace(/\s+/g, "_") !== businessType) return false;
+  if (offerType && offerType !== "all" && normalizeBusinessType(offerType) !== normalizeBusinessType(businessType)) return false;
   // An offer with no planId applies to every plan for its business type.
   if (offer.planId && String(offer.planId) !== String(planId)) return false;
   const offerCycle = String(offer.billingCycle || "").trim().toLowerCase();
@@ -1222,7 +1473,10 @@ app.post("/api/subscriptions/:subscriptionId/cancel", verifyAdmin, async (req, r
 const RAZORPAY_EVENT_STATUS = {
   "subscription.activated": "active",
   "subscription.charged": "active",
-  "subscription.authenticated": "pending",
+  // The mandate was approved but nothing has been charged yet. Distinct from
+  // "created" (checkout abandoned) and from "payment_failed" (a charge was
+  // attempted and declined) — three very different things to find in an audit.
+  "subscription.authenticated": "authenticated",
   "subscription.pending": "payment_failed",
   "subscription.halted": "halted",
   "subscription.cancelled": "cancelled",
@@ -1230,6 +1484,11 @@ const RAZORPAY_EVENT_STATUS = {
   "subscription.resumed": "active",
   "subscription.completed": "expired"
 };
+
+// Out-of-order delivery guard: these states are only ever written to a
+// subscription that has not already settled into one of the states below.
+const PRE_ACTIVE = new Set(["created", "authenticated", "pending"]);
+const SETTLED = new Set(["active", "cancelled", "expired", "halted", "paused", "payment_failed"]);
 
 function addMonthsUtc(date, months) {
   const result = new Date(date.getTime());
@@ -1282,20 +1541,32 @@ app.post("/api/webhooks/razorpay", async (req, res) => {
         const status = RAZORPAY_EVENT_STATUS[eventName] || null;
         const update = { updatedAt: FieldValue.serverTimestamp(), lastEvent: eventName, lastEventAt: FieldValue.serverTimestamp() };
 
-        if (status) update.status = status;
+        // Never let a late-arriving earlier event walk an active
+        // subscription backwards. Razorpay delivers at least once and not
+        // necessarily in order, so a delayed "authenticated" can land after
+        // "activated"; applying it would blank out a paid subscription.
+        if (status && !(PRE_ACTIVE.has(status) && SETTLED.has(String(current.status || "")))) {
+          update.status = status;
+        }
         if (eventName === "subscription.charged" || eventName === "subscription.activated") {
           const startedAt = entity?.current_start ? new Date(entity.current_start * 1000) : new Date();
           const nextAt = entity?.current_end ? new Date(entity.current_end * 1000) : null;
           update.startDate = current.startDate || startedAt;
           if (nextAt) update.nextBillingDate = nextAt;
           update.paymentFailedAt = null;
+          // The billing period exactly as Razorpay reports it. Kept separate
+          // from endDate below, which is an ACCESS date.
+          update.currentPeriodStart = startedAt;
+          if (nextAt) update.currentPeriodEnd = nextAt;
           // Access runs to the end of the paid period plus any bonus months
           // the offer granted. The bonus never changes the billing date above.
           const base = nextAt || addMonthsUtc(startedAt, Number(current.paidMonths || 1));
           update.endDate = addMonthsUtc(base, Number(current.bonusMonths || 0));
+          update.expiryDate = update.endDate;
           if (eventName === "subscription.charged" && payment?.amount) {
             update.lastPaymentAmount = Math.round(Number(payment.amount) / 100);
             update.lastPaymentId = payment.id || "";
+            update.paymentId = payment.id || "";
             update.lastPaidAt = FieldValue.serverTimestamp();
           }
         }

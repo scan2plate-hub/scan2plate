@@ -298,3 +298,272 @@ test("cancelling goes through the server and records the state", async () => {
   assert.equal(rzp.calls.cancels[0].payload.cancel_at_cycle_end, 1, "defaults to end-of-cycle, not instant cut-off");
   assert.equal(admin.readAll("subscriptions")[0].data.status, "cancelled");
 });
+
+/* =========================================================
+   MANUALLY CREATED RAZORPAY PLAN IDS
+
+   The path a real operator takes: create the plan in the
+   Razorpay dashboard, paste its id into Super Admin. Everything
+   here is about what happens when the pasted id is WRONG,
+   because a plan id that silently bills the wrong amount, in the
+   wrong mode, is money.
+========================================================= */
+
+test("a pasted plan id is verified against Razorpay and stored with its mode", async () => {
+  reset();
+  rzp.seedPlan("plan_RealMonthly01", { period: "monthly", amount: 49900 });
+  const res = await post("/api/admin/plans", {
+    name: "Scan2Plate Monthly", businessType: "restaurant",
+    monthlyPrice: 499, razorpayMonthlyPlanId: "plan_RealMonthly01"
+  }, SUPER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(res.body.razorpayMonthlyPlanId, "plan_RealMonthly01");
+  assert.equal(rzp.calls.plans.length, 0, "a pasted id must never trigger a duplicate plan creation");
+  assert.ok(rzp.calls.fetches.includes("plan_RealMonthly01"), "the id was actually checked at Razorpay");
+
+  const stored = admin.readAll("subscriptionPlans")[0].data;
+  assert.equal(stored.razorpayMonthlyPlanId, "plan_RealMonthly01");
+  assert.equal(stored.razorpayMonthlyAmountPaise, 49900, "the amount recorded is Razorpay's, not the typed one");
+  assert.equal(stored.razorpayMonthlyPlanMode, "test", "recorded against the key mode in use");
+  assert.equal(stored.razorpayMonthlyPlanSource, "manual");
+});
+
+test("a plan id from the other Razorpay mode is rejected with a mode-specific reason", async () => {
+  reset();
+  // Not seeded: from Razorpay's point of view on these keys, it does not exist.
+  const res = await post("/api/admin/plans", {
+    name: "Live Plan On Test Keys", monthlyPrice: 499, razorpayMonthlyPlanId: "plan_LiveModeOnly1"
+  }, SUPER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /TEST/, "names the mode this server is actually using");
+  assert.match(res.body.error, /LIVE/, "and the mode the plan was probably created in");
+  assert.equal(admin.readAll("subscriptionPlans").length, 0, "nothing is stored on a rejected id");
+});
+
+test("a plan id whose amount disagrees with the advertised price is rejected", async () => {
+  reset();
+  rzp.seedPlan("plan_Cheap0001", { period: "monthly", amount: 49900 });   // Razorpay charges 499
+  const res = await post("/api/admin/plans", {
+    name: "Mismatch", monthlyPrice: 599, razorpayMonthlyPlanId: "plan_Cheap0001"
+  }, SUPER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /499/);
+  assert.match(res.body.error, /599/, "both numbers are named, so the fix is obvious");
+});
+
+test("a monthly plan id pasted into the yearly field is rejected", async () => {
+  reset();
+  rzp.seedPlan("plan_Monthly0001", { period: "monthly", amount: 49900 });
+  const res = await post("/api/admin/plans", {
+    name: "Wrong Box", yearlyPrice: 499, razorpayYearlyPlanId: "plan_Monthly0001"
+  }, SUPER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /monthly/i);
+});
+
+test("something that is not a plan id fails before any Razorpay call", async () => {
+  reset();
+  for (const bad of ["your_plan_id", "sub_Abc123456", "https://dashboard.razorpay.com/plan_X", "plan_"]) {
+    const res = await post("/api/admin/plans", { name: "Bad", monthlyPrice: 499, razorpayMonthlyPlanId: bad }, SUPER);
+    assert.equal(res.status, 400, `"${bad}" should be rejected`);
+    assert.match(res.body.error, /plan_/);
+  }
+  assert.equal(rzp.calls.fetches.length, 0, "no pointless API calls for an obviously wrong value");
+});
+
+test("a pasted id fills in a price that was left blank", async () => {
+  reset();
+  rzp.seedPlan("plan_Priced00001", { period: "monthly", amount: 49900 });
+  const res = await post("/api/admin/plans", {
+    name: "Price From Razorpay", razorpayMonthlyPlanId: "plan_Priced00001"
+  }, SUPER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(res.body.monthlyPrice, 499);
+});
+
+test("renaming a plan leaves a manually entered id alone and calls nothing", async () => {
+  reset();
+  rzp.seedPlan("plan_Stable00001", { period: "monthly", amount: 49900 });
+  const first = await post("/api/admin/plans", { name: "Before", monthlyPrice: 499, razorpayMonthlyPlanId: "plan_Stable00001" }, SUPER);
+  const planId = first.body.planId;
+  rzp.resetCalls();
+
+  const res = await post("/api/admin/plans", { planId, name: "After", monthlyPrice: 499 }, SUPER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(res.body.razorpayMonthlyPlanId, "plan_Stable00001", "the id survives an edit that omits it");
+  assert.equal(rzp.calls.plans.length, 0, "no new Razorpay plan");
+  assert.equal(rzp.calls.fetches.length, 0, "no re-verification of an unchanged id");
+  assert.equal(admin.readAll("subscriptionPlans")[0].data.name, "After");
+});
+
+test("changing the price of a hand-managed plan refuses rather than silently creating a second one", async () => {
+  reset();
+  rzp.seedPlan("plan_Manual000001", { period: "monthly", amount: 49900 });
+  const first = await post("/api/admin/plans", { name: "Manual", monthlyPrice: 499, razorpayMonthlyPlanId: "plan_Manual000001" }, SUPER);
+  rzp.resetCalls();
+
+  const res = await post("/api/admin/plans", { planId: first.body.planId, name: "Manual", monthlyPrice: 599 }, SUPER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /cannot be edited/i);
+  assert.equal(rzp.calls.plans.length, 0, "no plan is created behind an operator managing plans by hand");
+  assert.equal(admin.readAll("subscriptionPlans")[0].data.monthlyPrice, 499, "the stored plan is unchanged");
+});
+
+test("auto-creation can be switched off entirely", async () => {
+  reset();
+  const res = await post("/api/admin/plans", {
+    name: "Hand Managed", monthlyPrice: 499, autoCreateRazorpayPlans: false
+  }, SUPER);
+  assert.equal(res.status, 400);
+  assert.equal(rzp.calls.plans.length, 0);
+  assert.match(res.body.error, /Super Admin/);
+});
+
+/* =========================================================
+   BUSINESS TYPE ISOLATION
+========================================================= */
+
+test("a restaurant cannot subscribe to a hostel plan even by sending its id", async () => {
+  reset();
+  const hostelPlan = await makePlan({ name: "Hostel Basic", businessType: "hostel", monthlyPrice: 699, yearlyPrice: 0 });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId: hostelPlan, billingCycle: "monthly" }, OWNER);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "plan_business_type_mismatch");
+  assert.equal(rzp.calls.subscriptions.length, 0, "nothing is created at Razorpay for a mismatched plan");
+  assert.equal(admin.readAll("subscriptions").length, 0, "and nothing is stored");
+});
+
+test("the business record's type decides, not the request body", async () => {
+  reset();
+  const hostelPlan = await makePlan({ name: "Hostel Basic", businessType: "hostel", monthlyPrice: 699, yearlyPrice: 0 });
+  const res = await post("/api/subscriptions/create", {
+    restaurantId: "rest-1", planId: hostelPlan, billingCycle: "monthly",
+    businessType: "hostel"   // the client claiming to be a hostel changes nothing
+  }, OWNER);
+  assert.equal(res.status, 403);
+});
+
+test("a legacy business type spelling still matches its plan", async () => {
+  reset();
+  // Stored as the panel name older records use, not a clean id.
+  admin.seed("restaurants/rest-1", {
+    restaurantName: "Test Bistro", businessType: "RestaurantAdmin",
+    ownerEmail: "owner@bistro.com", ownerUid: "owner-uid", status: "active"
+  });
+  const planId = await makePlan();
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly" }, OWNER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(admin.readAll("subscriptions")[0].data.businessType, "restaurant", "normalised on the way in");
+});
+
+test("a global plan is sellable to every type, and its subset restriction is honoured", async () => {
+  reset();
+  const globalPlan = await makePlan({ name: "Global", businessType: "all", monthlyPrice: 299, yearlyPrice: 0 });
+  const open = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId: globalPlan, billingCycle: "monthly" }, OWNER);
+  assert.equal(open.status, 200, open.body.error);
+
+  const narrowed = await makePlan({ name: "Hostels + Hotels", businessType: "all", businessTypes: ["hostel", "hotel"], monthlyPrice: 299, yearlyPrice: 0 });
+  const blocked = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId: narrowed, billingCycle: "monthly" }, OWNER);
+  assert.equal(blocked.status, 403, "a global plan narrowed to other types is not for a restaurant");
+});
+
+test("a plan configured for the other Razorpay mode is never billed", async () => {
+  reset();
+  const planId = await makePlan();
+  // Simulate a deployment that was switched from live keys to test keys.
+  admin.seed(`subscriptionPlans/${planId}`, {
+    ...admin.store.get(`subscriptionPlans/${planId}`),
+    razorpayMonthlyPlanMode: "live"
+  });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly" }, OWNER);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, "razorpay_mode_mismatch");
+  assert.equal(rzp.calls.subscriptions.length, 0);
+  assert.doesNotMatch(JSON.stringify(res.body), /rzp_|secret/i, "the owner is not shown key details");
+});
+
+test("checkout never invents a Razorpay plan for an unconfigured cycle", async () => {
+  reset();
+  const planId = await makePlan({ monthlyPrice: 499, yearlyPrice: 0 });
+  // Yearly price added directly, bypassing the Super Admin route, so no
+  // yearly Razorpay plan exists for it.
+  admin.seed(`subscriptionPlans/${planId}`, { ...admin.store.get(`subscriptionPlans/${planId}`), yearlyPrice: 4990 });
+  rzp.resetCalls();
+
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "yearly" }, OWNER);
+  assert.notEqual(res.status, 200);
+  assert.equal(rzp.calls.plans.length, 0, "a customer's checkout must not create plans");
+  assert.equal(rzp.calls.subscriptions.length, 0);
+});
+
+/* =========================================================
+   SUBSCRIPTION STATES AND THE AUDIT RECORD
+========================================================= */
+
+test("a subscription starts as created, not pending", async () => {
+  reset();
+  const planId = await makePlan();
+  await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly" }, OWNER);
+  const stored = admin.readAll("subscriptions")[0].data;
+  assert.equal(stored.status, "created", "nothing has been authorised or charged yet");
+});
+
+test("mandate approval is recorded as authenticated, distinct from a failed charge", async () => {
+  reset();
+  const subId = await activeSubscription({ billingCycle: "monthly" });
+  await webhook({ event: "subscription.authenticated", payload: { subscription: { entity: { id: subId, status: "authenticated" } } } }, { eventId: "evt_auth" });
+  assert.equal(admin.readAll("subscriptions")[0].data.status, "authenticated");
+
+  await webhook({ event: "subscription.pending", payload: { subscription: { entity: { id: subId, status: "pending" } } } }, { eventId: "evt_pending" });
+  assert.equal(admin.readAll("subscriptions")[0].data.status, "payment_failed", "Razorpay's 'pending' is a failed charge");
+});
+
+test("a late authenticated event cannot walk an active subscription backwards", async () => {
+  reset();
+  const subId = await activeSubscription();
+  await webhook(chargedEvent(subId), { eventId: "evt_charge" });
+  assert.equal(admin.readAll("subscriptions")[0].data.status, "active");
+
+  await webhook({ event: "subscription.authenticated", payload: { subscription: { entity: { id: subId } } } }, { eventId: "evt_late_auth" });
+  assert.equal(admin.readAll("subscriptions")[0].data.status, "active", "out-of-order delivery must not deactivate a paid subscription");
+});
+
+test("the subscription record carries what an audit needs", async () => {
+  reset();
+  const subId = await activeSubscription();
+  const before = admin.readAll("subscriptions")[0].data;
+  assert.equal(before.businessId, "rest-1");
+  assert.equal(before.businessType, "restaurant");
+  assert.ok(before.planId, "planId");
+  assert.match(before.razorpayPlanId, /^plan_/);
+  assert.equal(before.razorpaySubscriptionId, subId);
+  assert.equal(before.razorpayMode, "test");
+  assert.equal(before.currency, "INR");
+  assert.equal(before.customer.email, "owner@bistro.com", "who it belongs to, captured at creation");
+  assert.equal(before.customer.businessName, "Test Bistro");
+
+  await webhook(chargedEvent(subId), { eventId: "evt_audit" });
+  const after = admin.readAll("subscriptions")[0].data;
+  assert.equal(after.currentPeriodStart.toISOString().slice(0, 10), "2026-09-18");
+  assert.equal(after.currentPeriodEnd.toISOString().slice(0, 10), "2027-09-18");
+  assert.equal(after.expiryDate.toISOString().slice(0, 10), "2027-09-18");
+  assert.equal(after.paymentId, "pay_1");
+  assert.equal(after.lastPaymentAmount, 9990);
+});
+
+test("no Razorpay secret reaches any subscription API response", async () => {
+  reset();
+  rzp.seedPlan("plan_Secrecy00001", { period: "monthly", amount: 49900 });
+  const planRes = await post("/api/admin/plans", { name: "Secrecy", monthlyPrice: 499, razorpayMonthlyPlanId: "plan_Secrecy00001" }, SUPER);
+  const createRes = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId: planRes.body.planId, billingCycle: "monthly" }, OWNER);
+  const health = await fetch(`${BASE}/api/health`).then(r => r.json());
+
+  for (const [label, body] of [["plans", planRes.body], ["create", createRes.body], ["health", health]]) {
+    const json = JSON.stringify(body);
+    assert.doesNotMatch(json, /secret_stub/, `${label} leaks RAZORPAY_KEY_SECRET`);
+    assert.doesNotMatch(json, /whsec_stub/, `${label} leaks RAZORPAY_WEBHOOK_SECRET`);
+    assert.doesNotMatch(json, /keySecret|key_secret/i, `${label} carries a secret field`);
+  }
+  assert.equal(createRes.body.publicKeyId, "rzp_test_stub", "only the public key id crosses to the browser");
+  assert.equal(health.razorpayKeyIdPreview, "rzp_test_st…", "the health check masks even the public id");
+});

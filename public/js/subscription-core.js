@@ -22,15 +22,34 @@ export const GLOBAL_BUSINESS_TYPE = "all";
    Razorpay's own subscription states plus the two the product
    adds: "trial" before any charge, and "expired" once a
    cancelled/halted subscription is past its grace period.
+
+   `created` and `authenticated` are kept DISTINCT rather than
+   both collapsing into `pending`, because they mean very
+   different things when auditing a subscription that never went
+   live: `created` means checkout was never completed, while
+   `authenticated` means the customer approved the mandate and
+   the first charge is the thing that failed. Neither grants
+   access, so telling them apart costs nothing and is the
+   difference between "they walked away" and "their bank
+   declined".
+
+   Note that Razorpay's own `pending` means "a charge failed and
+   is being retried", NOT "awaiting first payment" — which is why
+   it maps to payment_failed below and is not what we store while
+   waiting for checkout.
 --------------------------------------------------------- */
 export const SUBSCRIPTION_STATES = [
-  "trial", "pending", "active", "paused", "cancelled", "halted", "expired", "payment_failed"
+  "created", "authenticated", "trial", "pending", "active",
+  "paused", "cancelled", "halted", "expired", "payment_failed"
 ];
+
+/** States before any successful charge. None of them grant access. */
+export const PRE_ACTIVE_STATES = ["created", "authenticated", "pending"];
 
 // Razorpay event/status -> the state stored on the subscription.
 const RAZORPAY_STATUS_MAP = {
-  created: "pending",
-  authenticated: "pending",
+  created: "created",
+  authenticated: "authenticated",
   active: "active",
   pending: "payment_failed",
   halted: "halted",
@@ -288,6 +307,8 @@ export function formatMoney(value, currency = "INR") {
 
 export function statusLabel(status) {
   return {
+    created: "Awaiting Payment",
+    authenticated: "Mandate Approved",
     trial: "Trial",
     pending: "Pending",
     active: "Active",
@@ -302,7 +323,7 @@ export function statusLabel(status) {
 export function statusTone(status) {
   const value = String(status || "").toLowerCase();
   if (["active", "trial"].includes(value)) return "success";
-  if (["pending", "paused"].includes(value)) return "warning";
+  if (["created", "authenticated", "pending", "paused"].includes(value)) return "warning";
   if (["payment_failed", "halted"].includes(value)) return "danger";
   return "muted";
 }
