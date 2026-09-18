@@ -52,8 +52,12 @@ All four are new. Nothing existing was renamed or removed.
   description,
   monthlyPrice, yearlyPrice,     // whole rupees
   razorpayMonthlyPlanId, razorpayYearlyPlanId,
-  razorpayMonthlyAmountPaise,    // what that plan id was created for
+  razorpayMonthlyAmountPaise,    // what that plan id actually charges
   razorpayYearlyAmountPaise,     //   (drives the no-duplicate rule below)
+  razorpayMonthlyPlanMode,       // "test" | "live" — which Razorpay universe
+  razorpayYearlyPlanMode,        //   this id belongs to
+  razorpayMonthlyPlanSource,     // "manual" (pasted in) | "auto" (we created it)
+  razorpayYearlyPlanSource,
   features: { qrOrdering: true, whatsapp: false, … },
   limits:   { maxTables: 20, maxStaff: -1, … },   // -1 = unlimited
   trialDays, gracePeriodDays,
@@ -83,11 +87,16 @@ All four are new. Nothing existing was renamed or removed.
 {
   businessId, businessType, planId, planName,
   razorpaySubscriptionId, razorpayPlanId,
+  razorpayMode,                               // "test" | "live" at creation
   status,                                     // see states below
   billingCycle, amount, currency,
-  paidMonths, bonusMonths, offerId, gracePeriodDays,
-  startDate, nextBillingDate, endDate,
-  lastPaymentId, lastPaymentAmount, lastPaidAt, paymentFailedAt,
+  paidMonths, bonusMonths, offerId, offerName, gracePeriodDays,
+  customer: { businessName, email, phone, uid },   // captured at creation
+  startDate,
+  currentPeriodStart, currentPeriodEnd,       // billing period, as Razorpay reports it
+  nextBillingDate,
+  endDate, expiryDate,                        // ACCESS ends here: paid period + bonus
+  paymentId, lastPaymentId, lastPaymentAmount, lastPaidAt, paymentFailedAt,
   createdAt, updatedAt
 }
 ```
@@ -107,16 +116,72 @@ Razorpay bills **12** months. Access runs **14**. `nextBillingDate` stays at 12
 months; `endDate` is extended by the bonus. Modelling it as a 14-month
 recurring period would make 14 months the customer's real billing cycle.
 
+### Two ways a Razorpay plan id gets here
+
+**Paste one you created** in Razorpay Dashboard → Subscriptions → Plans, into
+Super Admin → Subscription Plans. This is the normal path.
+
+**Or let Scan2Plate create it** from the price you typed, which is what happens
+for any priced cycle with no id. Untick *"Let Scan2Plate create a Razorpay plan
+automatically"* to manage plans entirely by hand.
+
+Every pasted id is **fetched from Razorpay before it is saved**. That single
+call is what catches all four ways a pasted id goes wrong:
+
+| What you pasted | What happens |
+| --- | --- |
+| An id from the other mode | Rejected, naming both modes — a live plan cannot be billed with test keys |
+| A monthly id in the yearly box | Rejected, naming the real period |
+| A plan charging ₹499 while the page advertises ₹599 | Rejected, naming both amounts |
+| Anything that is not a plan id | Rejected before any API call |
+
+A plan id with no price typed alongside it **sets** the price from Razorpay,
+so the advertised price can never drift from the billed one.
+
 ### Razorpay plans are immutable, so edits are handled carefully
 
 A plan's amount cannot be changed at Razorpay. The amount each stored plan id
-was created for is recorded, so:
+actually charges is recorded, so:
 
 - renaming / re-describing a plan → **reuses** the existing Razorpay plan
-- genuinely changing the price → **creates a new** Razorpay plan
+- genuinely changing the price of an **auto-created** plan → **creates a new** one
+- genuinely changing the price of a **hand-entered** plan → **rejected**, asking
+  for the new plan's id
+
+That last case matters: quietly creating a second plan behind someone who is
+managing plans in the Razorpay dashboard would leave two plans for one price
+and no sign of it.
 
 Existing subscribers keep billing on the plan they signed up to, which is the
 correct behaviour for a price change.
+
+### Test and live are kept apart
+
+Test and live are separate Razorpay universes, and a plan id carries no marker
+of which one it belongs to. So the key mode (`rzp_test_` / `rzp_live_`) is
+recorded next to every stored plan id and checked in three places:
+
+1. **On save** — the fetch above fails for a cross-mode id.
+2. **On save of an existing plan** — a stored id from the other mode is refused,
+   so switching a deployment's keys fails loudly here.
+3. **At checkout** — a plan whose recorded mode is not the server's mode returns
+   `razorpay_mode_mismatch` and nothing is created at Razorpay.
+
+Super Admin → Subscription Plans shows the mode against every configured plan.
+
+### A business can only buy a plan meant for its type
+
+Enforced **server-side**, at `/api/subscriptions/create`, against the business
+record's own `businessType` — never the type in the request body, which the
+caller controls. A restaurant sending a hostel plan's id gets `403
+plan_business_type_mismatch`, and nothing is created at Razorpay.
+
+A plan with `businessType: "all"` is sellable to everyone, unless
+`businessTypes: [...]` narrows it to a named subset.
+
+Checkout also **never creates a Razorpay plan**. A cycle with no configured
+plan id is a Super Admin problem; inventing a plan mid-payment would be the
+wrong way to hide it.
 
 ### Only one offer is ever applied
 
@@ -127,8 +192,25 @@ nothing.
 
 ### Subscription states
 
-`trial` · `pending` · `active` · `paused` · `cancelled` · `halted` ·
-`expired` · `payment_failed`
+`created` · `authenticated` · `trial` · `pending` · `active` · `paused` ·
+`cancelled` · `halted` · `expired` · `payment_failed`
+
+The first three of those mean quite different things and are deliberately not
+merged:
+
+| State | Means |
+| --- | --- |
+| `created` | Subscription made at Razorpay; the customer never completed checkout |
+| `authenticated` | Mandate approved; no money has moved yet |
+| `payment_failed` | A charge was attempted and declined (this is what Razorpay itself calls `pending`) |
+
+None of them grants access. Telling them apart is the difference between "they
+walked away" and "their bank declined", which is the first question anyone asks
+about a subscription that never went live.
+
+Webhook events are the authority for state. Out-of-order delivery is handled:
+a late `authenticated` can never walk an already-`active` subscription
+backwards.
 
 A failed payment keeps access for `gracePeriodDays` (default 7, configurable
 per plan) and **never deletes business data**.
@@ -283,8 +365,9 @@ Everything below is a manual step that could not be done from this repository.
 - [ ] Complete Razorpay KYC / live activation
 - [ ] Register the webhook URL and events, with a matching secret
 - [ ] Publish the Firestore rules above
-- [ ] In Super Admin → Subscription Plans, create your plans (this is what
-      creates the Razorpay plans)
+- [ ] In Super Admin → Subscription Plans, create your plans — either paste the
+      plan ids you created in the Razorpay dashboard, or let Scan2Plate create
+      them from the prices you type
 - [ ] In Super Admin → Offers, recreate the "12 months + 2 free" offer
 - [ ] **Run one real end-to-end test payment in Razorpay test mode**, confirm
       the webhook arrives and the subscription flips to `active`

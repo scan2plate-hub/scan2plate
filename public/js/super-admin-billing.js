@@ -248,7 +248,12 @@ function renderPlans() {
   const body = $("#planRows");
   if (!body) return;
   body.innerHTML = plans.length ? plans.map(plan => {
-    const rzp = [plan.razorpayMonthlyPlanId ? "M" : "", plan.razorpayYearlyPlanId ? "Y" : ""].filter(Boolean).join(" + ") || "—";
+    // The ids themselves are not printed in the list: knowing WHETHER each
+    // cycle is configured is what this column is for, and a screenshot of the
+    // plan list should not carry identifiers out of the console.
+    const configured = [plan.razorpayMonthlyPlanId ? "M" : "", plan.razorpayYearlyPlanId ? "Y" : ""].filter(Boolean).join(" + ");
+    const planMode = String(plan.razorpayMonthlyPlanMode || plan.razorpayYearlyPlanMode || "").toUpperCase();
+    const rzp = configured ? `${configured}${planMode ? ` · ${planMode}` : ""}` : "not configured";
     return `<tr>
       <td><strong>${esc(plan.name || plan.id)}</strong>${plan.featured ? ' <span class="sa-badge active">Featured</span>' : ""}${plan.badgeText ? ` <span class="sa-badge">${esc(plan.badgeText)}</span>` : ""}<span class="sa-sub">${esc(plan.description || "")}</span></td>
       <td>${esc(plan.businessType === "all" ? "All business types" : businessTypeLabel(plan.businessType))}</td>
@@ -263,6 +268,21 @@ function renderPlans() {
       </div></td>
     </tr>`;
   }).join("") : `<tr><td colspan="8"><div class="sa-empty">No plans yet. Create one to start selling.</div></td></tr>`;
+}
+
+/**
+ * Whether a cycle's Razorpay plan id is configured, and which mode it was
+ * configured for. Shown so a deployment that was switched from test to live
+ * keys is visible here rather than discovered at a customer's checkout.
+ */
+function planIdStatus(plan, cycle) {
+  const id = cycle === "yearly" ? plan.razorpayYearlyPlanId : plan.razorpayMonthlyPlanId;
+  if (!id) return "Not configured — this cycle cannot be sold yet.";
+  const mode = String((cycle === "yearly" ? plan.razorpayYearlyPlanMode : plan.razorpayMonthlyPlanMode) || "").toUpperCase();
+  const source = String((cycle === "yearly" ? plan.razorpayYearlyPlanSource : plan.razorpayMonthlyPlanSource) || "") === "manual"
+    ? "entered manually" : "created by Scan2Plate";
+  const paise = Number(cycle === "yearly" ? plan.razorpayYearlyAmountPaise : plan.razorpayMonthlyAmountPaise) || 0;
+  return `Configured${mode ? ` · ${mode} mode` : ""} · ${source}${paise ? ` · charges ${formatMoney(paise / 100)}` : ""}`;
 }
 
 function openPlanEditor(planId) {
@@ -291,6 +311,31 @@ function openPlanEditor(planId) {
         </div>
         <div class="sa-field" style="margin-top:12px"><label>Description</label><input id="planDescription" class="sa-input" value="${esc(plan.description || "")}" /></div>
         <div class="sa-field" style="margin-top:12px"><label>Featured</label><select id="planFeatured" class="sa-select"><option value="no">No</option><option value="yes" ${plan.featured ? "selected" : ""}>Yes</option></select></div>
+
+        <h3 style="margin:18px 0 8px">Razorpay plan IDs</h3>
+        <p class="sa-sub" style="margin:0 0 10px">
+          Create the plan in Razorpay Dashboard &rarr; Subscriptions &rarr; Plans, then paste its ID here.
+          The backend verifies each ID against Razorpay before saving: a wrong period, a price that does not
+          match, or an ID from the other mode is rejected with the reason. Leave a field blank to keep what is
+          already stored. Plan IDs are identifiers, not secrets &mdash; no Razorpay key or secret is ever sent
+          to this page.
+        </p>
+        <div class="sa-form-grid">
+          <div class="sa-field">
+            <label>Monthly Razorpay Plan ID</label>
+            <input id="planRzpMonthly" class="sa-input" value="${esc(plan.razorpayMonthlyPlanId || "")}" placeholder="plan_XXXXXXXXXXXX" spellcheck="false" autocomplete="off" />
+            <span class="sa-sub">${planIdStatus(plan, "monthly")}</span>
+          </div>
+          <div class="sa-field">
+            <label>Yearly Razorpay Plan ID</label>
+            <input id="planRzpYearly" class="sa-input" value="${esc(plan.razorpayYearlyPlanId || "")}" placeholder="plan_XXXXXXXXXXXX" spellcheck="false" autocomplete="off" />
+            <span class="sa-sub">${planIdStatus(plan, "yearly")}</span>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px">
+          <input type="checkbox" id="planAutoCreate" checked />
+          Let Scan2Plate create a Razorpay plan automatically for any cycle with a price but no ID
+        </label>
 
         <h3 style="margin:18px 0 8px">Features</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
@@ -341,18 +386,28 @@ async function submitPlan() {
     displayOrder: Number($("#planOrder")?.value || 0),
     badgeText: $("#planBadge")?.value.trim() || "",
     featured: $("#planFeatured")?.value === "yes",
+    // Blank means "leave the stored id alone", so an ordinary rename never
+    // disturbs a plan id that is already billing customers.
+    razorpayMonthlyPlanId: $("#planRzpMonthly")?.value.trim() || "",
+    razorpayYearlyPlanId: $("#planRzpYearly")?.value.trim() || "",
+    autoCreateRazorpayPlans: $("#planAutoCreate")?.checked !== false,
     features,
     limits,
     active: true
   };
   if (!payload.name) return setMessage("Enter a plan name.");
-  if (!payload.monthlyPrice && !payload.yearlyPrice) return setMessage("Set a monthly or yearly price.");
+  if (!payload.monthlyPrice && !payload.yearlyPrice && !payload.razorpayMonthlyPlanId && !payload.razorpayYearlyPlanId) {
+    return setMessage("Set a monthly or yearly price, or paste a Razorpay plan ID.");
+  }
 
   try {
     if (button) { button.disabled = true; button.textContent = "Saving…"; }
     setMessage("Saving and syncing with Razorpay…", true);
     const result = await savePlan(payload);
-    setMessage(result.createdRazorpayPlans ? "Saved. New Razorpay plan created for the new price." : "Saved. Existing Razorpay plan reused.", true);
+    const mode = result.razorpayMode && result.razorpayMode !== "unset" ? ` (${String(result.razorpayMode).toUpperCase()} mode)` : "";
+    setMessage(result.createdRazorpayPlans
+      ? `Saved. New Razorpay plan created for the new price${mode}.`
+      : `Saved and verified against Razorpay${mode}.`, true);
     editingPlanId = result.planId || "";
     // The plans listener re-renders the table on its own.
   } catch (error) {

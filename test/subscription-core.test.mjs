@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   planAppliesTo, plansForBusinessType, quotePlan, bestOffer, offerIsLive, offerApplies,
   discountAmount, computeEndDate, computeNextBillingDate, addMonths, mapRazorpayStatus,
-  isEntitled, withinGracePeriod, planAllowsFeature, planLimit, withinLimit, limitLabel, UNLIMITED
+  isEntitled, withinGracePeriod, planAllowsFeature, planLimit, withinLimit, limitLabel, UNLIMITED,
+  SUBSCRIPTION_STATES, statusLabel
 } from "../public/js/subscription-core.js";
 
 const restaurantPro = { id: "pro", name: "Restaurant Pro", businessType: "restaurant", monthlyPrice: 999, yearlyPrice: 9990, displayOrder: 2, active: true };
@@ -153,10 +154,27 @@ test("Razorpay statuses map onto the product's states", () => {
   assert.equal(mapRazorpayStatus("active"), "active");
   assert.equal(mapRazorpayStatus("halted"), "halted");
   assert.equal(mapRazorpayStatus("cancelled"), "cancelled");
-  assert.equal(mapRazorpayStatus("created"), "pending");
+  // "created" (checkout abandoned) and "authenticated" (mandate approved,
+  // nothing charged yet) are kept apart rather than both reading as pending:
+  // neither grants access, but they are different stories in an audit.
+  assert.equal(mapRazorpayStatus("created"), "created");
+  assert.equal(mapRazorpayStatus("authenticated"), "authenticated");
   // Razorpay's "pending" means a charge failed and it is retrying.
   assert.equal(mapRazorpayStatus("pending"), "payment_failed");
   assert.equal(mapRazorpayStatus("something-new"), "pending", "an unknown status must not grant access");
+});
+
+test("no pre-active state grants access", () => {
+  const now = new Date("2026-06-01T00:00:00Z");
+  for (const status of ["created", "authenticated", "pending"]) {
+    assert.equal(isEntitled({ status, endDate: "2026-12-31" }, now), false, `${status} must not unlock the product`);
+  }
+});
+
+test("every state the product stores has a label", () => {
+  SUBSCRIPTION_STATES.forEach(status => {
+    assert.notEqual(statusLabel(status), "Unknown", `${status} renders as "Unknown" in the UI`);
+  });
 });
 
 test("an active subscription is entitled until its end date", () => {
