@@ -6886,6 +6886,16 @@ try {
   if (!subscriptionBlocked) {
     await withTimeout(loadSettings(), 20000, "Settings load timed out");
     ensureOnlineOrderSettingsUi();
+    // Subscription panel, the plans for THIS business type, and the offer
+    // popup. Imported lazily and not awaited, so a slow plan read can never
+    // delay the dashboard itself.
+    import("./business-subscription.js?v=subs-20260918").then(module => module.mountBusinessSubscription({
+      businessId: restaurantId,
+      businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
+      businessName: restaurantSettings.restaurantName || "",
+      email: currentUser.email || "",
+      phone: restaurantSettings.phone || ""
+    })).catch(error => devError("subscription panel failed to mount", error));
     mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
     if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
       const quickActions = document.querySelector(".quick-actions");
