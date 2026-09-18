@@ -160,6 +160,16 @@ function endOfDay(date) {
   return copy;
 }
 
+/** An offer with a code is claimed by typing it, never applied automatically. */
+export function isCouponOffer(offer = {}) {
+  return Boolean(String(offer.code || "").trim());
+}
+
+/** Codes are compared case- and space-insensitively: "save50" === "SAVE 50". */
+export function normalizeCouponCode(value) {
+  return String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "");
+}
+
 export function offerApplies(offer = {}, { businessType, planId, billingCycle } = {}, now = new Date()) {
   if (!offerIsLive(offer, now)) return false;
   const offerType = String(offer.businessType || "").trim().toLowerCase();
@@ -175,7 +185,10 @@ export function offerApplies(offer = {}, { businessType, planId, billingCycle } 
  * larger saving, so two equally-ranked offers never show at random.
  */
 export function bestOffer(offers = [], context = {}, now = new Date()) {
-  const candidates = offers.filter(offer => offerApplies(offer, context, now));
+  // A coupon offer is deliberately excluded here. It is a code the owner has
+  // to be given and type in; if it also applied on its own, every visitor
+  // would get the discount and the code would mean nothing.
+  const candidates = offers.filter(offer => !isCouponOffer(offer) && offerApplies(offer, context, now));
   if (!candidates.length) return null;
   return candidates.sort((a, b) => {
     const byPriority = Number(b.priority || 0) - Number(a.priority || 0);
@@ -185,6 +198,64 @@ export function bestOffer(offers = [], context = {}, now = new Date()) {
     if (savingB !== savingA) return savingB - savingA;
     return Number(b.bonusMonths || 0) - Number(a.bonusMonths || 0);
   })[0];
+}
+
+/**
+ * Looks up a typed coupon code and says whether it can be used here.
+ *
+ * Returns { ok, offer, reason }. The reason is written for the customer
+ * reading it, because "invalid code" when the code is real but yearly-only
+ * is the kind of message that generates a support ticket.
+ *
+ * The browser calls this to price the cart. The SERVER calls the same
+ * function again before charging, so a customer who edits the page cannot
+ * award themselves a discount.
+ */
+export function findCouponOffer(offers = [], code, context = {}, now = new Date()) {
+  const wanted = normalizeCouponCode(code);
+  if (!wanted) return { ok: false, offer: null, reason: "Enter a coupon code." };
+
+  const match = offers.find(offer => isCouponOffer(offer) && normalizeCouponCode(offer.code) === wanted);
+  if (!match) return { ok: false, offer: null, reason: "That coupon code was not recognised." };
+  if (match.active === false) return { ok: false, offer: null, reason: "That coupon is no longer active." };
+
+  const now_ = now;
+  const start = toDate(match.startDate);
+  if (start && now_ < start) return { ok: false, offer: null, reason: "That coupon is not valid yet." };
+  const end = endOfDay(toDate(match.endDate));
+  if (end && now_ > end) return { ok: false, offer: null, reason: "That coupon has expired." };
+
+  const max = Number(match.maxRedemptions);
+  if (Number.isFinite(max) && max > 0 && Number(match.redemptions || 0) >= max) {
+    return { ok: false, offer: null, reason: "That coupon has been fully claimed." };
+  }
+
+  const offerType = String(match.businessType || "").trim().toLowerCase();
+  if (offerType && offerType !== GLOBAL_BUSINESS_TYPE && context.businessType
+      && normalizeBusinessType(offerType) !== normalizeBusinessType(context.businessType)) {
+    return { ok: false, offer: null, reason: "That coupon is for a different type of business." };
+  }
+  if (match.planId && context.planId && String(match.planId) !== String(context.planId)) {
+    return { ok: false, offer: null, reason: "That coupon applies to a different plan." };
+  }
+  const offerCycle = String(match.billingCycle || "").trim().toLowerCase();
+  if (offerCycle && offerCycle !== "any" && context.billingCycle && offerCycle !== String(context.billingCycle).toLowerCase()) {
+    return { ok: false, offer: null, reason: `That coupon is only valid on ${offerCycle} billing.` };
+  }
+  return { ok: true, offer: match, reason: "" };
+}
+
+/**
+ * Does this quote come to nothing to pay?
+ *
+ * Razorpay cannot create a subscription for zero, so a 100%-off coupon is not
+ * a payment at all — it is a grant, and takes a different route entirely (see
+ * /api/subscriptions/redeem). Treated as its own question rather than a
+ * `payable === 0` check scattered around, because getting it wrong either
+ * charges someone who was promised a free year or hands out free access.
+ */
+export function isFullyDiscounted(quote = {}) {
+  return Number(quote.listPrice || 0) > 0 && Number(quote.payable || 0) <= 0;
 }
 
 export function discountAmount(offer, price) {

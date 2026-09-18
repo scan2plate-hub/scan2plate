@@ -39,8 +39,24 @@ const planPrices = () => ({ basic: Number(superSettings.basicPrice) || 249, adva
 const normalizePlan = value => ({ pro: "advance", premium: "enterprise" }[String(value || "").toLowerCase()] || String(value || "basic").toLowerCase());
 const dateFrom = value => { if (!value) return null; if (value.toDate) return value.toDate(); if (typeof value.seconds === "number") return new Date(value.seconds * 1000); const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date; };
 const dateLabel = value => { const date = dateFrom(value); return date ? date.toLocaleDateString("en-IN") : "—"; };
-const isExpired = restaurant => { const expiry = dateFrom(restaurant.expiryDate); return !!expiry && expiry.setHours(23,59,59,999) < Date.now(); };
-const effectiveStatus = restaurant => isExpired(restaurant) ? "expired" : String(restaurant.status || "active").toLowerCase();
+// Expiry reads BOTH date fields. The Razorpay webhook writes planExpiryDate
+// and expiryDate together, but older records and the manual Renew modal have
+// only ever kept one reliably, so trusting a single field made a paid
+// business look expired here while Subscriptions showed it active.
+const isExpired = restaurant => { const expiry = dateFrom(restaurant.expiryDate || restaurant.planExpiryDate); return !!expiry && expiry.setHours(23,59,59,999) < Date.now(); };
+// A live subscription outranks a stale date. This page predates the Razorpay
+// system and looked only at `status` and a date, so a business the webhook had
+// just marked subscriptionStatus "active" still showed as Expired — the two
+// Super Admin screens disagreed about the same business. Where the webhook has
+// spoken, its word wins; everything else falls back to the old fields exactly
+// as before, so businesses that never used Razorpay are unaffected.
+const effectiveStatus = restaurant => {
+  const subscription = String(restaurant.subscriptionStatus || "").toLowerCase();
+  if (["active", "trial"].includes(subscription) && !isExpired(restaurant)) return "active";
+  if (["cancelled", "halted", "payment_failed", "paused"].includes(subscription) && !isExpired(restaurant)) return subscription === "payment_failed" ? "payment failed" : subscription;
+  if (subscription === "expired") return "expired";
+  return isExpired(restaurant) ? "expired" : String(restaurant.status || "active").toLowerCase();
+};
 const orderStats = restaurantId => { const matching = orders.filter(order => String(order.restaurantId || "") === restaurantId); return { count: matching.length, revenue: matching.filter(order => String(order.paymentStatus || "").toLowerCase() === "paid").reduce((sum, order) => sum + Number(order.grandTotal || 0), 0) }; };
 // Legacy documents deliberately receive defaults in memory only.  This keeps the
 // existing `restaurants` collection and every old restaurant document untouched.

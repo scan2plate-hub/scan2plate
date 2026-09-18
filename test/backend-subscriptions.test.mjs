@@ -635,3 +635,167 @@ test("an ordinary business owner is still not a Super Admin", async () => {
   assert.match(res.body.error, /superAdmins\/owner-uid/, "names the exact document to create");
   assert.equal(rzp.calls.plans.length, 0);
 });
+
+/* =========================================================
+   COUPON CODES
+
+   A coupon is money. Most of these are about what happens when
+   one is claimed that should not be.
+========================================================= */
+
+function seedCoupon(id, fields) {
+  admin.seed(`offers/${id}`, { active: true, endDate: "2030-12-31", ...fields });
+}
+
+test("a coupon offer is never applied automatically", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("half", { name: "Half", code: "SAVE50", businessType: "restaurant", discountType: "percent", discountValue: 50, razorpayOfferId: "offer_x", priority: 99 });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly" }, OWNER);
+  assert.equal(res.status, 200, res.body.error);
+  const stored = admin.readAll("subscriptions")[0].data;
+  assert.equal(stored.offerId, null, "a code nobody typed grants nothing");
+  assert.equal(stored.couponCode, "");
+});
+
+test("a valid code is accepted and passed to Razorpay as a real discount", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("half", { name: "Half", code: "SAVE50", businessType: "restaurant", discountType: "percent", discountValue: 50, razorpayOfferId: "offer_real1" });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly", couponCode: "save 50" }, OWNER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(rzp.calls.subscriptions[0].offer_id, "offer_real1", "Razorpay applies it — a plan's amount cannot be edited");
+  assert.equal(admin.readAll("subscriptions")[0].data.couponCode, "SAVE50");
+});
+
+test("a partial discount with no Razorpay offer is refused, not charged in full", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("broken", { name: "Broken", code: "HALFOFF", businessType: "restaurant", discountType: "percent", discountValue: 50 });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly", couponCode: "HALFOFF" }, OWNER);
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, "coupon_unbacked");
+  assert.equal(rzp.calls.subscriptions.length, 0, "showing a discount and charging full price is the one unacceptable outcome");
+});
+
+test("an unknown, expired or inactive code is refused with a reason", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("old", { name: "Old", code: "LASTYEAR", discountType: "percent", discountValue: 100, startDate: "2020-01-01", endDate: "2020-12-31" });
+  seedCoupon("off", { name: "Off", code: "DISABLED", discountType: "percent", discountValue: 100, active: false });
+
+  const unknown = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, couponCode: "NOTREAL" }, OWNER);
+  assert.match(unknown.body.error, /not recognised/i);
+  const expired = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, couponCode: "LASTYEAR" }, OWNER);
+  assert.match(expired.body.error, /expired/i);
+  const disabled = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, couponCode: "DISABLED" }, OWNER);
+  assert.match(disabled.body.error, /no longer active/i);
+  assert.equal(rzp.calls.subscriptions.length, 0);
+});
+
+test("a coupon for another business type cannot be used", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("hostels", { name: "Hostels", code: "HOSTEL100", businessType: "hostel", discountType: "percent", discountValue: 100 });
+  const res = await post("/api/subscriptions/redeem", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "HOSTEL100" }, OWNER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /different type of business/i);
+  assert.equal(admin.readAll("subscriptions").length, 0);
+});
+
+test("a 100% coupon activates without any Razorpay call", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("free", { name: "Free Year", code: "WELCOME100", businessType: "restaurant", discountType: "percent", discountValue: 100 });
+  const res = await post("/api/subscriptions/redeem", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "welcome100" }, OWNER);
+  assert.equal(res.status, 200, res.body.error);
+  assert.equal(rzp.calls.subscriptions.length, 0, "Razorpay cannot create a zero-rupee subscription");
+
+  const stored = admin.readAll("subscriptions")[0].data;
+  assert.equal(stored.status, "active");
+  assert.equal(stored.amount, 0);
+  assert.equal(stored.listPrice, 999, "what it would have cost, kept for the books");
+  assert.equal(stored.grantedByCoupon, true, "revenue reporting must not read this as a sale");
+  assert.equal(stored.couponCode, "WELCOME100");
+
+  const business = admin.store.get("restaurants/rest-1");
+  assert.equal(business.subscriptionStatus, "active", "no webhook is coming, so access is mirrored here");
+  assert.ok(business.planExpiryDate, "and the existing login checks read this");
+});
+
+test("redeeming counts against maxRedemptions", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("one", { name: "One use", code: "ONCE", businessType: "restaurant", discountType: "percent", discountValue: 100, maxRedemptions: 1, redemptions: 0 });
+  const first = await post("/api/subscriptions/redeem", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "ONCE" }, OWNER);
+  assert.equal(first.status, 200, first.body.error);
+  assert.equal(admin.store.get("offers/one").redemptions, 1);
+
+  const second = await post("/api/subscriptions/redeem", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "ONCE" }, OWNER);
+  assert.equal(second.status, 400, "a one-use code is not reusable");
+  assert.match(second.body.error, /fully claimed/i);
+  assert.equal(admin.readAll("subscriptions").length, 1);
+});
+
+test("redeem refuses a coupon that does not cover the whole price", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("half", { name: "Half", code: "SAVE50", businessType: "restaurant", discountType: "percent", discountValue: 50, razorpayOfferId: "offer_x" });
+  const res = await post("/api/subscriptions/redeem", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "SAVE50" }, OWNER);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /requires payment/i, "free access is only ever granted for a genuinely free coupon");
+  assert.equal(admin.readAll("subscriptions").length, 0);
+});
+
+test("a 100% coupon cannot be pushed through the paid route either", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("free", { name: "Free", code: "FREE100", businessType: "restaurant", discountType: "percent", discountValue: 100 });
+  const res = await post("/api/subscriptions/create", { restaurantId: "rest-1", planId, billingCycle: "monthly", couponCode: "FREE100" }, OWNER);
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, "coupon_is_free");
+  assert.equal(rzp.calls.subscriptions.length, 0, "a zero-rupee Razorpay subscription is impossible, so this must not be attempted");
+});
+
+test("redeeming needs ownership of the business", async () => {
+  reset();
+  const planId = await makePlan();
+  admin.seed("restaurants/rest-2", { restaurantName: "Other", ownerEmail: "someone@else.com", ownerUid: "other-uid", businessType: "Restaurant" });
+  seedCoupon("free", { name: "Free", code: "FREE100", businessType: "restaurant", discountType: "percent", discountValue: 100 });
+  const res = await post("/api/subscriptions/redeem", { restaurantId: "rest-2", planId, billingCycle: "monthly", code: "FREE100" }, OWNER);
+  assert.notEqual(res.status, 200, "a coupon does not grant access to someone else's business");
+  assert.equal(admin.readAll("subscriptions").length, 0);
+});
+
+test("validate prices a coupon without granting anything", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("half", { name: "Half", code: "SAVE50", businessType: "restaurant", discountType: "percent", discountValue: 50, razorpayOfferId: "offer_x" });
+  const res = await post("/api/coupons/validate", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "SAVE50" }, OWNER);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.listPrice, 999);
+  assert.equal(res.body.discount, 499.5);
+  assert.equal(res.body.payable, 499.5);
+  assert.equal(res.body.free, false);
+  assert.equal(admin.readAll("subscriptions").length, 0, "checking a coupon must not create anything");
+  assert.equal(admin.store.get("offers/half").redemptions ?? 0, 0, "nor spend a redemption");
+});
+
+test("validate flags a free coupon so the page offers redeem, not pay", async () => {
+  reset();
+  const planId = await makePlan();
+  seedCoupon("free", { name: "Free", code: "FREE100", businessType: "restaurant", discountType: "percent", discountValue: 100 });
+  const res = await post("/api/coupons/validate", { restaurantId: "rest-1", planId, billingCycle: "monthly", code: "FREE100" }, OWNER);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.free, true);
+  assert.equal(res.body.payable, 0);
+});
+
+test("a coupon is never checked for someone else's business", async () => {
+  reset();
+  const planId = await makePlan();
+  admin.seed("restaurants/rest-2", { restaurantName: "Other", ownerEmail: "someone@else.com", ownerUid: "other-uid" });
+  const res = await post("/api/coupons/validate", { restaurantId: "rest-2", planId, code: "ANY" }, OWNER);
+  assert.notEqual(res.status, 200);
+});

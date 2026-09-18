@@ -15,6 +15,10 @@ import { getStorage } from "firebase-admin/storage";
 // second copy of this table would eventually disagree with the first, and
 // the thing it guards is which plan a business is allowed to buy.
 import { normalizeBusinessType } from "../public/js/business-types.js";
+// The same coupon rules the browser prices with. Imported rather than
+// reimplemented so what a customer is shown and what they are charged can
+// never drift apart — and so the server, not the page, has the final word.
+import { findCouponOffer, normalizeCouponCode, discountAmount, isCouponOffer } from "../public/js/subscription-core.js";
 
 dotenv.config();
 const app = express();
@@ -1262,7 +1266,7 @@ app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
 app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
   try {
     if (!razorpayReady) return res.status(503).json({ ok: false, error: "Payments are temporarily unavailable." });
-    const { restaurantId = "", planId = "", billingCycle = "monthly", offerId = "" } = req.body || {};
+    const { restaurantId = "", planId = "", billingCycle = "monthly", offerId = "", couponCode = "" } = req.body || {};
     const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
     if (!restaurantId || !planId) return res.status(400).json({ ok: false, error: "restaurantId and planId are required." });
     const business = await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
@@ -1322,6 +1326,29 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
       }
     }
 
+    // A typed coupon is re-checked here, never trusted from the browser. It
+    // REPLACES the automatic offer rather than stacking with it.
+    let couponOfferId = "";
+    let razorpayOfferId = "";
+    if (couponCode) {
+      const check = await resolveCoupon(db, couponCode, { businessType, planId: String(planId), billingCycle: cycle });
+      if (!check.ok) return res.status(400).json({ ok: false, error: check.reason, code: "coupon_rejected" });
+      const listPrice = Math.round(amountPaise / 100);
+      const effect = couponEffect(check.offer, listPrice);
+      if (effect.kind === "free") {
+        return res.status(400).json({ ok: false, error: "This coupon covers the full price - redeem it instead of paying.", code: "coupon_is_free" });
+      }
+      if (effect.kind === "unbacked") {
+        // Charging full price while the page shows a discount is the one
+        // outcome that is never acceptable.
+        console.warn(`coupon ${check.offer.id} promises a discount with no razorpayOfferId; refusing rather than overcharging`);
+        return res.status(400).json({ ok: false, error: "That coupon cannot be applied to this plan. Please contact support.", code: "coupon_unbacked" });
+      }
+      offer = check.offer;
+      couponOfferId = check.offer.id;
+      if (effect.kind === "offer") razorpayOfferId = effect.razorpayOfferId;
+    }
+
     const trialDays = Math.max(0, Number(plan.trialDays) || 0);
     const startAt = trialDays > 0 ? Math.floor(Date.now() / 1000) + trialDays * 86400 : undefined;
     const totalCount = Number(cycle === "yearly" ? plan.totalCountYearly : plan.totalCountMonthly) || DEFAULT_TOTAL_COUNT[cycle];
@@ -1331,6 +1358,9 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
       plan_id: razorpayPlanId,
       total_count: totalCount,
       customer_notify: 1,
+      // Razorpay applies the discount itself. A plan's amount is immutable, so
+      // this is the only way a percentage actually comes off the charge.
+      ...(razorpayOfferId ? { offer_id: razorpayOfferId } : {}),
       ...(startAt ? { start_at: startAt } : {}),
       notes: {
         scan2plateSubscriptionId: subscriptionRef.id,
@@ -1367,6 +1397,8 @@ app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
       bonusMonths,
       offerId: offer?.id || null,
       offerName: offer?.name || "",
+      couponCode: couponOfferId ? normalizeCouponCode(offer?.code) : "",
+      razorpayOfferId: razorpayOfferId || "",
       gracePeriodDays: Math.max(0, Number(plan.gracePeriodDays ?? 7)),
       startDate,
       // The billing period Razorpay reports. Filled in by the webhook on the
@@ -1465,6 +1497,207 @@ function offerMatches(offer, planId, billingCycle, businessType) {
   if (offerCycle && offerCycle !== "any" && offerCycle !== billingCycle) return false;
   return true;
 }
+
+/**
+ * Finds a coupon by the code a customer typed and re-checks every rule.
+ *
+ * Read fresh from Firestore each time: a coupon's redemption count and active
+ * flag change while people are checking out, and a cached copy is how a
+ * "one use only" code gets used twice.
+ */
+async function resolveCoupon(db, code, context) {
+  const wanted = normalizeCouponCode(code);
+  if (!wanted) return { ok: false, offer: null, reason: "Enter a coupon code." };
+  // Coupon codes are stored normalised, but older rows and hand-edited ones
+  // may not be, so the whole (small) coupon set is matched in memory rather
+  // than queried by an exact string.
+  const snap = await db.collection("offers").get();
+  const offers = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(isCouponOffer);
+  return findCouponOffer(offers, wanted, context, new Date());
+}
+
+/**
+ * What a coupon can actually do at Razorpay.
+ *
+ * A Razorpay plan's amount is immutable and a subscription bills its plan, so
+ * we CANNOT simply charge 50% of a plan. There are exactly three honest
+ * outcomes, and silently charging full price while showing a discount is not
+ * one of them:
+ *
+ *   free   100% off. Razorpay cannot create a zero-rupee subscription, so this
+ *          is not a payment at all — it is a grant, handled by /redeem.
+ *   offer  A discount backed by a Razorpay Offer the Super Admin created and
+ *          pasted in. Razorpay applies it to the real charge.
+ *   bonus  Extra free months. Costs nothing at Razorpay because it extends
+ *          access rather than changing the price.
+ *
+ * Anything else is a coupon that promises money off with no way to deliver it.
+ */
+function couponEffect(offer, listPrice) {
+  const discount = discountAmount(offer, listPrice);
+  if (listPrice > 0 && discount >= listPrice) return { kind: "free", discount: listPrice };
+  const razorpayOfferId = String(offer?.razorpayOfferId || "").trim();
+  if (discount > 0 && razorpayOfferId) return { kind: "offer", discount, razorpayOfferId };
+  if (discount > 0) return { kind: "unbacked", discount };
+  if (Number(offer?.bonusMonths || 0) > 0) return { kind: "bonus", discount: 0 };
+  return { kind: "none", discount: 0 };
+}
+
+/* ---------- Business owner: check a coupon before paying ---------- */
+app.post("/api/coupons/validate", verifyAdmin, async (req, res) => {
+  try {
+    const { restaurantId = "", planId = "", billingCycle = "monthly", code = "" } = req.body || {};
+    const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+    if (!restaurantId || !planId) return res.status(400).json({ ok: false, error: "restaurantId and planId are required." });
+    const business = await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
+    const db = getFirestore();
+    const planSnap = await db.collection("subscriptionPlans").doc(String(planId)).get();
+    if (!planSnap.exists) return res.status(404).json({ ok: false, error: "Plan not found." });
+    const plan = planSnap.data();
+
+    const result = await resolveCoupon(db, code, {
+      businessType: businessTypeOfDoc(business.data()), planId: String(planId), billingCycle: cycle
+    });
+    if (!result.ok) return res.json({ ok: false, error: result.reason });
+
+    const listPrice = Math.round((planCycleAmountPaise(plan, cycle) || 0) / 100);
+    const effect = couponEffect(result.offer, listPrice);
+    if (effect.kind === "unbacked") {
+      // Refused rather than quietly charging full price. The Super Admin is
+      // told the same thing when saving, so this should not reach a customer.
+      console.warn(`coupon ${result.offer.id} offers a discount with no razorpayOfferId and cannot be honoured`);
+      return res.json({ ok: false, error: "That coupon cannot be applied to this plan. Please contact support." });
+    }
+    if (effect.kind === "none") return res.json({ ok: false, error: "That coupon gives no discount on this plan." });
+
+    res.json({
+      ok: true,
+      offerId: result.offer.id,
+      code: normalizeCouponCode(result.offer.code),
+      kind: effect.kind,
+      discount: effect.discount,
+      payable: Math.max(0, listPrice - effect.discount),
+      listPrice,
+      bonusMonths: Math.max(0, Number(result.offer.bonusMonths || 0)),
+      offerText: safeString(result.offer.offerText || result.offer.name || "", 120),
+      // A free coupon is redeemed, not paid for. The browser needs to know
+      // which button to show.
+      free: effect.kind === "free"
+    });
+  } catch (error) {
+    console.error("coupons/validate failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: "Could not check that coupon." });
+  }
+});
+
+/* ---------- Business owner: redeem a 100% coupon (no payment) ---------- */
+app.post("/api/subscriptions/redeem", verifyAdmin, async (req, res) => {
+  try {
+    const { restaurantId = "", planId = "", billingCycle = "monthly", code = "" } = req.body || {};
+    const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+    if (!restaurantId || !planId || !code) return res.status(400).json({ ok: false, error: "restaurantId, planId and code are required." });
+    const business = await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
+    const businessType = businessTypeOfDoc(business.data());
+
+    const db = getFirestore();
+    const planSnap = await db.collection("subscriptionPlans").doc(String(planId)).get();
+    if (!planSnap.exists) return res.status(404).json({ ok: false, error: "Plan not found." });
+    const plan = planSnap.data();
+    if (plan.active === false) return res.status(400).json({ ok: false, error: "This plan is no longer available." });
+    if (!planAppliesToBusinessType(plan, businessType)) {
+      return res.status(403).json({ ok: false, error: "This plan is not available for your business type.", code: "plan_business_type_mismatch" });
+    }
+
+    const listPrice = Math.round((planCycleAmountPaise(plan, cycle) || 0) / 100);
+    const check = await resolveCoupon(db, code, { businessType, planId: String(planId), billingCycle: cycle });
+    if (!check.ok) return res.status(400).json({ ok: false, error: check.reason });
+    const effect = couponEffect(check.offer, listPrice);
+    // This route grants access for nothing, so it accepts ONLY a coupon that
+    // genuinely covers the whole price. A partial discount must go through
+    // Razorpay and actually be paid.
+    if (effect.kind !== "free") {
+      return res.status(400).json({ ok: false, error: "That coupon requires payment. Please use the payment option." });
+    }
+
+    const offerRef = db.collection("offers").doc(check.offer.id);
+    const subscriptionRef = db.collection("subscriptions").doc();
+    const paidMonths = cycle === "yearly" ? 12 : 1;
+    const bonusMonths = Math.max(0, Number(check.offer.bonusMonths || 0));
+    const startDate = new Date();
+    const endDate = addMonthsUtc(addMonthsUtc(startDate, paidMonths), bonusMonths);
+    const businessData = business.data() || {};
+
+    // The redemption count is claimed in a transaction. Two people typing the
+    // last use of a one-use code at the same moment must not both get it.
+    await db.runTransaction(async tx => {
+      const fresh = await tx.get(offerRef);
+      if (!fresh.exists || fresh.data().active === false) throw billingError("That coupon is no longer active.");
+      const data = fresh.data();
+      const max = Number(data.maxRedemptions);
+      const used = Number(data.redemptions || 0);
+      if (Number.isFinite(max) && max > 0 && used >= max) throw billingError("That coupon has been fully claimed.");
+      tx.update(offerRef, { redemptions: used + 1, updatedAt: FieldValue.serverTimestamp() });
+      tx.set(subscriptionRef, {
+        businessId: String(restaurantId),
+        businessType,
+        planId: String(planId),
+        planName: plan.name || "",
+        razorpaySubscriptionId: "",
+        razorpayPlanId: "",
+        razorpayMode,
+        // No money moved, so this is never "charged". It is granted, and the
+        // record says so plainly for anyone auditing revenue later.
+        status: "active",
+        grantedByCoupon: true,
+        couponCode: normalizeCouponCode(check.offer.code),
+        billingCycle: cycle,
+        amount: 0,
+        listPrice,
+        currency: "INR",
+        paidMonths,
+        bonusMonths,
+        offerId: check.offer.id,
+        offerName: check.offer.name || "",
+        gracePeriodDays: Math.max(0, Number(plan.gracePeriodDays ?? 7)),
+        startDate,
+        currentPeriodStart: startDate,
+        currentPeriodEnd: endDate,
+        nextBillingDate: null,
+        endDate,
+        expiryDate: endDate,
+        paymentId: null,
+        customer: {
+          businessName: safeString(businessData.restaurantName || businessData.businessName || "", 120),
+          email: safeString(businessData.ownerEmail || businessData.email || req.user.email || "", 120),
+          phone: safeString(businessData.phone || businessData.ownerPhone || "", 20),
+          uid: String(req.user.uid || "")
+        },
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        createdBy: req.user.email || req.user.uid
+      });
+    });
+
+    // No webhook is coming, so access is mirrored onto the business here —
+    // the same fields the webhook writes, so both Super Admin screens and the
+    // existing login checks read it identically.
+    const iso = endDate.toISOString().slice(0, 10);
+    await business.ref.set({
+      subscriptionStatus: "active",
+      subscriptionPlanId: String(planId),
+      status: "active",
+      planExpiryDate: iso,
+      expiryDate: iso,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    console.log(`coupon ${check.offer.id} redeemed by ${restaurantId} for ${plan.name || planId} (${cycle})`);
+    res.json({ ok: true, success: true, subscriptionId: subscriptionRef.id, status: "active", endDate: iso, months: paidMonths + bonusMonths });
+  } catch (error) {
+    console.error("subscriptions/redeem failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: error.safe ? error.message : "Could not redeem that coupon." });
+  }
+});
 
 /* ---------- Business owner: cancel ---------- */
 app.post("/api/subscriptions/:subscriptionId/cancel", verifyAdmin, async (req, res) => {
