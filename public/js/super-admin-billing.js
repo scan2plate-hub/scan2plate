@@ -487,9 +487,10 @@ function renderOffers() {
 
 /** Explains, per offer, whether its discount can actually reach the customer. */
 function couponBackingNote(offer = {}) {
-  const percent = String(offer.discountType || "") === "percent" ? Number(offer.discountValue || 0) : 0;
+  const type = String(offer.discountType || "");
+  const percent = type === "percent" ? Number(offer.discountValue || 0) : 0;
   if (percent >= 100) return "Not needed: 100% off is granted directly, with no Razorpay payment.";
-  if (Number(offer.discountValue || 0) > 0) {
+  if (type && Number(offer.discountValue || 0) > 0) {
     return offer.razorpayOfferId
       ? "Razorpay will apply this discount to the charge."
       : "Required — without it Razorpay charges the full plan price.";
@@ -497,7 +498,12 @@ function couponBackingNote(offer = {}) {
   return "Not needed for bonus months.";
 }
 
+// Bumped whenever an editor is opened or closed, so a pending close can tell
+// whether it is still the current one.
+let offerEditorGeneration = 0;
+
 function openOfferEditor(offerId) {
+  offerEditorGeneration += 1;
   editingOfferId = offerId || "";
   const offer = offers.find(item => item.id === offerId) || {};
   const host = $("#offerEditor");
@@ -562,7 +568,20 @@ function openOfferEditor(offerId) {
       </div>
     </div>`;
   $("#saveOfferBtn")?.addEventListener("click", submitOffer);
-  $("#cancelOfferBtn")?.addEventListener("click", () => { editingOfferId = ""; host.innerHTML = ""; });
+  $("#cancelOfferBtn")?.addEventListener("click", () => { offerEditorGeneration += 1; editingOfferId = ""; host.innerHTML = ""; });
+  // A discount value with no discount type is a contradiction the form should
+  // not let someone type in the first place.
+  const discountType = $("#offerDiscountType");
+  const discountValue = $("#offerDiscountValue");
+  const syncDiscount = () => {
+    const off = !discountType?.value;
+    if (!discountValue) return;
+    discountValue.disabled = off;
+    discountValue.placeholder = off ? "Choose a discount type first" : "";
+    if (off) discountValue.value = "";
+  };
+  discountType?.addEventListener("change", syncDiscount);
+  syncDiscount();
   host.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -577,7 +596,10 @@ async function submitOffer() {
     planId: $("#offerPlan")?.value || "",
     billingCycle: $("#offerCycle")?.value || "any",
     discountType: $("#offerDiscountType")?.value || "",
-    discountValue: Number($("#offerDiscountValue")?.value || 0),
+    // With no discount type there is no discount, whatever is left in the
+    // value box. discountAmount() already ignores it; storing it anyway made
+    // a pure bonus-months offer look like a discount to the checks below.
+    discountValue: $("#offerDiscountType")?.value ? Number($("#offerDiscountValue")?.value || 0) : 0,
     bonusMonths: Number($("#offerBonusMonths")?.value || 0),
     priority: Number($("#offerPriority")?.value || 1),
     startDate: $("#offerStart")?.value || "",
@@ -599,9 +621,11 @@ async function submitOffer() {
   // plan, so a partial discount can only reach the customer through a Razorpay
   // Offer. Saying so here is the difference between a coupon that works and
   // one that is refused at checkout in front of a customer.
-  const percent = payload.discountType === "percent" ? payload.discountValue : 0;
-  const coversEverything = percent >= 100;
-  const partialDiscount = payload.discountValue > 0 && !coversEverything;
+  // Only a real discount needs backing. "None" plus a number left in the value
+  // box is not a discount, and a bonus-months offer must not be blocked by it.
+  const hasDiscount = Boolean(payload.discountType) && payload.discountValue > 0;
+  const coversEverything = payload.discountType === "percent" && payload.discountValue >= 100;
+  const partialDiscount = hasDiscount && !coversEverything;
   if (partialDiscount && !payload.razorpayOfferId) {
     return setMessage("A partial discount needs a Razorpay Offer ID, or Razorpay will still charge the full price. Create the offer in Razorpay Dashboard → Offers and paste its ID, or use bonus months instead.");
   }
@@ -615,9 +639,21 @@ async function submitOffer() {
     } else {
       await addDoc(collection(db, "offers"), { ...payload, redemptions: 0, createdAt: serverTimestamp() });
     }
+    // The editor used to blank itself in the same tick as the message, so the
+    // confirmation was destroyed before it could be read and a successful save
+    // looked exactly like nothing happening. The offer appears in the table
+    // below either way; this just lets the operator see that it worked.
     setMessage("Offer saved.", true);
     editingOfferId = "";
-    $("#offerEditor").innerHTML = "";
+    // Only close the editor this save belongs to. A bare timeout would blank
+    // whatever editor happened to be open 1.4s later, including a new one the
+    // operator had already started filling in.
+    const closing = ++offerEditorGeneration;
+    setTimeout(() => {
+      if (closing !== offerEditorGeneration) return;
+      const host = $("#offerEditor");
+      if (host) host.innerHTML = "";
+    }, 1400);
   } catch (error) {
     setMessage(error.message || "Could not save the offer.");
   } finally {
