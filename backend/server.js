@@ -23,7 +23,13 @@ app.use(cors({
     return callback(new Error("Not allowed by CORS"));
   }
 }));
-app.use(express.json({ limit: "2mb" }));
+// `verify` keeps the untouched request bytes so the Razorpay webhook can check
+// its HMAC signature against exactly what Razorpay sent. Re-serialising the
+// parsed body would change whitespace/key order and break verification.
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, _res, buffer) => { req.rawBody = buffer; }
+}));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -311,6 +317,36 @@ function parseBillText(text = "") {
   const parseWarnings = reviewItems.length ? [] : ["OCR text was received, but no item rows matched. Edit the raw text and try parsing again, or enter rows manually."];
   return { supplierName, billNumber, billDate, taxAmount: Number(taxMatch?.[1] || 0), grandTotal: Number(grandTotalMatch?.[1] || 0), items: reviewItems, rawText: text, parseWarnings };
 }
+// Only a Super Admin may manage the plan catalogue, offers and other
+// businesses' subscriptions. Mirrors the client-side role resolution in
+// super-admin-auth.js, but the decision is made here, server-side.
+async function verifySuperAdmin(req, res, next) {
+  if (!adminReady) return res.status(503).json({ ok: false, error: firebaseAdminError });
+  try {
+    const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (!token) throw new Error("Missing bearer token");
+    const user = await getAuth().verifyIdToken(token);
+    const db = getFirestore();
+    const email = lowerEmail(user.email);
+    const isSuper = data => String(data?.role || "").trim().toLowerCase() === "super_admin"
+      && !["disabled", "suspended", "inactive"].includes(String(data?.status || "active").toLowerCase());
+
+    const direct = await db.collection("users").doc(user.uid).get();
+    if (direct.exists && isSuper(direct.data())) { req.user = user; return next(); }
+
+    const byUid = await db.collection("users").where("uid", "==", user.uid).limit(5).get();
+    if (byUid.docs.some(docSnap => isSuper(docSnap.data()))) { req.user = user; return next(); }
+
+    if (email) {
+      const byEmail = await db.collection("admins").where("email", "==", email).limit(5).get();
+      if (byEmail.docs.some(docSnap => isSuper(docSnap.data()))) { req.user = user; return next(); }
+    }
+    return res.status(403).json({ ok: false, error: "Super Admin access required." });
+  } catch {
+    return res.status(401).json({ ok: false, error: "Authentication required." });
+  }
+}
+
 async function verifyAdmin(req, res, next) {
   if (!adminReady) return res.status(503).json({ error: firebaseAdminError });
   try {
@@ -889,6 +925,429 @@ app.delete("/api/restaurants/:restaurantId/staff/:uid", verifyAdmin, async (req,
     res.json({ ok: true, success: true });
   } catch (error) {
     res.status(error.status || 400).json({ ok: false, error: error.message || "Could not delete staff." });
+  }
+});
+
+/* =========================================================
+   RAZORPAY — RECURRING SUBSCRIPTIONS
+
+   Plans and subscriptions are created here, never in the browser.
+   RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET exist only in
+   backend env; the frontend only ever receives the public key id
+   and a subscription id.
+
+   The plan catalogue lives in Firestore (`subscriptionPlans`) and
+   is readable by the client, because it is public pricing. Every
+   WRITE goes through a Super Admin route here.
+========================================================= */
+const razorpayWebhookSecret = String(process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
+
+// Razorpay bills for a fixed number of cycles. These are the defaults used
+// when Super Admin does not set one; a subscription simply renews for this
+// many cycles before Razorpay stops charging.
+const DEFAULT_TOTAL_COUNT = { monthly: 120, yearly: 10 };
+
+function planCycleAmountPaise(planDoc, billingCycle) {
+  const rupees = billingCycle === "yearly" ? planDoc.yearlyPrice : planDoc.monthlyPrice;
+  const numeric = Number(rupees);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return Math.round(numeric * 100);
+}
+
+/**
+ * Returns the Razorpay plan id to bill against, creating one only when it is
+ * genuinely needed.
+ *
+ * Razorpay plans are immutable — a plan's amount cannot be edited — so a real
+ * price change requires a new Razorpay plan. Editing a plan's NAME, features
+ * or description must not create one. We therefore remember the amount each
+ * stored Razorpay plan was created for, and only create a new plan when the
+ * amount actually differs. Existing subscribers keep billing on the plan they
+ * signed up to, which is the correct behaviour for a price change.
+ */
+async function ensureRazorpayPlan(planDoc, billingCycle) {
+  const amountPaise = planCycleAmountPaise(planDoc, billingCycle);
+  if (!amountPaise) return { planId: "", amountPaise: 0, created: false };
+
+  const idField = billingCycle === "yearly" ? "razorpayYearlyPlanId" : "razorpayMonthlyPlanId";
+  const amountField = billingCycle === "yearly" ? "razorpayYearlyAmountPaise" : "razorpayMonthlyAmountPaise";
+  const existingId = String(planDoc[idField] || "").trim();
+  const existingAmount = Number(planDoc[amountField] || 0);
+
+  if (existingId && existingAmount === amountPaise) {
+    return { planId: existingId, amountPaise, created: false };
+  }
+  if (!razorpayReady) {
+    const error = new Error("Razorpay is not configured on the server.");
+    error.status = 503;
+    throw error;
+  }
+
+  const created = await razorpayClient.plans.create({
+    period: billingCycle === "yearly" ? "yearly" : "monthly",
+    interval: 1,
+    item: {
+      name: `${safeString(planDoc.name, 80)} (${billingCycle})`,
+      amount: amountPaise,
+      currency: "INR",
+      description: safeString(planDoc.description, 200) || `${safeString(planDoc.name, 80)} ${billingCycle} plan`
+    },
+    notes: { businessType: safeString(planDoc.businessType, 40), billingCycle }
+  });
+  return { planId: created.id, amountPaise, created: true };
+}
+
+/* ---------- Super Admin: plan catalogue ---------- */
+app.post("/api/admin/plans", verifySuperAdmin, async (req, res) => {
+  try {
+    const { planId = "", name = "", businessType = "restaurant", businessTypes = [], description = "",
+      monthlyPrice = 0, yearlyPrice = 0, features = {}, limits = {}, trialDays = 0,
+      active = true, featured = false, displayOrder = 0, badgeText = "", gracePeriodDays = 7,
+      totalCountMonthly = 0, totalCountYearly = 0 } = req.body || {};
+
+    if (!String(name).trim()) return res.status(400).json({ ok: false, error: "Plan name is required." });
+    const monthly = Number(monthlyPrice) || 0;
+    const yearly = Number(yearlyPrice) || 0;
+    if (monthly <= 0 && yearly <= 0) return res.status(400).json({ ok: false, error: "Set a monthly or yearly price." });
+
+    const db = getFirestore();
+    const ref = String(planId).trim()
+      ? db.collection("subscriptionPlans").doc(String(planId).trim())
+      : db.collection("subscriptionPlans").doc();
+    const existing = (await ref.get()).data() || {};
+
+    const draft = {
+      ...existing,
+      name: safeString(name, 80),
+      businessType: String(businessType || "restaurant").trim().toLowerCase(),
+      businessTypes: Array.isArray(businessTypes) ? businessTypes.map(v => String(v).trim().toLowerCase()).filter(Boolean) : [],
+      description: safeString(description, 300),
+      monthlyPrice: monthly,
+      yearlyPrice: yearly
+    };
+
+    // Sync each cycle independently: a plan may be monthly-only or yearly-only.
+    const sync = {};
+    for (const cycle of ["monthly", "yearly"]) {
+      const result = await ensureRazorpayPlan(draft, cycle);
+      if (!result.planId) continue;
+      sync[cycle === "yearly" ? "razorpayYearlyPlanId" : "razorpayMonthlyPlanId"] = result.planId;
+      sync[cycle === "yearly" ? "razorpayYearlyAmountPaise" : "razorpayMonthlyAmountPaise"] = result.amountPaise;
+      if (result.created) sync[`${cycle}PlanCreatedAt`] = FieldValue.serverTimestamp();
+    }
+
+    const payload = {
+      ...draft,
+      ...sync,
+      features: features && typeof features === "object" ? features : {},
+      limits: limits && typeof limits === "object" ? limits : {},
+      trialDays: Math.max(0, Number(trialDays) || 0),
+      gracePeriodDays: Math.max(0, Number(gracePeriodDays) || 0),
+      totalCountMonthly: Math.max(0, Number(totalCountMonthly) || 0),
+      totalCountYearly: Math.max(0, Number(totalCountYearly) || 0),
+      active: active !== false,
+      featured: featured === true,
+      displayOrder: Number(displayOrder) || 0,
+      badgeText: safeString(badgeText, 40),
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: req.user.email || req.user.uid
+    };
+    if (!existing.createdAt) payload.createdAt = FieldValue.serverTimestamp();
+
+    await ref.set(payload, { merge: true });
+    res.json({
+      ok: true, success: true, planId: ref.id,
+      razorpayMonthlyPlanId: payload.razorpayMonthlyPlanId || "",
+      razorpayYearlyPlanId: payload.razorpayYearlyPlanId || "",
+      createdRazorpayPlans: Object.keys(sync).filter(k => k.endsWith("PlanCreatedAt")).length
+    });
+  } catch (error) {
+    console.error("admin/plans failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: error.message || "Could not save the plan." });
+  }
+});
+
+/* ---------- Business owner: start a subscription ---------- */
+app.post("/api/subscriptions/create", verifyAdmin, async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ ok: false, error: "Payments are temporarily unavailable." });
+    const { restaurantId = "", planId = "", billingCycle = "monthly", offerId = "" } = req.body || {};
+    const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+    if (!restaurantId || !planId) return res.status(400).json({ ok: false, error: "restaurantId and planId are required." });
+    const business = await assertRestaurantAccess(req.user.uid, restaurantId, req.user);
+
+    const db = getFirestore();
+    const planSnap = await db.collection("subscriptionPlans").doc(String(planId)).get();
+    if (!planSnap.exists) return res.status(404).json({ ok: false, error: "Plan not found." });
+    const plan = planSnap.data();
+    if (plan.active === false) return res.status(400).json({ ok: false, error: "This plan is no longer available." });
+
+    // The Razorpay plan is resolved here, server-side, from the stored
+    // catalogue — the client never chooses which plan id gets billed.
+    const { planId: razorpayPlanId, amountPaise } = await ensureRazorpayPlan(plan, cycle);
+    if (!razorpayPlanId) return res.status(400).json({ ok: false, error: `This plan has no ${cycle} price.` });
+
+    // The offer is re-validated here. A discount or bonus the client claims is
+    // never trusted; only a live, matching offer is applied.
+    let offer = null;
+    if (offerId) {
+      const offerSnap = await db.collection("offers").doc(String(offerId)).get();
+      const candidate = offerSnap.exists ? { id: offerSnap.id, ...offerSnap.data() } : null;
+      if (candidate && candidate.active !== false && offerMatches(candidate, String(planId), cycle, businessTypeOfDoc(business.data()))) {
+        offer = candidate;
+      }
+    }
+
+    const trialDays = Math.max(0, Number(plan.trialDays) || 0);
+    const startAt = trialDays > 0 ? Math.floor(Date.now() / 1000) + trialDays * 86400 : undefined;
+    const totalCount = Number(cycle === "yearly" ? plan.totalCountYearly : plan.totalCountMonthly) || DEFAULT_TOTAL_COUNT[cycle];
+
+    const subscriptionRef = db.collection("subscriptions").doc();
+    const razorpaySubscription = await razorpayClient.subscriptions.create({
+      plan_id: razorpayPlanId,
+      total_count: totalCount,
+      customer_notify: 1,
+      ...(startAt ? { start_at: startAt } : {}),
+      notes: {
+        scan2plateSubscriptionId: subscriptionRef.id,
+        businessId: String(restaurantId),
+        planId: String(planId),
+        billingCycle: cycle
+      }
+    });
+
+    const bonusMonths = Math.max(0, Number(offer?.bonusMonths || 0));
+    const paidMonths = cycle === "yearly" ? 12 : 1;
+    const startDate = startAt ? new Date(startAt * 1000) : new Date();
+
+    await subscriptionRef.set({
+      businessId: String(restaurantId),
+      businessType: businessTypeOfDoc(business.data()),
+      planId: String(planId),
+      planName: plan.name || "",
+      razorpaySubscriptionId: razorpaySubscription.id,
+      razorpayPlanId,
+      status: trialDays > 0 ? "trial" : "pending",
+      billingCycle: cycle,
+      amount: Math.round(amountPaise / 100),
+      currency: "INR",
+      paidMonths,
+      bonusMonths,
+      offerId: offer?.id || null,
+      gracePeriodDays: Math.max(0, Number(plan.gracePeriodDays ?? 7)),
+      startDate,
+      nextBillingDate: null,
+      endDate: null,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      createdBy: req.user.email || req.user.uid
+    });
+
+    res.json({
+      ok: true, success: true,
+      publicKeyId: razorpayKeyId,
+      subscriptionId: subscriptionRef.id,
+      razorpaySubscriptionId: razorpaySubscription.id,
+      amount: amountPaise,
+      currency: "INR",
+      bonusMonths,
+      trialDays
+    });
+  } catch (error) {
+    console.error("subscriptions/create failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: "Could not start the subscription. Please try again." });
+  }
+});
+
+function businessTypeOfDoc(data = {}) {
+  return String(data.businessType || data.restaurantType || "restaurant").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+// Server-side re-validation of an offer. The client may claim any offerId;
+// only a live offer that genuinely matches this plan, cycle and business type
+// is honoured, so a discount or bonus month can never be self-granted.
+function offerMatches(offer, planId, billingCycle, businessType) {
+  const now = Date.now();
+  const start = offer.startDate ? new Date(offer.startDate).getTime() : null;
+  const end = offer.endDate ? new Date(`${String(offer.endDate).slice(0, 10)}T23:59:59.999`).getTime() : null;
+  if (start && now < start) return false;
+  if (end && now > end) return false;
+  const max = Number(offer.maxRedemptions);
+  if (Number.isFinite(max) && max > 0 && Number(offer.redemptions || 0) >= max) return false;
+  const offerType = String(offer.businessType || "").trim().toLowerCase();
+  if (offerType && offerType !== "all" && offerType.replace(/\s+/g, "_") !== businessType) return false;
+  // An offer with no planId applies to every plan for its business type.
+  if (offer.planId && String(offer.planId) !== String(planId)) return false;
+  const offerCycle = String(offer.billingCycle || "").trim().toLowerCase();
+  if (offerCycle && offerCycle !== "any" && offerCycle !== billingCycle) return false;
+  return true;
+}
+
+/* ---------- Business owner: cancel ---------- */
+app.post("/api/subscriptions/:subscriptionId/cancel", verifyAdmin, async (req, res) => {
+  try {
+    if (!razorpayReady) return res.status(503).json({ ok: false, error: "Payments are temporarily unavailable." });
+    const db = getFirestore();
+    const ref = db.collection("subscriptions").doc(String(req.params.subscriptionId || ""));
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: "Subscription not found." });
+    const subscription = snap.data();
+    await assertRestaurantAccess(req.user.uid, subscription.businessId, req.user);
+
+    const atCycleEnd = req.body?.immediate === true ? 0 : 1;
+    if (subscription.razorpaySubscriptionId) {
+      try {
+        await razorpayClient.subscriptions.cancel(subscription.razorpaySubscriptionId, { cancel_at_cycle_end: atCycleEnd });
+      } catch (error) {
+        // Already cancelled at Razorpay is not a failure — fall through and
+        // record it locally so the two sides agree.
+        if (!/already|not.*active/i.test(error.message || "")) throw error;
+      }
+    }
+    await ref.set({
+      status: "cancelled",
+      cancelAtCycleEnd: atCycleEnd === 1,
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledBy: req.user.email || req.user.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    res.json({ ok: true, success: true, cancelAtCycleEnd: atCycleEnd === 1 });
+  } catch (error) {
+    console.error("subscriptions/cancel failed:", error.message);
+    res.status(error.status || 500).json({ ok: false, error: "Could not cancel the subscription." });
+  }
+});
+
+/* ---------- Razorpay webhook ---------- */
+const RAZORPAY_EVENT_STATUS = {
+  "subscription.activated": "active",
+  "subscription.charged": "active",
+  "subscription.authenticated": "pending",
+  "subscription.pending": "payment_failed",
+  "subscription.halted": "halted",
+  "subscription.cancelled": "cancelled",
+  "subscription.paused": "paused",
+  "subscription.resumed": "active",
+  "subscription.completed": "expired"
+};
+
+function addMonthsUtc(date, months) {
+  const result = new Date(date.getTime());
+  const day = result.getDate();
+  result.setMonth(result.getMonth() + Number(months || 0));
+  if (result.getDate() < day) result.setDate(0);
+  return result;
+}
+
+app.post("/api/webhooks/razorpay", async (req, res) => {
+  try {
+    if (!razorpayWebhookSecret) {
+      console.warn("Razorpay webhook received but RAZORPAY_WEBHOOK_SECRET is not set.");
+      return res.status(503).json({ ok: false, error: "Webhook not configured." });
+    }
+    if (!adminReady) return res.status(503).json({ ok: false, error: firebaseAdminError });
+
+    // Verify against the exact bytes Razorpay sent.
+    const signature = String(req.headers["x-razorpay-signature"] || "");
+    const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    const expected = crypto.createHmac("sha256", razorpayWebhookSecret).update(raw).digest("hex");
+    const valid = signature.length === expected.length
+      && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    if (!valid) return res.status(400).json({ ok: false, error: "Invalid signature." });
+
+    const event = req.body || {};
+    const eventName = String(event.event || "");
+    // Razorpay delivers at least once. The event id is the idempotency key:
+    // a replayed delivery finds the marker and does nothing.
+    const eventId = String(req.headers["x-razorpay-event-id"] || event.id || `${eventName}-${event.created_at || ""}`);
+
+    const db = getFirestore();
+    const eventRef = db.collection("subscriptionEvents").doc(eventId.replace(/[^\w.-]/g, "_"));
+    const already = await eventRef.get();
+    if (already.exists && already.data()?.processed === true) {
+      return res.json({ ok: true, duplicate: true });
+    }
+
+    const entity = event.payload?.subscription?.entity || null;
+    const payment = event.payload?.payment?.entity || null;
+    const razorpaySubscriptionId = entity?.id || payment?.subscription_id || "";
+
+    let subscriptionDocId = "";
+    if (razorpaySubscriptionId) {
+      const matches = await db.collection("subscriptions").where("razorpaySubscriptionId", "==", razorpaySubscriptionId).limit(1).get();
+      if (!matches.empty) {
+        const doc = matches.docs[0];
+        subscriptionDocId = doc.id;
+        const current = doc.data();
+        const status = RAZORPAY_EVENT_STATUS[eventName] || null;
+        const update = { updatedAt: FieldValue.serverTimestamp(), lastEvent: eventName, lastEventAt: FieldValue.serverTimestamp() };
+
+        if (status) update.status = status;
+        if (eventName === "subscription.charged" || eventName === "subscription.activated") {
+          const startedAt = entity?.current_start ? new Date(entity.current_start * 1000) : new Date();
+          const nextAt = entity?.current_end ? new Date(entity.current_end * 1000) : null;
+          update.startDate = current.startDate || startedAt;
+          if (nextAt) update.nextBillingDate = nextAt;
+          update.paymentFailedAt = null;
+          // Access runs to the end of the paid period plus any bonus months
+          // the offer granted. The bonus never changes the billing date above.
+          const base = nextAt || addMonthsUtc(startedAt, Number(current.paidMonths || 1));
+          update.endDate = addMonthsUtc(base, Number(current.bonusMonths || 0));
+          if (eventName === "subscription.charged" && payment?.amount) {
+            update.lastPaymentAmount = Math.round(Number(payment.amount) / 100);
+            update.lastPaymentId = payment.id || "";
+            update.lastPaidAt = FieldValue.serverTimestamp();
+          }
+        }
+        if (eventName === "subscription.pending" || eventName === "payment.failed") {
+          update.status = "payment_failed";
+          if (!current.paymentFailedAt) update.paymentFailedAt = FieldValue.serverTimestamp();
+        }
+        if (eventName === "subscription.cancelled") update.cancelledAt = FieldValue.serverTimestamp();
+
+        await doc.ref.set(update, { merge: true });
+
+        // Mirror the status onto the business record so existing access checks
+        // (admin.js / login.js read subscriptionStatus + planExpiryDate) keep
+        // working unchanged.
+        if (current.businessId) {
+          const businessSnap = await findRestaurantDocByBusinessId(current.businessId);
+          if (businessSnap) {
+            const effective = update.status || current.status;
+            const mirror = {
+              subscriptionStatus: ["active", "trial"].includes(effective) ? "active" : effective,
+              subscriptionPlanId: current.planId || "",
+              updatedAt: FieldValue.serverTimestamp()
+            };
+            const endDate = update.endDate || null;
+            if (endDate) {
+              const iso = endDate.toISOString().slice(0, 10);
+              mirror.planExpiryDate = iso;
+              mirror.expiryDate = iso;
+            }
+            if (["active", "trial"].includes(effective)) mirror.status = "active";
+            await businessSnap.ref.set(mirror, { merge: true });
+          }
+        }
+      }
+    }
+
+    await eventRef.set({
+      eventId,
+      event: eventName,
+      razorpaySubscriptionId,
+      subscriptionId: subscriptionDocId,
+      matched: Boolean(subscriptionDocId),
+      processed: true,
+      receivedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // 2xx tells Razorpay the event is handled and must not be retried.
+    res.json({ ok: true, event: eventName, matched: Boolean(subscriptionDocId) });
+  } catch (error) {
+    console.error("razorpay webhook failed:", error.message);
+    // A non-2xx asks Razorpay to retry, which is what we want on a real fault.
+    res.status(500).json({ ok: false, error: "Webhook processing failed." });
   }
 });
 

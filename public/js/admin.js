@@ -20,6 +20,8 @@ import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
 import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
+import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=subs-20260918";
+import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=subs-20260918";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -806,6 +808,8 @@ async function createStaffUser() {
     role: document.getElementById("staffRoleField")?.value || "waiter"
   };
   if (!payload.name || !payload.email || !payload.password) return setStaffMessage("Name, email, and password are required.", "warning");
+  const staffGate = checkLimit("maxStaff", staffUsers.length);
+  if (!staffGate.allowed) return setStaffMessage(staffGate.message, "warning");
   try {
     if (button) button.disabled = true;
     const response = await fetch(`${purchaseBackendUrl()}/api/restaurants/${encodeURIComponent(restaurantId)}/staff`, {
@@ -2794,6 +2798,22 @@ async function loadSettings() {
     setValue("deliveryOperatingHoursField", restaurantSettings.deliveryOperatingHours ?? "");
     setChecked("onlinePaymentEnabledField", restaurantSettings.onlinePaymentEnabled, true);
     setChecked("cashOnDeliveryEnabledField", restaurantSettings.cashOnDeliveryEnabled, false);
+
+    // Show only the settings this business type uses, add its own groups, and
+    // load any values already stored for them. Runs before the extra fields
+    // are populated so their inputs exist.
+    const businessType = applyBusinessTypeUi(restaurantSettings.businessType || currentUser.businessType || "restaurant");
+    // Plan limits load in the background. Until they arrive — and for any
+    // business without a plan — every limit is unlimited, so nothing blocks.
+    loadPlanLimits(restaurantId).catch(error => devLog("plan limits unavailable", error));
+    typeSpecificSettingFields().forEach(({ field, kind }) => {
+      const el = document.getElementById(`${field}Field`);
+      if (!el) return;
+      const stored = restaurantSettings[field];
+      if (kind === "boolean") el.checked = stored === true;
+      else el.value = stored ?? "";
+    });
+    devLog("business type applied", { businessType });
   } catch (err) {
     console.error("loadSettings error", err);
   }
@@ -2925,6 +2945,18 @@ async function saveSettings() {
       billFooterMessage: billFooterMessageFieldEl?.value.trim() || "",
       dailyOrderResetTime: normalizeResetTime(dailyOrderResetTimeFieldEl?.value || "04:00"),
       showQrOnPaidBills: showQrOnPaidBillsFieldEl?.checked !== false,
+      // Settings groups that only some business types show (rooms, hostel,
+      // mess, salon, products). Only fields actually rendered are written, so
+      // a restaurant's save never introduces hostel keys.
+      ...Object.fromEntries(typeSpecificSettingFields()
+        .map(({ field, kind }) => {
+          const el = document.getElementById(`${field}Field`);
+          if (!el) return null;
+          if (kind === "boolean") return [field, el.checked === true];
+          if (kind === "number") return [field, el.value === "" ? null : Number(el.value)];
+          return [field, el.value.trim()];
+        })
+        .filter(Boolean)),
       kitchenWhatsApp: kitchenWhatsAppFieldEl?.value.trim() || "",
       backendUrl: getBackendBaseUrl(),
       gstNumber: gstFieldEl?.value.trim() || "",
@@ -3544,6 +3576,11 @@ async function saveMenuItem() {
 
     if (!name) return alert("Enter item name.");
     if (!category) return alert("Enter category.");
+    if (!customDocId) {
+      // Only a NEW item counts against the plan; editing one never does.
+      const gate = checkLimit("maxMenuItems", allMenuItems.length);
+      if (!gate.allowed) return alert(gate.message);
+    }
     if (hasVariants && (!halfPrice || !fullPrice || halfPrice <= 0 || fullPrice <= 0)) return alert("Please enter both Half and Full prices.");
     if (!price || price <= 0) return alert("Enter valid price.");
 
@@ -3814,6 +3851,10 @@ async function saveInventoryItem() {
   if (!itemName || !Number.isFinite(currentStock) || !Number.isFinite(minStockAlert) || currentStock < 0 || minStockAlert < 0) {
     alert("Enter an item name, current stock, and minimum stock alert.");
     return;
+  }
+  if (!inventoryDocIdEl?.value.trim()) {
+    const gate = checkLimit("maxInventoryItems", allInventoryItems.length);
+    if (!gate.allowed) return alert(gate.message);
   }
   const payload = {
     restaurantId,
@@ -6425,6 +6466,8 @@ addTablesBtn?.addEventListener("click", () => guardedAction(addTablesBtn, async 
   const addCount = Number(addTablesCountEl?.value || 0);
   if (!Number.isInteger(addCount) || addCount < 1) return alert("Enter the number of tables to add.");
   const currentCount = Math.max(Number(restaurantSettings.tableCount || 20), ...managedTables.map(t => Number(t.tableNo || t.id) || 0), ...getTableOptions().map(Number));
+  const tableGate = checkLimitFor("maxTables", currentCount, addCount);
+  if (!tableGate.allowed) return alert(tableGate.message);
   const batch = [];
   for (let index = 1; index <= addCount; index++) {
     const tableNo = String(currentCount + index).padStart(2, "0");
@@ -6886,6 +6929,16 @@ try {
   if (!subscriptionBlocked) {
     await withTimeout(loadSettings(), 20000, "Settings load timed out");
     ensureOnlineOrderSettingsUi();
+    // Subscription panel, the plans for THIS business type, and the offer
+    // popup. Imported lazily and not awaited, so a slow plan read can never
+    // delay the dashboard itself.
+    import("./business-subscription.js?v=subs-20260918").then(module => module.mountBusinessSubscription({
+      businessId: restaurantId,
+      businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
+      businessName: restaurantSettings.restaurantName || "",
+      email: currentUser.email || "",
+      phone: restaurantSettings.phone || ""
+    })).catch(error => devError("subscription panel failed to mount", error));
     mountSafeReset({ restaurantId, role: currentUser.role, host: document.getElementById("section-settings"), panelName: "Restaurant Admin", defaultTableReset: true });
     if (["admin", "owner"].includes(String(currentUser.role || "").toLowerCase())) {
       const quickActions = document.querySelector(".quick-actions");

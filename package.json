@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate:seo": "node scripts/generate-seo.mjs"
+    "generate:seo": "node scripts/generate-seo.mjs",
+    "test": "node --test --test-force-exit test/*.test.mjs"
   }
 }
