@@ -15,12 +15,12 @@
    as it was. Access returns only when Razorpay's webhook says
    the payment happened.
 ========================================================= */
-import { auth, db } from "./firebase.js";
+import { auth, db } from "./firebase.js?v=s2p-20260918c";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { pricingFor, startSubscription, openRazorpayCheckout, watchSubscription, loadBusiness, validateCoupon, redeemCoupon } from "./subscription-client.js?v=renew-20260918";
-import { formatMoney, isEntitled } from "./subscription-core.js?v=renew-20260918";
-import { businessTypeLabel } from "./business-types.js?v=renew-20260918";
+import { pricingFor, startSubscription, openRazorpayCheckout, watchSubscription, loadBusiness, validateCoupon, redeemCoupon } from "./subscription-client.js?v=s2p-20260918c";
+import { formatMoney, isEntitled } from "./subscription-core.js?v=s2p-20260918c";
+import { businessTypeLabel } from "./business-types.js?v=s2p-20260918c";
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "")

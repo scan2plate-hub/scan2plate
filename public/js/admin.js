@@ -20,8 +20,8 @@ import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
 import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
-import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=subs-20260918";
-import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=subs-20260918";
+import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260918c";
+import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260918c";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -6936,7 +6936,7 @@ try {
     // Subscription panel, the plans for THIS business type, and the offer
     // popup. Imported lazily and not awaited, so a slow plan read can never
     // delay the dashboard itself.
-    import("./business-subscription.js?v=subs-20260918").then(module => module.mountBusinessSubscription({
+    import("./business-subscription.js?v=s2p-20260918c").then(module => module.mountBusinessSubscription({
       businessId: restaurantId,
       businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
       businessName: restaurantSettings.restaurantName || "",

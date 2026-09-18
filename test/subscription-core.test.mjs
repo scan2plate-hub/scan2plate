@@ -227,3 +227,52 @@ test("a numeric limit blocks only once it is reached", () => {
   assert.equal(withinLimit(plan, "maxTables", 20), false);
   assert.equal(withinLimit({ limits: { maxTables: -1 } }, "maxTables", 99999), true);
 });
+
+/* =========================================================
+   MODULE GRAPH FRESHNESS
+
+   These are about deployment, not pricing. The Super Admin
+   billing sections once disappeared entirely because
+   super-admin-billing.js imported subscription-core.js with no
+   version string: the browser kept a cached copy from before two
+   exports existed, the import failed to LINK, and the whole
+   module graph died before any code ran. No error reached the
+   page — the nav items simply were not there.
+========================================================= */
+import { readFileSync, readdirSync } from "node:fs";
+
+const JS_DIR = `${import.meta.dirname}/../public/js`;
+const GRAPH = [
+  "subscription-core.js", "subscription-client.js", "super-admin-billing.js",
+  "super-admin-billing-boot.js", "business-subscription.js", "business-types.js",
+  "business-type-ui.js", "plan-limits.js", "renew.js"
+];
+
+test("every relative import in the subscription graph is version-stamped", () => {
+  const offenders = [];
+  GRAPH.forEach(file => {
+    const source = readFileSync(`${JS_DIR}/${file}`, "utf8");
+    // Both static `from "./x.js"` and dynamic `import("./x.js")`.
+    for (const match of source.matchAll(/(?:from\s+|import\()\s*["'](\.\/[a-z0-9-]+\.js)(\?[^"']*)?["']/gi)) {
+      if (!match[2]?.includes("v=")) offenders.push(`${file} -> ${match[1]}`);
+    }
+  });
+  assert.deepEqual(offenders, [], "an unversioned link can serve a stale module and break the whole graph");
+});
+
+test("the whole graph shares one version token", () => {
+  const tokens = new Set();
+  GRAPH.forEach(file => {
+    const source = readFileSync(`${JS_DIR}/${file}`, "utf8");
+    for (const match of source.matchAll(/\?v=([a-z0-9-]+)/gi)) tokens.add(match[1]);
+  });
+  // Mixed tokens are how half a graph goes stale: one module updates, its
+  // dependency does not, and the pair no longer agree on what is exported.
+  assert.equal(tokens.size, 1, `expected one shared token, found: ${[...tokens].join(", ")}`);
+});
+
+test("the Super Admin console loads its billing sections dynamically", () => {
+  const boot = readFileSync(`${JS_DIR}/super-admin-billing-boot.js`, "utf8");
+  assert.match(boot, /import\(/, "a static import cannot be caught if it fails to link");
+  assert.match(boot, /catch/, "and the failure must be handled rather than lost");
+});

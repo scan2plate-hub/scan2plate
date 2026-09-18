@@ -15,17 +15,17 @@
    hold no money secrets and are written straight to Firestore,
    where the Super Admin rules already apply.
 ========================================================= */
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=s2p-20260918c";
 import {
   collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { listBusinessTypes, businessTypeLabel, normalizeBusinessType } from "./business-types.js";
+import { listBusinessTypes, businessTypeLabel, normalizeBusinessType } from "./business-types.js?v=s2p-20260918c";
 import {
   formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive,
   normalizeCouponCode, isCouponOffer
-} from "./subscription-core.js";
-import { savePlan, clearSubscriptionCache } from "./subscription-client.js";
-import { getBackendBaseUrl } from "./common.js";
+} from "./subscription-core.js?v=s2p-20260918c";
+import { savePlan, clearSubscriptionCache } from "./subscription-client.js?v=s2p-20260918c";
+import { getBackendBaseUrl } from "./common.js?v=s2p-20260918c";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
