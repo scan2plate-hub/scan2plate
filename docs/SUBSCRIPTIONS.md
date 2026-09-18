@@ -133,6 +133,34 @@ nothing.
 A failed payment keeps access for `gracePeriodDays` (default 7, configurable
 per plan) and **never deletes business data**.
 
+### Settings and the sidebar follow the business type
+
+`business-type-ui.js` hides the settings cards and sidebar sections a business
+type does not use, and adds the ones it does (Rooms, Hostel & Residents, Mess,
+Services & Appointments, Products & Custom Orders). A street vendor sees no
+table or kitchen configuration; a hostel sees rooms, beds and mess.
+
+Two rules keep it safe: it only ever **adds** `hidden` (so it can never undo
+the role-based hiding `applyStaffPermissions()` already did), and it never
+clears a stored value — switching a business's type back restores its
+configuration untouched. The extra fields write into `settings/general`,
+which is schemaless, so this is additive.
+
+### Plan limits are enforced at the point of creation
+
+`plan-limits.js` gates adding tables, staff accounts, menu items and inventory
+items against the limits configured on the plan.
+
+**It fails open by design.** A business with no subscription, no plan, an
+unentitled (expired/cancelled) subscription, or an unreadable plan is never
+blocked — every existing Scan2Plate business is in exactly that state, and a
+billing lookup must not stop a live restaurant adding a table mid-service.
+Editing an existing record is never blocked, only creating a new one.
+
+This is a usability gate, not a security boundary: it stops an owner quietly
+exceeding what they bought. Firestore rules and the backend remain what
+actually enforce access.
+
 ### Existing businesses need no migration
 
 `normalizeBusinessType()` resolves every spelling already in production —
@@ -250,12 +278,9 @@ Stated plainly so nothing is assumed:
   groups and their pricing exist. Room allocation, bed/resident management,
   mess plans and appointment booking are separate product modules and were not
   built.
-- **Settings screen re-layout.** `business-types.js` declares which settings
-  groups each type shows, but the existing Settings screen does not yet render
-  itself from that declaration.
-- **Plan limits are not yet enforced at write time.** `withinLimit()` exists
-  and is tested, but the table/staff/menu creation paths do not call it, so
-  limits are currently advisory.
+- **Hostel/salon domain screens.** Their *settings* now exist (rooms, beds,
+  warden, mess charge, appointment slots) and persist, but there is no room
+  allocation screen, resident register, mess roster or appointment calendar.
 - **Upgrade proration.** Changing plan creates a new subscription; the old one
   must be cancelled. Razorpay's `update` API is not used.
 - **The existing one-time ₹499 signup checkout** (`/api/subscriptions/create-order`)

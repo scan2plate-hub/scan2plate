@@ -38,7 +38,20 @@ export function doc(_db, ...path) { return { type: "doc", path: path.join("/") }
 export function setDoc(ref, data, options) { writes.push({ op: "setDoc", path: ref.path, data, options }); return Promise.resolve(); }
 export function addDoc(ref, data) { writes.push({ op: "addDoc", path: ref.name, data }); return Promise.resolve({ id: `generated-${writes.length}` }); }
 export function deleteDoc(ref) { writes.push({ op: "deleteDoc", path: ref.path }); return Promise.resolve(); }
-export function getDocs() { return Promise.resolve({ empty: true, docs: [] }); }
+export function getDocs(ref) {
+  const rows = seededRows(ref?.name || ref?.path || "");
+  return Promise.resolve({ empty: rows.length === 0, size: rows.length, docs: rows.map(row => ({ id: row.id, data: () => row })) });
+}
+export function getDoc(ref) {
+  const row = (globalThis.__STUB_DOCS || {})[ref?.path || ""];
+  return Promise.resolve({ exists: () => Boolean(row), id: String(ref?.path || "").split("/").pop(), data: () => row });
+}
+// Tests seed collections/documents through these globals; an unseeded path
+// simply comes back empty, which is what an absent record looks like.
+function seededRows(name) {
+  const rows = (globalThis.__STUB_COLLECTIONS || {})[name];
+  return Array.isArray(rows) ? rows : [];
+}
 export function limit(n) { return { limit: n }; }
 export function orderBy(field) { return { orderBy: field }; }
 export function serverTimestamp() { return { __serverTimestamp: true }; }
