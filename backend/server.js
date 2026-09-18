@@ -342,6 +342,23 @@ async function verifySuperAdmin(req, res, next) {
     const isSuper = data => String(data?.role || "").trim().toLowerCase() === "super_admin"
       && !["disabled", "suspended", "inactive"].includes(String(data?.status || "active").toLowerCase());
 
+    // The dedicated Super Admin collections come first, because that is the
+    // order super-admin-auth.js checks them in the browser. They were missing
+    // here, so an account whose grant lives ONLY in superAdmins was let into
+    // the console and then refused by every route it called — the console
+    // said "Main Super Admin" while the server said "access required".
+    //
+    // A document in a collection named superAdmins IS the grant, so its mere
+    // presence is enough, exactly as the browser treats it. An explicit role
+    // that says something else is still honoured, which is one notch stricter
+    // than the browser rather than one looser.
+    const grantsSuper = data => !["disabled", "suspended", "inactive"].includes(String(data?.status || "active").toLowerCase())
+      && ["", "super_admin"].includes(String(data?.role || "").trim().toLowerCase());
+    for (const collectionName of ["superAdmins", "super_admins"]) {
+      const snap = await db.collection(collectionName).doc(user.uid).get();
+      if (snap.exists && grantsSuper(snap.data())) { req.user = user; return next(); }
+    }
+
     const direct = await db.collection("users").doc(user.uid).get();
     if (direct.exists && isSuper(direct.data())) { req.user = user; return next(); }
 
@@ -352,7 +369,14 @@ async function verifySuperAdmin(req, res, next) {
       const byEmail = await db.collection("admins").where("email", "==", email).limit(5).get();
       if (byEmail.docs.some(docSnap => isSuper(docSnap.data()))) { req.user = user; return next(); }
     }
-    return res.status(403).json({ ok: false, error: "Super Admin access required." });
+    // Logged with the uid so a mis-provisioned account is diagnosable from the
+    // server log rather than by guessing.
+    console.warn(`super admin denied: uid=${user.uid} email=${email || "(none)"} has no super_admin grant in superAdmins/super_admins/users/admins`);
+    return res.status(403).json({
+      ok: false,
+      error: "Super Admin access required. This account has no super_admin record in Firestore.",
+      code: "not_super_admin"
+    });
   } catch {
     return res.status(401).json({ ok: false, error: "Authentication required." });
   }

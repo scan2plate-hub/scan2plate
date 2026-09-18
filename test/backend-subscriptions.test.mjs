@@ -567,3 +567,65 @@ test("no Razorpay secret reaches any subscription API response", async () => {
   assert.equal(createRes.body.publicKeyId, "rzp_test_stub", "only the public key id crosses to the browser");
   assert.equal(health.razorpayKeyIdPreview, "rzp_test_st…", "the health check masks even the public id");
 });
+
+/* =========================================================
+   SUPER ADMIN RECOGNITION
+
+   The console and the server must agree on who is a Super
+   Admin. They did not: an account granted only through the
+   `superAdmins` collection got into the console and was then
+   refused by every route it called.
+========================================================= */
+
+const asSuper = (token, uid, email) => { admin.authUsers.set(token, { uid, email }); };
+
+test("a grant in superAdmins is accepted, as the console already accepts it", async () => {
+  reset();
+  asSuper("t-sa", "sa-uid", "ops@scan2plate.com");
+  admin.seed("superAdmins/sa-uid", { uid: "sa-uid", email: "ops@scan2plate.com", role: "super_admin", status: "active" });
+  const res = await post("/api/admin/plans", { name: "Via superAdmins", monthlyPrice: 499 }, "t-sa");
+  assert.equal(res.status, 200, res.body.error);
+});
+
+test("a superAdmins document with no role field still grants access", async () => {
+  reset();
+  asSuper("t-bare", "bare-uid", "bare@scan2plate.com");
+  // Membership of a collection literally named superAdmins is the grant.
+  admin.seed("superAdmins/bare-uid", { uid: "bare-uid", email: "bare@scan2plate.com" });
+  const res = await post("/api/admin/plans", { name: "Bare", monthlyPrice: 499 }, "t-bare");
+  assert.equal(res.status, 200, res.body.error);
+});
+
+test("the snake_case super_admins collection works too", async () => {
+  reset();
+  asSuper("t-snake", "snake-uid", "snake@scan2plate.com");
+  admin.seed("super_admins/snake-uid", { uid: "snake-uid", role: "super_admin", status: "active" });
+  const res = await post("/api/admin/plans", { name: "Snake", monthlyPrice: 499 }, "t-snake");
+  assert.equal(res.status, 200, res.body.error);
+});
+
+test("a disabled super admin is refused even with a superAdmins document", async () => {
+  reset();
+  asSuper("t-off", "off-uid", "off@scan2plate.com");
+  admin.seed("superAdmins/off-uid", { uid: "off-uid", role: "super_admin", status: "disabled" });
+  const res = await post("/api/admin/plans", { name: "Disabled", monthlyPrice: 499 }, "t-off");
+  assert.equal(res.status, 403);
+  assert.equal(rzp.calls.plans.length, 0);
+});
+
+test("a superAdmins document that explicitly names a lesser role is refused", async () => {
+  reset();
+  asSuper("t-lesser", "lesser-uid", "lesser@scan2plate.com");
+  admin.seed("superAdmins/lesser-uid", { uid: "lesser-uid", role: "admin", status: "active" });
+  const res = await post("/api/admin/plans", { name: "Lesser", monthlyPrice: 499 }, "t-lesser");
+  assert.equal(res.status, 403, "an explicit non-super role is honoured, unlike in the browser");
+});
+
+test("an ordinary business owner is still not a Super Admin", async () => {
+  reset();
+  const res = await post("/api/admin/plans", { name: "Nope", monthlyPrice: 499 }, OWNER);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, "not_super_admin");
+  assert.match(res.body.error, /Firestore/, "says where the missing record belongs");
+  assert.equal(rzp.calls.plans.length, 0);
+});
