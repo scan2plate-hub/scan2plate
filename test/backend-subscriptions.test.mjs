@@ -627,5 +627,11 @@ test("an ordinary business owner is still not a Super Admin", async () => {
   assert.equal(res.status, 403);
   assert.equal(res.body.code, "not_super_admin");
   assert.match(res.body.error, /Firestore/, "says where the missing record belongs");
+  // Which account was checked. The console can show a stale localStorage
+  // session, so "this account" is not always the one the operator assumes.
+  assert.equal(res.body.uid, "owner-uid");
+  assert.equal(res.body.email, "owner@bistro.com");
+  assert.match(res.body.error, /owner@bistro\.com/);
+  assert.match(res.body.error, /superAdmins\/owner-uid/, "names the exact document to create");
   assert.equal(rzp.calls.plans.length, 0);
 });

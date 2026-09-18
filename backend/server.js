@@ -372,10 +372,18 @@ async function verifySuperAdmin(req, res, next) {
     // Logged with the uid so a mis-provisioned account is diagnosable from the
     // server log rather than by guessing.
     console.warn(`super admin denied: uid=${user.uid} email=${email || "(none)"} has no super_admin grant in superAdmins/super_admins/users/admins`);
+    // Echo back WHICH account was checked. Without it the message sends people
+    // hunting through Firestore with no idea which document id to look for —
+    // and the console can show a stale localStorage session, so the account
+    // signed in is not always the one they assume. This is the caller's own
+    // uid and email, returned to them after their own token verified, so it
+    // discloses nothing they did not already send.
     return res.status(403).json({
       ok: false,
-      error: "Super Admin access required. This account has no super_admin record in Firestore.",
-      code: "not_super_admin"
+      error: `Super Admin access required. No super_admin record in Firestore for ${email || "this account"} (uid ${user.uid}). Add it to superAdmins/${user.uid}.`,
+      code: "not_super_admin",
+      uid: user.uid,
+      email: email || ""
     });
   } catch {
     return res.status(401).json({ ok: false, error: "Authentication required." });
