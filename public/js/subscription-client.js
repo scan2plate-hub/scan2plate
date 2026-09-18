@@ -181,11 +181,11 @@ async function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function startSubscription({ businessId, planId, billingCycle, offerId = "" }) {
+export async function startSubscription({ businessId, planId, billingCycle, offerId = "", couponCode = "" }) {
   const response = await fetch(`${getBackendBaseUrl()}/api/subscriptions/create`, {
     method: "POST",
     headers: { ...(await authHeaders()), "Content-Type": "application/json" },
-    body: JSON.stringify({ restaurantId: businessId, planId, billingCycle, offerId })
+    body: JSON.stringify({ restaurantId: businessId, planId, billingCycle, offerId, couponCode })
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.ok === false) throw new Error(result.error || "Could not start the subscription.");
@@ -200,6 +200,37 @@ export async function cancelSubscription(subscriptionId, { immediate = false } =
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.ok === false) throw new Error(result.error || "Could not cancel the subscription.");
+  return result;
+}
+
+/**
+ * Asks the SERVER whether a typed coupon is usable, and what it is worth.
+ *
+ * Priced server-side on purpose: the page could compute the same number from
+ * the public offers collection, but then the figure a customer is shown would
+ * come from code they can edit. This way the quote and the charge come from
+ * one place.
+ */
+export async function validateCoupon({ businessId, planId, billingCycle, code }) {
+  const response = await fetch(`${getBackendBaseUrl()}/api/coupons/validate`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify({ restaurantId: businessId, planId, billingCycle, code })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok && !result.error) throw new Error("Could not check that coupon.");
+  return result;
+}
+
+/** Claims a coupon that covers the whole price. No payment is involved. */
+export async function redeemCoupon({ businessId, planId, billingCycle, code }) {
+  const response = await fetch(`${getBackendBaseUrl()}/api/subscriptions/redeem`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify({ restaurantId: businessId, planId, billingCycle, code })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) throw new Error(result.error || "Could not redeem that coupon.");
   return result;
 }
 

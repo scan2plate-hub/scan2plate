@@ -18,7 +18,7 @@
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { pricingFor, startSubscription, openRazorpayCheckout, watchSubscription, loadBusiness } from "./subscription-client.js?v=renew-20260918";
+import { pricingFor, startSubscription, openRazorpayCheckout, watchSubscription, loadBusiness, validateCoupon, redeemCoupon } from "./subscription-client.js?v=renew-20260918";
 import { formatMoney, isEntitled } from "./subscription-core.js?v=renew-20260918";
 import { businessTypeLabel } from "./business-types.js?v=renew-20260918";
 
@@ -31,6 +31,9 @@ let business = null;
 let cycle = "monthly";
 let quotes = [];
 let unwatch = null;
+// The coupon the server accepted, if any. Held here rather than read from the
+// input at checkout, so a code edited after validation cannot be submitted.
+let coupon = null;
 
 /* The business is taken from the session login.js stored, never from the URL:
    a business id in a query string is something anyone can edit. The backend
@@ -128,6 +131,15 @@ async function renderPlans() {
     </div>` : ""}
     <div class="renew-plans">
       ${sellable.length ? sellable.map(card).join("") : `<div class="renew-msg muted">No ${esc(cycle)} plan is available. Try the other billing cycle.</div>`}
+    </div>
+    <div class="renew-coupon">
+      <label for="couponInput"><strong>Have a coupon code?</strong></label>
+      <div class="renew-coupon-row">
+        <input id="couponInput" type="text" placeholder="Enter code" spellcheck="false" autocomplete="off"
+               value="${esc(coupon?.code || "")}" ${coupon ? "disabled" : ""} />
+        <button type="button" id="couponApply">${coupon ? "Remove" : "Apply"}</button>
+      </div>
+      <div id="couponMessage" class="renew-coupon-msg">${coupon ? esc(couponSummary(coupon)) : ""}</div>
     </div>`;
 
   host.querySelectorAll("[data-cycle]").forEach(button => {
@@ -136,11 +148,21 @@ async function renderPlans() {
   host.querySelectorAll("[data-buy]").forEach(button => {
     button.addEventListener("click", () => checkout(button.dataset.buy, button.dataset.offer || "", button));
   });
+  $("couponApply")?.addEventListener("click", () => {
+    if (coupon) { coupon = null; renderPlans(); return; }
+    applyCoupon();
+  });
+  $("couponInput")?.addEventListener("keydown", event => { if (event.key === "Enter") applyCoupon(); });
 }
 
 function card(entry) {
-  const quote = entry[cycle];
   const plan = entry.plan;
+  // A coupon the server priced for THIS plan overrides the automatic offer;
+  // the two never stack, so the customer sees one price and pays it.
+  const applied = coupon && coupon.planId === plan.id ? coupon : null;
+  const quote = applied
+    ? { ...entry[cycle], payable: applied.payable, offer: null, bonusMonths: applied.bonusMonths, couponText: couponSummary(applied) }
+    : entry[cycle];
   const features = Object.entries(plan.features || {}).filter(([, on]) => on !== false).slice(0, 5);
   return `
     <div class="renew-plan ${plan.featured ? "featured" : ""}">
@@ -150,14 +172,59 @@ function card(entry) {
         ${quote.payable < quote.listPrice ? `<span class="renew-was">${esc(formatMoney(quote.listPrice))}</span>` : ""}
       </div>
       <div class="muted" style="font-size:13px">per ${cycle === "yearly" ? "year" : "month"}</div>
-      ${quote.offer ? `<div class="renew-offer"><i class="fa-solid fa-gift"></i> ${esc(quote.offer.offerText || quote.offer.name || "Offer applied")}
+      ${quote.couponText ? `<div class="renew-offer"><i class="fa-solid fa-ticket"></i> ${esc(quote.couponText)}</div>`
+        : quote.offer ? `<div class="renew-offer"><i class="fa-solid fa-gift"></i> ${esc(quote.offer.offerText || quote.offer.name || "Offer applied")}
         ${quote.bonusMonths ? ` · ${quote.totalMonths} months access` : ""}</div>` : ""}
       ${features.length ? `<ul class="renew-feats">${features.map(([key]) =>
         `<li><i class="fa-solid fa-check"></i>${esc(FEATURE_LABELS[key] || key)}</li>`).join("")}</ul>` : ""}
       <button class="renew-buy" type="button" data-buy="${esc(plan.id)}" data-offer="${esc(quote.offer?.id || "")}">
-        Pay ${esc(formatMoney(quote.payable))} &amp; restore access
+        ${applied?.free ? "Activate free &amp; restore access" : `Pay ${esc(formatMoney(quote.payable))} &amp; restore access`}
       </button>
     </div>`;
+}
+
+function couponSummary(applied) {
+  if (!applied) return "";
+  if (applied.free) return `${applied.code} applied — this plan is free.`;
+  const parts = [];
+  if (applied.discount > 0) parts.push(`${formatMoney(applied.discount)} off`);
+  if (applied.bonusMonths > 0) parts.push(`${applied.bonusMonths} bonus month${applied.bonusMonths === 1 ? "" : "s"}`);
+  return `${applied.code} applied — ${parts.join(" · ") || applied.offerText || "discount applied"}.`;
+}
+
+/**
+ * Checks a code against the SERVER, which is also what prices it. The page
+ * never works out the discount itself, so the figure shown is the figure
+ * charged.
+ */
+async function applyCoupon() {
+  const input = $("couponInput");
+  const message = $("couponMessage");
+  const button = $("couponApply");
+  const code = String(input?.value || "").trim();
+  if (!code) { if (message) { message.textContent = "Enter a coupon code."; message.className = "renew-coupon-msg bad"; } return; }
+
+  // A coupon is checked against one plan, so with several on sale we check the
+  // one the customer is most likely buying: the featured plan, else the first.
+  const target = quotes.find(entry => entry.plan.featured && entry[cycle]?.payable > 0)
+    || quotes.find(entry => entry[cycle]?.payable > 0);
+  if (!target) return;
+
+  if (button) { button.disabled = true; button.textContent = "Checking…"; }
+  try {
+    const result = await validateCoupon({ businessId: business.id, planId: target.plan.id, billingCycle: cycle, code });
+    if (!result.ok) {
+      coupon = null;
+      if (message) { message.textContent = result.error || "That coupon cannot be used here."; message.className = "renew-coupon-msg bad"; }
+      return;
+    }
+    coupon = { ...result, planId: target.plan.id };
+    renderPlans();
+  } catch (error) {
+    if (message) { message.textContent = error?.message || "Could not check that coupon."; message.className = "renew-coupon-msg bad"; }
+  } finally {
+    if (button) { button.disabled = false; button.textContent = coupon ? "Remove" : "Apply"; }
+  }
 }
 
 const FEATURE_LABELS = {
@@ -169,10 +236,20 @@ const FEATURE_LABELS = {
 
 async function checkout(planId, offerId, button) {
   const original = button.textContent;
+  const applied = coupon && coupon.planId === planId ? coupon : null;
   button.disabled = true;
-  button.textContent = "Opening payment…";
   try {
-    const order = await startSubscription({ businessId: business.id, planId, billingCycle: cycle, offerId });
+    // A coupon covering the whole price is not a payment. Razorpay cannot
+    // create a zero-rupee subscription, so it is redeemed instead — and the
+    // server checks the coupon really is 100% before granting anything.
+    if (applied?.free) {
+      button.textContent = "Activating…";
+      await redeemCoupon({ businessId: business.id, planId, billingCycle: cycle, code: applied.code });
+      showActivated();
+      return;
+    }
+    button.textContent = "Opening payment…";
+    const order = await startSubscription({ businessId: business.id, planId, billingCycle: cycle, offerId, couponCode: applied?.code || "" });
     await openRazorpayCheckout({
       publicKeyId: order.publicKeyId,
       razorpaySubscriptionId: order.razorpaySubscriptionId,

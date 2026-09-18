@@ -21,7 +21,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { listBusinessTypes, businessTypeLabel, normalizeBusinessType } from "./business-types.js";
 import {
-  formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive
+  formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive,
+  normalizeCouponCode, isCouponOffer
 } from "./subscription-core.js";
 import { savePlan, clearSubscriptionCache } from "./subscription-client.js";
 import { getBackendBaseUrl } from "./common.js";
@@ -484,6 +485,18 @@ function renderOffers() {
   }).join("") : `<tr><td colspan="9"><div class="sa-empty">No offers yet.</div></td></tr>`;
 }
 
+/** Explains, per offer, whether its discount can actually reach the customer. */
+function couponBackingNote(offer = {}) {
+  const percent = String(offer.discountType || "") === "percent" ? Number(offer.discountValue || 0) : 0;
+  if (percent >= 100) return "Not needed: 100% off is granted directly, with no Razorpay payment.";
+  if (Number(offer.discountValue || 0) > 0) {
+    return offer.razorpayOfferId
+      ? "Razorpay will apply this discount to the charge."
+      : "Required — without it Razorpay charges the full plan price.";
+  }
+  return "Not needed for bonus months.";
+}
+
 function openOfferEditor(offerId) {
   editingOfferId = offerId || "";
   const offer = offers.find(item => item.id === offerId) || {};
@@ -522,6 +535,25 @@ function openOfferEditor(offerId) {
           <div class="sa-field"><label>Badge</label><input id="offerBadge" class="sa-input" value="${esc(offer.badge || "")}" placeholder="LIMITED TIME" /></div>
         </div>
         <div class="sa-field" style="margin-top:12px"><label>Offer text shown to the business</label><input id="offerText" class="sa-input" value="${esc(offer.offerText || "")}" placeholder="Pay for 12 months, get 2 months FREE" /></div>
+
+        <h3 style="margin:18px 0 8px">Coupon code <span class="sa-sub">(optional)</span></h3>
+        <p class="sa-sub" style="margin:0 0 10px">
+          Leave the code blank and this offer applies <strong>automatically</strong> to everyone who qualifies.
+          Give it a code and it applies only to a business that types that code &mdash; so you can hand it to one
+          customer. Codes ignore spaces and capitals: <code>save 50</code> and <code>SAVE50</code> are the same code.
+        </p>
+        <div class="sa-form-grid">
+          <div class="sa-field">
+            <label>Coupon code</label>
+            <input id="offerCode" class="sa-input" value="${esc(offer.code || "")}" placeholder="WELCOME50" spellcheck="false" autocomplete="off" style="text-transform:uppercase" />
+            <span class="sa-sub">Blank = automatic offer, no code needed.</span>
+          </div>
+          <div class="sa-field">
+            <label>Razorpay Offer ID <span class="sa-sub">(for a partial discount)</span></label>
+            <input id="offerRazorpayId" class="sa-input" value="${esc(offer.razorpayOfferId || "")}" placeholder="offer_XXXXXXXXXXXX" spellcheck="false" autocomplete="off" />
+            <span class="sa-sub">${couponBackingNote(offer)}</span>
+          </div>
+        </div>
         <div id="offerEditorMessage" class="sa-sub" style="margin-top:12px"></div>
         <div class="sa-actions" style="margin-top:14px">
           <button class="sa-btn" id="saveOfferBtn" type="button">Save Offer</button>
@@ -553,11 +585,27 @@ async function submitOffer() {
     maxRedemptions: Number($("#offerMaxRedemptions")?.value || 0),
     badge: $("#offerBadge")?.value.trim() || "",
     offerText: $("#offerText")?.value.trim() || "",
+    // Stored normalised so a code typed with different spacing or case still
+    // matches, and two codes cannot differ only by a space.
+    code: normalizeCouponCode($("#offerCode")?.value || ""),
+    razorpayOfferId: $("#offerRazorpayId")?.value.trim() || "",
     active: true,
     updatedAt: serverTimestamp()
   };
   if (!payload.name) return setMessage("Enter an offer name.");
   if (!payload.discountValue && !payload.bonusMonths) return setMessage("Set a discount or some bonus months.");
+
+  // A Razorpay plan's amount cannot be edited and a subscription bills its
+  // plan, so a partial discount can only reach the customer through a Razorpay
+  // Offer. Saying so here is the difference between a coupon that works and
+  // one that is refused at checkout in front of a customer.
+  const percent = payload.discountType === "percent" ? payload.discountValue : 0;
+  const coversEverything = percent >= 100;
+  const partialDiscount = payload.discountValue > 0 && !coversEverything;
+  if (partialDiscount && !payload.razorpayOfferId) {
+    return setMessage("A partial discount needs a Razorpay Offer ID, or Razorpay will still charge the full price. Create the offer in Razorpay Dashboard → Offers and paste its ID, or use bonus months instead.");
+  }
+  if (payload.discountType === "percent" && payload.discountValue > 100) return setMessage("A percentage discount cannot be more than 100%.");
   if (payload.startDate && payload.endDate && payload.startDate > payload.endDate) return setMessage("The end date is before the start date.");
 
   try {

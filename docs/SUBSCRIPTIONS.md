@@ -183,6 +183,33 @@ Checkout also **never creates a Razorpay plan**. A cycle with no configured
 plan id is a Super Admin problem; inventing a plan mid-payment would be the
 wrong way to hide it.
 
+### Coupon codes
+
+An offer with a `code` is a coupon: it applies **only** when a business types
+that code. An offer without one applies automatically to everyone who
+qualifies, as before. Codes ignore spaces and capitals, so `save 50` and
+`SAVE50` are the same code.
+
+Razorpay plan amounts are immutable and a subscription bills its plan, so a
+coupon cannot simply charge less. There are exactly three honest outcomes:
+
+| Coupon | How it is delivered |
+| --- | --- |
+| **100% off** | Not a payment at all. `/api/subscriptions/redeem` grants access directly, no Razorpay call — a zero-rupee subscription cannot exist |
+| **Partial discount** | Requires a `razorpayOfferId` (Razorpay Dashboard → Offers). Razorpay applies the discount to the real charge |
+| **Bonus months** | Extends access rather than changing the price, so it needs nothing at Razorpay |
+
+A partial discount with **no** `razorpayOfferId` is refused — at save time in
+Super Admin, and again at checkout. Showing a customer a discount and then
+charging them full price is the one outcome that is never acceptable, so the
+code would rather fail loudly.
+
+Every coupon is re-validated **server-side** before anything is charged or
+granted. A redemption is claimed in a Firestore transaction, so two people
+typing the last use of a one-use code cannot both get it. A free grant is
+recorded with `grantedByCoupon: true`, `amount: 0` and the `listPrice` it
+would have cost, so revenue reporting never reads it as a sale.
+
 ### Only one offer is ever applied
 
 Highest `priority` wins. Ties break on the larger saving, so two equally
@@ -266,6 +293,17 @@ Nothing about the gates changed. `admin.js` still locks the dashboard on
 expiry, and the lock genuinely blocks: `checkRestaurantSubscription()` returns
 true and the boot path skips loading any data behind it. Access comes back
 only when the webhook says the payment happened.
+
+### The two Super Admin screens agree
+
+Businesses and Subscriptions used to disagree about the same business.
+`effectiveStatus()` on the Businesses page predates the Razorpay system and
+looked only at `status` and `expiryDate`, ignoring the `subscriptionStatus`
+the webhook writes — so a business the webhook had just marked active could
+still show as Expired. It now prefers the subscription's own status where the
+webhook has spoken, and reads both `expiryDate` and `planExpiryDate`, falling
+back to the old fields exactly as before for businesses that never used
+Razorpay.
 
 ### Existing businesses need no migration
 
