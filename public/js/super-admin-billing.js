@@ -19,7 +19,7 @@ import { db } from "./firebase.js";
 import {
   collection, doc, addDoc, setDoc, deleteDoc, getDocs, onSnapshot, query, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { listBusinessTypes, businessTypeLabel, normalizeBusinessType, MODULES } from "./business-types.js";
+import { listBusinessTypes, businessTypeLabel, normalizeBusinessType } from "./business-types.js";
 import {
   formatMoney, statusLabel, statusTone, toDate, planPrice, offerIsLive
 } from "./subscription-core.js";
@@ -39,9 +39,27 @@ const LIMIT_FIELDS = [
 
 // Feature flags offered per plan, drawn from the shared module vocabulary so
 // the plan editor and the dashboard speak about the same things.
+// [stored key, label shown to a Super Admin].
+//
+// The labels are explicit rather than looked up in MODULES, because three of
+// these keys (tableManagement, kitchen, hotelRooms) have no MODULES entry and
+// were falling through to the raw field name — a Super Admin was being shown
+// "tableManagement" next to "QR Ordering". The keys are deliberately left
+// alone: they are what gets written into a plan's `features` map, and
+// renaming them would silently orphan the flags on every plan already saved.
 const FEATURE_FIELDS = [
-  "qrOrdering", "tableManagement", "kitchen", "kot", "inventory", "reports",
-  "onlineOrders", "preOrder", "whatsapp", "advancedReports", "hotelRooms", "appointments"
+  ["qrOrdering", "QR Ordering"],
+  ["tableManagement", "Table Management"],
+  ["kitchen", "Kitchen Display"],
+  ["kot", "KOT / Kitchen"],
+  ["inventory", "Inventory"],
+  ["reports", "Reports"],
+  ["onlineOrders", "Online Orders"],
+  ["preOrder", "Pre-Orders"],
+  ["whatsapp", "WhatsApp Alerts"],
+  ["advancedReports", "Advanced Reports"],
+  ["hotelRooms", "Rooms"],
+  ["appointments", "Appointments"]
 ];
 
 let plans = [];
@@ -339,8 +357,8 @@ function openPlanEditor(planId) {
 
         <h3 style="margin:18px 0 8px">Features</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
-          ${FEATURE_FIELDS.map(key => `<label style="display:flex;align-items:center;gap:7px;font-size:13px">
-            <input type="checkbox" class="plan-feature" value="${key}" ${features[key] !== false ? "checked" : ""} /> ${esc(MODULES[key] || key)}
+          ${FEATURE_FIELDS.map(([key, label]) => `<label style="display:flex;align-items:center;gap:7px;font-size:13px">
+            <input type="checkbox" class="plan-feature" value="${key}" ${features[key] !== false ? "checked" : ""} /> ${esc(label)}
           </label>`).join("")}
         </div>
 
