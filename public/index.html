@@ -579,6 +579,12 @@
       border-color:#111;
     }
 
+    .pricing-controls{ grid-column:1/-1; display:flex; gap:14px; justify-content:center; align-items:flex-end; flex-wrap:wrap; margin-bottom:22px; }
+    .pricing-type{ display:flex; flex-direction:column; gap:5px; font-size:13px; font-weight:600; }
+    .pricing-type select{ border:1px solid #ddd; border-radius:10px; padding:9px 13px; font-size:14px; min-width:190px; background:#fff; }
+    .pricing-cycle{ display:flex; gap:6px; }
+    .pricing-cycle button{ border:1px solid #ddd; background:#fff; border-radius:999px; padding:9px 18px; font-weight:700; font-size:13px; cursor:pointer; }
+    .pricing-cycle button.active{ background:#111; border-color:#111; color:#fff; }
     .price-row{
       display:flex;
       justify-content:space-between;
@@ -2667,6 +2673,10 @@ import {
   </div>
 </div>
 
+<!-- Renders the pricing section from the live subscriptionPlans catalogue.
+     The static card above stays as the fallback: if this cannot load, a
+     visitor still sees pricing rather than an empty section. -->
+<script type="module" src="/js/landing-pricing.js?v=s2p-20260918c"></script>
 <script src="/js/checkout.js" defer></script>
 <script src="/js/downloads-config.js"></script>
 <script src="/js/download-modal.js"></script>
