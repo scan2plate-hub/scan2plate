@@ -300,6 +300,28 @@ FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
 
 ---
 
+## Who counts as a Super Admin
+
+`/api/admin/plans` accepts an account granted through **any** of these, which
+is the same set `public/js/super-admin-auth.js` checks in the browser:
+
+| Where | What makes it a grant |
+| --- | --- |
+| `superAdmins/{uid}` | The document existing (role may be absent) |
+| `super_admins/{uid}` | The document existing |
+| `users/{uid}` | `role == "super_admin"` |
+| `admins` where `email ==` | `role == "super_admin"` |
+
+Any of them with `status` of `disabled` / `suspended` / `inactive` is refused,
+as is a document that explicitly names a lesser role.
+
+The first two were missing from the backend, so an account granted only
+through `superAdmins` was welcomed into the console and then refused by every
+route it called — "Main Super Admin" in the header, "Super Admin access
+required" on save. Keep the two lists in step if either gains a source.
+
+---
+
 ## Firestore security rules
 
 The plan catalogue is public pricing and is read by unauthenticated pricing
