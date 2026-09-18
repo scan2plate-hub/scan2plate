@@ -1,1 +1,56 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Renew Plan - Scan2Plate</title><link rel="stylesheet" href="./css/style.css" /></head><body><section class="section"><div class="container" style="max-width:700px"><div class="card"><h2 style="margin-top:0">Plan Expired / Suspended</h2><p class="muted">Your restaurant plan is expired or suspended. Please contact Scan2Plate admin to renew access.</p><div class="notice">Access to admin and kitchen dashboard is blocked until renewal.</div><a class="btn btn-primary" href="./admin-login.html" style="margin-top:16px">Back to Login</a></div></div></section></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Renew Your Plan - Scan2Plate</title>
+<link rel="stylesheet" href="./css/style.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+<style>
+  .renew-wrap { max-width: 880px; margin: 0 auto; padding: 24px 16px 60px; }
+  .renew-head { text-align: center; margin-bottom: 22px; }
+  .renew-head h1 { margin: 10px 0 6px; font-size: 26px; }
+  .renew-status { background: #fff6ed; border: 1px solid #f6c89a; color: #8a4b0a;
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; }
+  .renew-cycle { display: flex; gap: 8px; justify-content: center; margin-bottom: 18px; }
+  .renew-cycle button { border: 1px solid #e3e3e3; background: #fff; border-radius: 999px;
+    padding: 8px 18px; font-weight: 700; cursor: pointer; font-size: 14px; }
+  .renew-cycle button.active { background: #ff6b00; border-color: #ff6b00; color: #fff; }
+  .renew-plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .renew-plan { border: 1px solid #e6e6e6; border-radius: 14px; padding: 18px; background: #fff; }
+  .renew-plan.featured { border-color: #ff6b00; box-shadow: 0 6px 20px rgba(255,107,0,.12); }
+  .renew-plan h3 { margin: 0 0 4px; font-size: 17px; }
+  .renew-price { font-size: 30px; font-weight: 800; margin: 10px 0 2px; }
+  .renew-was { text-decoration: line-through; opacity: .55; font-size: 15px; font-weight: 600; margin-left: 6px; }
+  .renew-offer { background: #eafaf0; color: #10633a; border-radius: 8px;
+    padding: 7px 10px; font-size: 13px; font-weight: 700; margin: 10px 0; }
+  .renew-feats { list-style: none; padding: 0; margin: 12px 0; font-size: 13.5px; }
+  .renew-feats li { padding: 3px 0; }
+  .renew-feats i { color: #12a150; margin-right: 7px; }
+  .renew-buy { width: 100%; border: 0; border-radius: 10px; background: #ff6b00; color: #fff;
+    font-weight: 800; padding: 12px; cursor: pointer; font-size: 15px; }
+  .renew-buy:disabled { opacity: .6; cursor: not-allowed; }
+  .renew-note { text-align: center; margin-top: 22px; font-size: 13.5px; }
+  .renew-done { background: #eafaf0; border: 1px solid #a8e0c1; color: #10633a;
+    border-radius: 12px; padding: 20px; text-align: center; }
+  .renew-msg { text-align: center; padding: 30px 0; }
+</style>
+</head>
+<body>
+<section class="section">
+  <div class="renew-wrap">
+    <div class="renew-head">
+      <img src="./logo.PNG" alt="Scan2Plate" style="height:46px" />
+      <h1>Renew your plan</h1>
+      <p class="muted" id="renewBusiness">Loading your account…</p>
+    </div>
+    <div id="renewStatus" class="renew-status hidden"></div>
+    <div id="renewBody"><div class="renew-msg muted">Loading plans…</div></div>
+    <div class="renew-note">
+      <a href="./admin-login.html" id="renewBack">← Back to login</a>
+    </div>
+  </div>
+</section>
+<script type="module" src="./js/renew.js?v=renew-20260918"></script>
+</body>
+</html>

@@ -243,6 +243,30 @@ This is a usability gate, not a security boundary: it stops an owner quietly
 exceeding what they bought. Firestore rules and the backend remain what
 actually enforce access.
 
+### An expired business can pay for itself
+
+Before this, expiry was a dead end. `login.js` signed the account out with
+"Your plan has expired. Please renew", the dashboard lock said "contact your
+Super Admin", `renew.html` was 710 bytes of the same, and the lock's "Renew
+Now" button opened a `mailto:`. A customer who wanted to pay could not.
+
+`renew.html` is now a real self-service renewal page:
+
+- An expired login is redirected there **still signed in**, because buying a
+  subscription needs a verified identity. The session written for it carries
+  `role: "expired"` and the page reads only the business id from it.
+- It sells the plans for that business's type, with the best live offer
+  applied, through the same `/api/subscriptions/create` every other checkout
+  uses. No second payment path.
+- It watches the subscription and flips to a success state when **the webhook**
+  activates it — never on Razorpay's checkout callback, which only says the
+  customer finished, not that the money arrived.
+
+Nothing about the gates changed. `admin.js` still locks the dashboard on
+expiry, and the lock genuinely blocks: `checkRestaurantSubscription()` returns
+true and the boot path skips loading any data behind it. Access comes back
+only when the webhook says the payment happened.
+
 ### Existing businesses need no migration
 
 `normalizeBusinessType()` resolves every spelling already in production —
