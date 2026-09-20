@@ -1,6 +1,31 @@
 User-agent: *
 Allow: /
 
+# Operational pages. These are app surfaces, not marketing pages, and several
+# render business data for a signed-in operator. Each one also carries
+# <meta name="robots" content="noindex, nofollow">, which is what actually
+# keeps them out of an index — a Disallow only stops the crawl, and a page
+# that is linked from elsewhere can still be indexed without being fetched.
+Disallow: /admin-login
+Disallow: /admin-dashboard
+Disallow: /super-admin-login
+Disallow: /super-admin-dashboard
+Disallow: /restaurant-onboarding
+Disallow: /qr-generator
+Disallow: /kitchen-dashboard
+Disallow: /customer-order
+Disallow: /track
+Disallow: /bill
+Disallow: /restaurant-list
+Disallow: /add-restaurant
+Disallow: /renew
+Disallow: /cafe-token-panel
+Disallow: /cloud-kitchen-panel
+Disallow: /food-court-panel
+Disallow: /hotel-room-panel
+Disallow: /vendor-panel
+
+# Legacy prefixes kept from the previous file.
 Disallow: /admin
 Disallow: /super-admin
 Disallow: /dashboard

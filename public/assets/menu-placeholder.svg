@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="No photo for this menu item">
+  <rect width="160" height="160" fill="#f3efe9"/>
+  <circle cx="80" cy="74" r="34" fill="none" stroke="#d6cdc0" stroke-width="3"/>
+  <path d="M80 56v36M62 74h36" stroke="#d6cdc0" stroke-width="3" stroke-linecap="round"/>
+  <text x="80" y="132" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" fill="#a99f91">No photo</text>
+</svg>

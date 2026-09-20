@@ -3712,9 +3712,9 @@ function renderMenuManagement() {
         class="menu-item-img"
         loading="lazy"
         decoding="async"
-        src="${escapeHtml(item.imageUrl || item.image || "./assets/placeholder-food.jpg")}"
+        src="${escapeHtml(item.imageUrl || item.image || "./assets/menu-placeholder.svg")}"
         alt="${escapeHtml(item.name || "Item")}"
-        onerror="this.src='./assets/placeholder-food.jpg'"
+        onerror="this.src='./assets/menu-placeholder.svg'"
       />
       <div class="menu-item-info">
         <div class="menu-item-name">${escapeHtml(item.name || "")}</div>
@@ -4695,9 +4695,9 @@ function renderManualMenuPicker() {
         class="menu-item-img"
         loading="lazy"
         decoding="async"
-        src="${escapeHtml(item.imageUrl || item.image || "./assets/placeholder-food.jpg")}"
+        src="${escapeHtml(item.imageUrl || item.image || "./assets/menu-placeholder.svg")}"
         alt="${escapeHtml(item.name || "Item")}"
-        onerror="this.src='./assets/placeholder-food.jpg'"
+        onerror="this.src='./assets/menu-placeholder.svg'"
       />
       <div class="menu-item-info">
         <div class="menu-item-name">${escapeHtml(item.name)}</div>

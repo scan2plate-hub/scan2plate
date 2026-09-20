@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-IN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -22,7 +22,7 @@
   <meta name="twitter:title" content="Scan2Plate — Restaurant Billing, POS & QR Ordering Software" />
   <meta name="twitter:description" content="Scan2Plate is restaurant billing and management software with QR ordering, KOT, kitchen display, inventory, reports, pre-orders and delivery tools." />
   <meta name="twitter:image" content="https://scan2plate.com/assets/scan2plate-hero.jpg" />
-  <link rel="preload" as="image" href="/assets/scan2plate-hero.jpg" />
+  <link rel="preload" as="image" href="/assets/scan2plate-hero.webp" type="image/webp" fetchpriority="high" />
   <link rel="stylesheet" href="./css/style.css?v=latest-business-login-fix" />
   <link rel="stylesheet" href="./css/seo.css" />
   <script type="application/ld+json">
@@ -1395,7 +1395,10 @@
     <section class="landing-section">
       <div class="container deployment-card">
         <div class="deployment-image">
-          <img src="./assets/scan2plate-hero.jpg" alt="Old Monk Cafe Darbhanga live Scan2Plate deployment" loading="lazy">
+          <picture>
+            <source srcset="./assets/scan2plate-hero.webp" type="image/webp">
+            <img src="./assets/scan2plate-hero-min.jpg" alt="Old Monk Cafe Darbhanga live Scan2Plate deployment" width="1200" height="800" fetchpriority="high" decoding="async">
+          </picture>
         </div>
         <div class="deployment-copy">
           <span class="section-kicker">Live deployment</span>
@@ -2219,9 +2222,9 @@ import {
       menuGrid.innerHTML = items.map(item => `
         <div class="menu-item">
           <img
-            src="${item.imageUrl || item.image || "./assets/placeholder-food.jpg"}"
+            src="${item.imageUrl || item.image || "./assets/scan2plate-hero-min.jpg"}"
             alt="${item.name || "item"}"
-            onerror="this.onerror=null;this.src='./assets/placeholder-food.jpg'"
+            onerror="this.onerror=null;this.src='./assets/scan2plate-hero-min.jpg'"
           >
           <div class="menu-item-body">
             <h3>${item.name || ""}</h3>
