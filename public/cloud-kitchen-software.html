@@ -46,33 +46,83 @@
     <section class="seo-hero seo-hero-simple">
       <div class="container">
         <h1>Cloud Kitchen Software for Delivery-Only Kitchens</h1>
-        <p>Scan2Plate helps cloud kitchens organize orders, kitchen work, billing, menus, and reporting without relying on paper-based coordination.</p>
+        <p class="lede"><strong>Scan2Plate is cloud kitchen software for kitchens with no dining floor.</strong> It handles pre-orders with advance payment, routes every order to a kitchen screen, and reports the day without a table view you would never use. It costs &#8377;499 a month with every feature included.</p>
+        <p class="muted">Last updated: 21 September 2026</p>
         <div class="seo-cta"><a class="btn btn-primary" href="/demo">Request demo</a><a class="btn btn-outline" href="/features">Explore features</a></div>
       </div>
     </section>
     <section class="seo-section">
       <div class="container seo-content">
-        <aside class="seo-answer-box"><p>Scan2Plate helps cloud kitchens organize orders, kitchen work, billing, menus, and reporting without relying on paper-based coordination.</p></aside>
-        <h2>Centralized Orders</h2><p>Cloud kitchen teams can manage incoming orders and preparation from a shared order and kitchen workflow.</p>
-        <h2>Kitchen and Billing</h2><p>KOT, status updates, bill records, and payment tracking help connect preparation with business records.</p>
-        <h2>Inventory and Reports</h2><p>Stock, purchases, and sales reports support better daily planning for cloud kitchen operations.</p>
-        <h2>What cloud kitchen software changes day to day</h2>
-        <ul><li>Centralized order view</li><li>Kitchen flow</li><li>Token or takeaway support</li><li>Inventory tracking</li><li>Reports</li></ul>
+        <h2>Delivery-only kitchens are billed for a floor they do not have</h2>
+        <p>Most restaurant software is priced and built around seating. A cloud kitchen pays for table management, floor views and waiter flows it will never open, and still has to solve the problems it actually has.</p>
+        <p>Those problems are different. Orders arrive without anyone standing in front of you, so the identifier is a customer and a time rather than a table. Preparation has to be sequenced against when food leaves, not when a guest is ready. And demand is spiky in a way a dining room is not: forty orders can land inside twenty minutes.</p>
+
         <h2>How running a delivery-only kitchen works</h2>
-        <ol>
-          <li>Set up business details, menu, tables or service type, tax, payments, and staff access.</li>
-          <li>Customers or staff place orders through QR menu, counter, table, token, or pre-order workflows.</li>
-          <li>Kitchen and admin teams manage KOT, preparation, billing, payment status, inventory, and reports.</li>
+        <ol class="numbered-steps">
+          <li><strong>Publish the menu.</strong> The same digital menu, minus the table QR codes. Items can be marked unavailable the moment something runs out, which matters more without a waiter to explain.</li>
+          <li><strong>Take pre-orders with payment up front.</strong> A customer orders for a later time and pays in advance, so the kitchen is cooking against confirmed money rather than an intention.</li>
+          <li><strong>Orders land on the kitchen screen.</strong> Each with its items, quantities and the time it is needed, rather than a table number.</li>
+          <li><strong>Track through preparation.</strong> Pending, preparing, ready, served &mdash; the same states, used to sequence dispatch instead of service.</li>
+          <li><strong>Read the day by item.</strong> What sold and what it earned, which is the only feedback a kitchen with no dining room gets.</li>
         </ol>
+        <!-- TODO(owner): screenshot of the kitchen screen showing pre-orders queued by time -->
+
+        <h2>Why advance payment changes the operation</h2>
+        <p>A pre-order that is paid for is a different thing from a booking.</p>
+        <p>An unpaid order can evaporate, so a kitchen either cooks speculatively and eats the loss, or waits for confirmation and delivers late. Advance payment removes the choice: the order is real, the money has arrived, and preparation can be scheduled against the time it is needed rather than the time it was placed.</p>
+        <p>For a kitchen with no walk-in trade to absorb the mistake, that is the difference between planning a shift and reacting to it.</p>
+
+        <div class="table-wrap">
+          <table class="spec-table">
+            <caption>Scan2Plate for cloud kitchens at a glance</caption>
+            <tbody>
+              <tr><th scope="row">Dining floor</th><td>Not required; table features can stay unused</td></tr>
+              <tr><th scope="row">Pre-orders</th><td>Ordered for a later time, with advance payment</td></tr>
+              <tr><th scope="row">Kitchen routing</th><td>Every order to the kitchen display, sequenced by state</td></tr>
+              <tr><th scope="row">Order states</th><td>Pending, preparing, ready, served, cancelled</td></tr>
+              <tr><th scope="row">Menu control</th><td>Mark items unavailable instantly when stock runs out</td></tr>
+              <tr><th scope="row">Reporting</th><td>Item-level sales and payment mix by date range</td></tr>
+              <tr><th scope="row">Stock</th><td>Inventory from scanned supplier bills</td></tr>
+              <tr><th scope="row">Price</th><td>&#8377;499 per month per kitchen</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Handling a spike</h2>
+        <p>A delivery kitchen's load does not arrive evenly. Forty orders inside twenty minutes is normal, and it is where a system either helps or gets in the way.</p>
+        <p>Two things matter during one. The kitchen board has to show what has been waiting longest rather than what happens to be nearest, which the order states give you. And an item that has run out has to stop being orderable in the same moment it runs out, because there is no waiter to intercept it &mdash; a customer who has paid in advance for something you cannot make is a refund and a bad review, not a small problem.</p>
+
+        <h2>Who this suits, and who it does not</h2>
+        <p><strong>It suits you if</strong> you cook for delivery and collection, want payment confirmed before you cook, and would rather not pay for floor management you do not use.</p>
+        <p><strong>It suits you less if</strong> your orders arrive mainly through a delivery aggregator and you need them pulled into this system automatically. Scan2Plate does not integrate with aggregator platforms, so those orders would be entered here by hand. If aggregator volume is most of your business, check that before switching &mdash; it is a daily cost, not a one-off.</p>
+
+        <h2>Questions cloud kitchen owners ask</h2>
+        <div class="faq-list">
+          <details>
+            <summary>Does it connect to delivery aggregators?</summary>
+            <p>No. Orders from an aggregator platform are not pulled in automatically and would be entered here as they arrive. If most of your volume comes through aggregators, that manual step happens on every order, and it is worth weighing that before switching rather than after.</p>
+          </details>
+          <details>
+            <summary>How do pre-orders with advance payment work?</summary>
+            <p>A customer places the order for a later time and pays when placing it, so the kitchen is cooking against confirmed payment rather than an intention. The order appears with the time it is needed, which lets preparation be sequenced by dispatch time rather than order time.</p>
+          </details>
+          <details>
+            <summary>Do I have to set up tables I do not have?</summary>
+            <p>No. Table features exist but are not required, and a kitchen with no dining floor simply leaves them unused. The billing, kitchen and reporting flows work without any table being configured.</p>
+          </details>
+          <details>
+            <summary>Can I run more than one brand from one kitchen?</summary>
+            <p>Each Scan2Plate subscription covers one kitchen with one menu and one set of bill numbering. Running genuinely separate brands with separate menus and separate reporting means a subscription each, because the records they produce need to stay apart.</p>
+          </details>
+        </div>
+
         <h2>Related to cloud kitchen software</h2>
-        <div class="seo-link-grid"><a href="/restaurant-billing-software">Restaurant Billing Software</a><a href="/restaurant-management-software">Restaurant Management Software</a><a href="/restaurant-pos">Restaurant POS</a><a href="/restaurant-qr-ordering">Restaurant QR Ordering</a><a href="/digital-menu">Digital Menu</a><a href="/table-ordering-system">Table Ordering System</a><a href="/kitchen-display-system">Kitchen Display System</a><a href="/restaurant-inventory">Restaurant Inventory</a></div>
-        
-        <h2>Questions restaurant owners ask about cloud kitchen software</h2>
-        <div class="seo-faq"><details><summary>What is Scan2Plate?</summary><p>Scan2Plate is restaurant billing, QR ordering, digital menu, KOT, kitchen display, inventory, table management, payment tracking, analytics, and restaurant management software.</p></details><details><summary>Who is Cloud Kitchen Software for?</summary><p>It is for restaurants, cafes, cloud kitchens, hotels, food courts, and vendor-style food businesses that need practical digital ordering, billing, kitchen, and reporting workflows.</p></details><details><summary>How does Scan2Plate work?</summary><p>Restaurants configure menus, tables, QR links, billing, payment, kitchen, inventory, and staff workflows. Customers or staff place orders, kitchens update preparation, and owners review bills and reports.</p></details><details><summary>How do I request a demo?</summary><p>Use the demo or contact page to share your business name, contact details, restaurant type, and the workflows you want to review.</p></details></div>
+        <p>Orders reach cooks through the <a href="/kitchen-display-system">kitchen display</a> and are billed through <a href="/restaurant-billing-software">billing</a>. The menu is set up on the <a href="/digital-menu">digital menu</a>, and stock on <a href="/restaurant-inventory">inventory</a>. Billing survives an outage with the <a href="/download">offline apps</a>. Cost is on the <a href="/pricing">pricing page</a>.</p>
+
+        <p class="cta-line"><a class="btn btn-primary" href="/demo">Book a free demo</a> and see the pre-order flow end to end.</p>
       </div>
     </section>
-    
-    <section class="seo-section seo-cta-band"><div class="container"><h2>See cloud kitchen software on your own menu</h2><p>Share your workflow and the team can help you decide which setup fits your restaurant, cafe, cloud kitchen, hotel, food court, or vendor operation.</p><a class="btn btn-primary" href="/contact">Contact Scan2Plate</a></div></section>
+
   </main>
   <footer class="seo-footer">
     <div class="container seo-footer-grid">
