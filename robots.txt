@@ -37,4 +37,6 @@ Disallow: /register
 Disallow: /reset-password
 Disallow: /forgot-password
 
+# Sitemap index. The three child sitemaps are listed inside it; submitting the
+# index in Search Console is enough.
 Sitemap: https://scan2plate.com/sitemap.xml
