@@ -1,3 +1,42 @@
+/* ============================================================================
+   DISABLED - DO NOT RUN WITHOUT READING THIS
+
+   This script generated the site's SEO problems rather than solving them:
+
+     - it wrote the SAME FAQPage block ("What is Scan2Plate?") onto every page
+     - it wrote a flat sitemap.xml with hardcoded lastmod values that went stale
+     - it wrote each page TWICE, as <slug>.html and <slug>/index.html, which
+       left 33 duplicate files all claiming the same rel=canonical
+     - its pages were ~410 words and 60%+ word-for-word identical to each other
+
+   ensureFile() calls writeFileSync unconditionally, so running this would
+   overwrite every page rewritten in the SEO rebuild and undo all of it.
+
+   The replacement pipeline is:
+     npm run build:schema    scripts/build-schema.mjs    JSON-LD from page content
+     npm run build:sitemap   scripts/build-sitemap.mjs   sitemaps with git lastmod
+     npm run seo:check       audit + schema + sitemap + similarity gates
+
+   Kept for reference rather than deleted, because the page templates here
+   record what the original markup looked like.
+
+   TODO(owner): delete this file once nothing references it.
+   ============================================================================ */
+if (!process.env.ALLOW_LEGACY_SEO_GENERATOR) {
+  console.error([
+    "scripts/generate-seo.mjs is disabled.",
+    "",
+    "Running it would overwrite every page rewritten in the SEO rebuild,",
+    "restore the duplicated FAQ schema, and replace the sitemap index with",
+    "a flat sitemap carrying hardcoded lastmod values.",
+    "",
+    "Use instead:  npm run build:schema && npm run build:sitemap && npm run seo:check",
+    "",
+    "If you genuinely need the old behaviour, set ALLOW_LEGACY_SEO_GENERATOR=1."
+  ].join("\n"));
+  process.exit(1);
+}
+
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
