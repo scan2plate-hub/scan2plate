@@ -8,4 +8,8 @@
     <loc>https://scan2plate.com/sitemap-solutions.xml</loc>
     <lastmod>2026-09-21</lastmod>
   </sitemap>
+  <sitemap>
+    <loc>https://scan2plate.com/sitemap-blog.xml</loc>
+    <lastmod>2026-09-21</lastmod>
+  </sitemap>
 </sitemapindex>

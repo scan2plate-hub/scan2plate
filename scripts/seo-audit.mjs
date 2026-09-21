@@ -5,6 +5,7 @@
  */
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 
+
 const MARKETING = [
   "index", "about", "contact", "demo", "features", "pricing", "download", "blog",
   "restaurant-billing-software", "restaurant-pos", "restaurant-qr-ordering", "digital-menu",
@@ -18,6 +19,15 @@ const OPERATIONAL = [
   "bill", "restaurant-list", "add-restaurant", "renew", "cafe-token-panel",
   "cloud-kitchen-panel", "food-court-panel", "hotel-room-panel", "vendor-panel"
 ];
+
+// Blog posts are marketing pages too. They were not covered at first, which is
+// exactly why five of them shipped with over-length titles. This must sit after
+// MARKETING is declared: placed above it, the push throws on the temporal dead
+// zone and a try/catch swallows it, leaving the audit silently narrower.
+try {
+  for (const f of readdirSync("public/blog").filter(n => n.endsWith(".html") && n !== "index.html"))
+    MARKETING.push(`blog/${f.replace(/\.html$/, "")}`);
+} catch { /* no blog yet */ }
 
 const problems = [];
 const warn = [];

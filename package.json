@@ -9,7 +9,8 @@
     "build:sitemap": "node scripts/build-sitemap.mjs",
     "build:schema": "node scripts/build-schema.mjs",
     "seo:check": "node scripts/seo-audit.mjs && node scripts/validate-schema.mjs && node scripts/validate-sitemap.mjs && node scripts/page-similarity.mjs",
-    "predeploy": "npm run build:schema && npm run sync:copies && npm run build:sitemap && npm run seo:check",
-    "sync:copies": "node scripts/sync-directory-copies.mjs"
+    "predeploy": "npm run build:blog && npm run build:schema && npm run sync:copies && npm run build:sitemap && npm run seo:check",
+    "sync:copies": "node scripts/sync-directory-copies.mjs",
+    "build:blog": "node scripts/build-blog.mjs"
   }
 }
