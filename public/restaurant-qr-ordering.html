@@ -46,33 +46,81 @@
     <section class="seo-hero seo-hero-simple">
       <div class="container">
         <h1>QR Ordering System for Restaurants</h1>
-        <p>Scan2Plate lets customers scan a QR code, open a digital menu, add items, place an order, and follow the service flow from their phone.</p>
+        <p class="lede"><strong>Scan2Plate is a QR ordering system that lets a guest scan the code on their table and order from their own phone, with no app to install.</strong> The order reaches your kitchen directly. An optional location check refuses orders placed from outside the restaurant. It is included at &#8377;499 a month.</p>
+        <p class="muted">Last updated: 21 September 2026</p>
         <div class="seo-cta"><a class="btn btn-primary" href="/demo">Request demo</a><a class="btn btn-outline" href="/features">Explore features</a></div>
       </div>
     </section>
     <section class="seo-section">
       <div class="container seo-content">
-        <aside class="seo-answer-box"><p>Scan2Plate lets customers scan a QR code, open a digital menu, add items, place an order, and follow the service flow from their phone.</p></aside>
-        <h2>Scan, Browse, Order</h2><p>Customers can scan a table or counter QR, browse menu categories, choose items, and submit orders without waiting for a paper menu.</p>
-        <h2>Kitchen and Staff Flow</h2><p>Orders can move to kitchen and admin workflows where staff review, accept, prepare, mark ready, bill, and update payment status.</p>
-        <h2>Table Context</h2><p>Table-specific QR links help restaurants connect orders to the correct table or service context.</p>
-        <h2>What QR ordering changes day to day</h2>
-        <ul><li>Mobile menu access</li><li>Table-specific orders</li><li>Kitchen visibility</li><li>Order tracking</li><li>Payment flow support</li></ul>
+        <h2>The queue is at the counter, not in the kitchen</h2>
+        <p>At a busy hour the constraint in most Indian restaurants is not cooking speed. It is the number of people who can take an order.</p>
+        <p>Guests wait to catch a waiter's eye. The waiter writes on a pad, walks to the counter, reads it out, and somebody types it again. Every one of those steps is a place an order can be misheard, and all of them happen at exactly the moment the floor is busiest.</p>
+        <p>The second cost is quieter: a guest who wants one more portion of something waits to be noticed, gives up, and asks for the bill instead.</p>
+
         <h2>How QR ordering at a table works</h2>
-        <ol>
-          <li>Set up business details, menu, tables or service type, tax, payments, and staff access.</li>
-          <li>Customers or staff place orders through QR menu, counter, table, token, or pre-order workflows.</li>
-          <li>Kitchen and admin teams manage KOT, preparation, billing, payment status, inventory, and reports.</li>
+        <ol class="numbered-steps">
+          <li><strong>Guest scans the table QR code.</strong> The phone camera opens the menu in the browser. Nothing is installed, no account is created, and no number is asked for.</li>
+          <li><strong>The menu opens already knowing the table.</strong> Each table has its own code, so the order arrives attached to table 7 without anybody typing it.</li>
+          <li><strong>The guest orders at their own pace.</strong> They see photographs, veg and non-veg marks, half and full portions, and what is currently unavailable.</li>
+          <li><strong>The location check runs.</strong> If you have set it, the browser asks for location and the order is refused when the phone is further from the restaurant than the radius you configured, 150 metres by default.</li>
+          <li><strong>The kitchen gets it directly.</strong> The Kitchen Order Ticket &mdash; the slip telling the kitchen what to cook &mdash; prints or appears on the kitchen screen. Nobody re-typed anything.</li>
+          <li><strong>Extra rounds are added to the same table.</strong> A second order from the same code joins the running bill rather than starting a new one.</li>
         </ol>
-        <h2>Related to QR ordering</h2>
-        <div class="seo-link-grid"><a href="/restaurant-billing-software">Restaurant Billing Software</a><a href="/restaurant-management-software">Restaurant Management Software</a><a href="/restaurant-pos">Restaurant POS</a><a href="/digital-menu">Digital Menu</a><a href="/table-ordering-system">Table Ordering System</a><a href="/kitchen-display-system">Kitchen Display System</a><a href="/restaurant-inventory">Restaurant Inventory</a><a href="/restaurant-analytics">Restaurant Analytics</a></div>
-        
+        <!-- TODO(owner): screenshot of a guest's phone showing the scanned menu with the table number visible -->
+
+        <h2>Why the location check matters</h2>
+        <p>A QR code on a table is a public link. Anyone who photographs it can open the same menu from anywhere, and a menu that accepts orders from anywhere will eventually receive one from somebody who is not in your restaurant.</p>
+        <p>The location check compares the phone's position against your restaurant's coordinates and refuses anything beyond the radius you set. A guest at table 7 passes. Somebody who saved a photo of the code and tries it from home does not.</p>
+        <p>It is optional. Leave the radius unset and ordering works without it, which some restaurants prefer where phone location is unreliable indoors.</p>
+
+        <div class="table-wrap">
+          <table class="spec-table">
+            <caption>Scan2Plate QR ordering at a glance</caption>
+            <tbody>
+              <tr><th scope="row">Guest installs</th><td>Nothing. Opens in the phone's browser</td></tr>
+              <tr><th scope="row">Guest signs up</th><td>No account, no phone number required to order</td></tr>
+              <tr><th scope="row">Table identification</th><td>One QR code per table, order arrives tagged to it</td></tr>
+              <tr><th scope="row">Location check</th><td>Optional, default radius 150 metres from your coordinates</td></tr>
+              <tr><th scope="row">Repeat rounds</th><td>Added to the same table's running bill</td></tr>
+              <tr><th scope="row">Reaches kitchen as</th><td>Printed KOT or kitchen display entry</td></tr>
+              <tr><th scope="row">Needs internet</th><td>Yes, on the guest's phone</td></tr>
+              <tr><th scope="row">Price</th><td>&#8377;499 per month per restaurant, QR ordering included</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Who this suits, and who it does not</h2>
+        <p><strong>It suits you if</strong> your peak-hour bottleneck is order-taking rather than cooking, or you want guests to be able to add a round without waiting to be noticed.</p>
+        <p><strong>It suits you less if</strong> your guests mostly do not carry data-enabled phones, or your dining area has no usable mobile signal. QR ordering needs the internet on the guest's side, and nothing on your counter changes that. In that case the counter POS is the better fit and QR ordering can wait.</p>
+
         <h2>Questions restaurant owners ask about QR ordering</h2>
-        <div class="seo-faq"><details><summary>What is Scan2Plate?</summary><p>Scan2Plate is restaurant billing, QR ordering, digital menu, KOT, kitchen display, inventory, table management, payment tracking, analytics, and restaurant management software.</p></details><details><summary>Who is Restaurant QR Ordering for?</summary><p>It is for restaurants, cafes, cloud kitchens, hotels, food courts, and vendor-style food businesses that need practical digital ordering, billing, kitchen, and reporting workflows.</p></details><details><summary>How does Scan2Plate work?</summary><p>Restaurants configure menus, tables, QR links, billing, payment, kitchen, inventory, and staff workflows. Customers or staff place orders, kitchens update preparation, and owners review bills and reports.</p></details><details><summary>How do I request a demo?</summary><p>Use the demo or contact page to share your business name, contact details, restaurant type, and the workflows you want to review.</p></details></div>
+        <div class="faq-list">
+          <details>
+            <summary>Do guests have to download an app?</summary>
+            <p>No. Scanning the code opens the menu in whatever browser the phone already has. There is no app to install, no account to create and no phone number needed to place an order, which is what stops guests abandoning at the first screen.</p>
+          </details>
+          <details>
+            <summary>Can somebody order from outside the restaurant?</summary>
+            <p>Not if you set the location radius. The guest's browser reports its position and Scan2Plate refuses an order placed further away than the distance you configured, 150 metres by default. Leave it unset and orders are accepted from anywhere, which some restaurants prefer.</p>
+          </details>
+          <details>
+            <summary>What if a guest orders a second round?</summary>
+            <p>It joins the same table's bill. Scanning the same table code again adds to the running order rather than opening a separate one, so a table that orders three times still settles a single bill at the end.</p>
+          </details>
+          <details>
+            <summary>Do I still need waiters?</summary>
+            <p>Yes, for service, and for guests who prefer to order out loud. QR ordering removes the order-writing and re-typing steps rather than the staff. Most restaurants run both at once, with staff free for the tables that want attention.</p>
+          </details>
+        </div>
+
+        <h2>Related to QR ordering</h2>
+        <p>What guests see is set up on the <a href="/digital-menu">digital menu</a>, and what happens to the table afterwards on <a href="/table-ordering-system">table ordering</a>. Orders reach the kitchen through the <a href="/kitchen-display-system">kitchen display</a>. Guests who want to order before arriving are covered by <a href="/cloud-kitchen-software">pre-orders</a>. Cost is on the <a href="/pricing">pricing page</a>.</p>
+
+        <p class="cta-line"><a class="btn btn-primary" href="/demo">Book a free demo</a> and scan a live table code from your own phone.</p>
       </div>
     </section>
-    
-    <section class="seo-section seo-cta-band"><div class="container"><h2>See QR ordering on your own menu</h2><p>Share your workflow and the team can help you decide which setup fits your restaurant, cafe, cloud kitchen, hotel, food court, or vendor operation.</p><a class="btn btn-primary" href="/contact">Contact Scan2Plate</a></div></section>
+
   </main>
   <footer class="seo-footer">
     <div class="container seo-footer-grid">
