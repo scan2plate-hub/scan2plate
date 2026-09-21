@@ -16,6 +16,11 @@ const modal = $("#restaurantModal");
 const modalBody = $("#restaurantModalBody");
 const renewalModal = $("#renewalModal");
 let renewingRestaurant = null;
+// The real plan catalogue. Everything below used to price from three hardcoded
+// tiers in localStorage, so the Plans page, the renewal modal and the pricing
+// a customer actually paid could all disagree.
+let subscriptionPlans = [];
+let subscriptionRows = [];
 const storageKey = "scan2plate_super_settings";
 const legacyStorageKey = "scan2plate_super_admin_settings";
 const defaultSuperSettings = { companyName:"Scan2Plate", supportPhone:"", supportEmail:"", basicPrice:249, advancePrice:999, enterprisePrice:1999, aiHelpEnabled:"true", aiProvider:"openai", aiModel:"gpt-4o-mini", dailyAiLimitBasic:20, dailyAiLimitAdvanced:100 };
@@ -99,9 +104,55 @@ function businessTypeConfig(value) {
 }
 
 function renewalExpiry(months) { const date = new Date(); date.setMonth(date.getMonth() + Number(months || 1)); return date.toISOString().slice(0, 10); }
-function updateRenewalPreview() { const plan = $("#renewalPlan")?.value || "basic"; const months = Number($("#renewalDuration")?.value || 1); if ($("#renewalExpiry")) $("#renewalExpiry").value = renewalExpiry(months); if ($("#renewalAmount")) $("#renewalAmount").value = fmtCurrency(Number(planPrices()[plan] || 0) * months); }
-function openRenewalModal(restaurant) { renewingRestaurant = restaurant; $("#renewalRestaurantInfo").innerHTML = `<div><strong>${escapeHtml(restaurant.name || restaurant.id)}</strong><span class="sa-sub">${escapeHtml(restaurant.id)} · Current plan: ${escapeHtml(normalizePlan(restaurant.plan))} · Expiry: ${escapeHtml(restaurant.expiryDate || restaurant.planExpiryDate || "—")}</span></div>`; $("#renewalPlan").value = normalizePlan(restaurant.plan); $("#renewalDuration").value = "1"; updateRenewalPreview(); renewalModal?.classList.add("open"); }
-async function confirmRenewal() { if (!renewingRestaurant) return; const selectedPlan = $("#renewalPlan").value; const durationMonths = Number($("#renewalDuration").value || 1); const newExpiryDate = renewalExpiry(durationMonths); const amount = Number(planPrices()[selectedPlan] || 0) * durationMonths; const button = $("#confirmRenewalBtn"); const sourceCollection = renewingRestaurant.sourceCollection || "restaurants"; try { button.disabled=true; button.textContent="Renewing…"; await updateDoc(doc(db,sourceCollection,renewingRestaurant.id),{plan:selectedPlan,status:"active",subscriptionStatus:"active",planStartDate:new Date().toISOString().slice(0,10),planExpiryDate:newExpiryDate,expiryDate:newExpiryDate,renewedAt:serverTimestamp(),updatedAt:serverTimestamp()}); await addDoc(collection(db,"restaurants",renewingRestaurant.id,"renewal_logs"),{restaurantId:renewingRestaurant.id,restaurantName:renewingRestaurant.name || renewingRestaurant.id,oldPlan:normalizePlan(renewingRestaurant.plan),newPlan:selectedPlan,oldExpiryDate:renewingRestaurant.planExpiryDate || renewingRestaurant.expiryDate || "",newExpiryDate,durationMonths,amount,renewedAt:serverTimestamp(),renewedBy:session.email || session.uid || "super_admin"}); renewalModal.classList.remove("open"); renewingRestaurant=null; await loadData(); alert("Plan renewed successfully"); } catch(error) { console.error("Renewal failed",error); alert("Could not renew plan: " + error.message); } finally { button.disabled=false; button.textContent="Confirm Renewal"; } }
+/** The plans a given business may be put on: its own type, plus any global plan. */
+function renewalPlansFor(business) {
+  const type = String(businessTypeOf(business) || "").trim().toLowerCase().replace(/\s+/g, "_");
+  return subscriptionPlans.filter(plan => {
+    if (plan.active === false) return false;
+    const planType = String(plan.businessType || "").trim().toLowerCase();
+    if (planType === "all" || planType === "") {
+      const subset = Array.isArray(plan.businessTypes) ? plan.businessTypes.map(v => String(v).toLowerCase()) : [];
+      return subset.length ? subset.includes(type) : true;
+    }
+    return planType === type;
+  });
+}
+
+function renewalPriceFor(planId) {
+  const plan = subscriptionPlans.find(item => item.id === planId);
+  // Falls back to the legacy tier prices only for a business still on the old
+  // basic/advance/enterprise vocabulary, so existing records keep renewing.
+  if (!plan) return Number(planPrices()[normalizePlan(planId)] || 0);
+  return Number(plan.monthlyPrice) || Math.round(Number(plan.yearlyPrice || 0) / 12);
+}
+
+function updateRenewalPreview() {
+  const planId = $("#renewalPlan")?.value || "";
+  const months = Number($("#renewalDuration")?.value || 1);
+  if ($("#renewalExpiry")) $("#renewalExpiry").value = renewalExpiry(months);
+  if ($("#renewalAmount")) $("#renewalAmount").value = fmtCurrency(renewalPriceFor(planId) * months);
+}
+function openRenewalModal(restaurant) {
+  renewingRestaurant = restaurant;
+  $("#renewalRestaurantInfo").innerHTML = `<div><strong>${escapeHtml(restaurant.name || restaurant.id)}</strong><span class="sa-sub">${escapeHtml(restaurant.id)} · ${escapeHtml(businessTypeOf(restaurant))} · Current plan: ${escapeHtml(restaurant.subscriptionPlanId ? (subscriptionPlans.find(p=>p.id===restaurant.subscriptionPlanId)?.name || restaurant.subscriptionPlanId) : normalizePlan(restaurant.plan))} · Expiry: ${escapeHtml(restaurant.expiryDate || restaurant.planExpiryDate || "—")}</span></div>`;
+  // The dropdown used to be three fixed tiers regardless of business type, so a
+  // hostel could be renewed onto a restaurant's price. It now lists the real
+  // plans this business type is actually sold.
+  const select = $("#renewalPlan");
+  const available = renewalPlansFor(restaurant);
+  if (select) {
+    select.innerHTML = available.length
+      ? available.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name || plan.id)} — ${fmtCurrency(renewalPriceFor(plan.id))}/mo</option>`).join("")
+      : `<option value="${escapeHtml(normalizePlan(restaurant.plan))}">${escapeHtml(normalizePlan(restaurant.plan))} (legacy)</option>`;
+    const current = restaurant.subscriptionPlanId && available.some(plan => plan.id === restaurant.subscriptionPlanId)
+      ? restaurant.subscriptionPlanId : (available[0]?.id || normalizePlan(restaurant.plan));
+    select.value = current;
+  }
+  $("#renewalDuration").value = "1";
+  updateRenewalPreview();
+  renewalModal?.classList.add("open");
+}
+async function confirmRenewal() { if (!renewingRestaurant) return; const selectedPlan = $("#renewalPlan").value; const durationMonths = Number($("#renewalDuration").value || 1); const newExpiryDate = renewalExpiry(durationMonths); const amount = renewalPriceFor(selectedPlan) * durationMonths; const catalogued = subscriptionPlans.find(item => item.id === selectedPlan); const button = $("#confirmRenewalBtn"); const sourceCollection = renewingRestaurant.sourceCollection || "restaurants"; try { button.disabled=true; button.textContent="Renewing…"; await updateDoc(doc(db,sourceCollection,renewingRestaurant.id),{plan:catalogued?(renewingRestaurant.plan||"advance"):selectedPlan,subscriptionPlanId:catalogued?selectedPlan:(renewingRestaurant.subscriptionPlanId||""),subscriptionPlanName:catalogued?.name||"",status:"active",subscriptionStatus:"active",planStartDate:new Date().toISOString().slice(0,10),planExpiryDate:newExpiryDate,expiryDate:newExpiryDate,renewedAt:serverTimestamp(),updatedAt:serverTimestamp()}); await addDoc(collection(db,"restaurants",renewingRestaurant.id,"renewal_logs"),{restaurantId:renewingRestaurant.id,restaurantName:renewingRestaurant.name || renewingRestaurant.id,oldPlan:normalizePlan(renewingRestaurant.plan),newPlan:selectedPlan,oldExpiryDate:renewingRestaurant.planExpiryDate || renewingRestaurant.expiryDate || "",newExpiryDate,durationMonths,amount,renewedAt:serverTimestamp(),renewedBy:session.email || session.uid || "super_admin"}); renewalModal.classList.remove("open"); renewingRestaurant=null; await loadData(); alert("Plan renewed successfully"); } catch(error) { console.error("Renewal failed",error); alert("Could not renew plan: " + error.message); } finally { button.disabled=false; button.textContent="Confirm Renewal"; } }
 
 logoutBtn?.addEventListener("click", async () => { localStorage.removeItem("scan2serve_super_admin"); localStorage.removeItem("scan2plate_super_admin"); await signOut(auth); window.location.href = "./admin-login.html"; });
 
@@ -152,7 +203,67 @@ function renderRestaurants() {
 
 function renderOnboarding() { onboardingRows.innerHTML = restaurants.length ? restaurants.map(restaurant => `<tr><td><strong>${escapeHtml(restaurant.name || restaurant.id)}</strong><span class="sa-sub">${escapeHtml(restaurant.id)}</span></td><td>${escapeHtml(restaurant.ownerName || "—")}</td><td>${escapeHtml(restaurant.phone || "—")}</td><td>${escapeHtml(restaurant.email || restaurant.adminEmail || "—")}</td><td>${escapeHtml(restaurant.address || "—")}</td><td>${escapeHtml(normalizePlan(restaurant.plan))}</td><td>${escapeHtml(restaurant.upiId || "—")}</td><td>${escapeHtml(restaurant.gstNumber || "—")}</td><td><span class="sa-badge ${effectiveStatus(restaurant)}">${effectiveStatus(restaurant)}</span></td></tr>`).join("") : `<tr><td colspan="9"><div class="sa-empty">No restaurants found.</div></td></tr>`; }
 
-function renderPlans() { const prices = planPrices(); const details = { basic:[["QR ordering","Kitchen dashboard","Order tracking"]], advance:[["Everything in Basic","WhatsApp alerts","Reports & payments"]], enterprise:[["Multi-location support","Priority support","Advanced controls"]] }; planSummary.innerHTML = Object.entries(details).map(([plan,[features]]) => { const list = restaurants.filter(restaurant => normalizePlan(restaurant.plan) === plan); const revenue = list.filter(restaurant => effectiveStatus(restaurant)==="active").length * Number(prices[plan] || 0); return `<article class="sa-plan ${plan === "advance" ? "featured" : ""}"><h3>${plan[0].toUpperCase()+plan.slice(1)}</h3><div class="sa-plan-price">${fmtCurrency(prices[plan])}<small style="font-size:12px;color:var(--sa-muted)"> / month</small></div><ul>${features.map(feature=>`<li>${feature}</li>`).join("")}</ul><div class="sa-plan-meta"><span>${list.length} restaurants</span><strong>${fmtCurrency(revenue)}</strong></div></article>`; }).join(""); }
+/**
+ * Plan performance, read from the REAL catalogue.
+ *
+ * This page used to render three hardcoded tiers (Basic / Advance /
+ * Enterprise) priced from localStorage, so a plan created in Subscription
+ * Plans never appeared here and the prices shown were whatever happened to be
+ * in that browser. It now reads `subscriptionPlans` — the same documents the
+ * checkout charges against — grouped by business type, because the whole point
+ * of the plan system is that a hostel and a tea stall are not priced alike.
+ */
+function renderPlans() {
+  if (!planSummary) return;
+  if (!subscriptionPlans.length) {
+    planSummary.innerHTML = `<div class="sa-empty" style="grid-column:1/-1">
+      No subscription plans yet. Create them in <strong>Subscription Plans</strong> — that is where pricing lives,
+      and what both this page and the customer's checkout read.</div>`;
+    return;
+  }
+
+  const subscribersFor = planId => subscriptionRows.filter(row => String(row.planId || "") === String(planId));
+  const groups = new Map();
+  subscriptionPlans.forEach(plan => {
+    const key = String(plan.businessType || "all").toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(plan);
+  });
+
+  planSummary.innerHTML = [...groups.entries()].map(([type, plans]) => {
+    const heading = type === "all" ? "All business types" : type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const cards = plans.map(plan => {
+      const subscribers = subscribersFor(plan.id);
+      // Only a subscription that is actually live counts as revenue. A
+      // cancelled or expired one still has an amount on it.
+      const live = subscribers.filter(row => ["active", "trial"].includes(String(row.status || "").toLowerCase()));
+      const monthly = live.reduce((sum, row) => {
+        const amount = Number(row.amount || 0);
+        return sum + (String(row.billingCycle) === "yearly" ? amount / 12 : amount);
+      }, 0);
+      const features = Object.entries(plan.features || {}).filter(([, on]) => on !== false).slice(0, 4).map(([key]) => key);
+      const prices = [
+        Number(plan.monthlyPrice) > 0 ? `${fmtCurrency(plan.monthlyPrice)}<small style="font-size:12px;color:var(--sa-muted)"> / month</small>` : "",
+        Number(plan.yearlyPrice) > 0 ? `<div class="sa-sub" style="margin-top:2px">${fmtCurrency(plan.yearlyPrice)} / year</div>` : ""
+      ].filter(Boolean).join("");
+      return `<article class="sa-plan ${plan.featured ? "featured" : ""}">
+        <h3>${escapeHtml(plan.name || plan.id)}${plan.active === false ? ' <span class="sa-badge expired">Inactive</span>' : ""}</h3>
+        <div class="sa-plan-price">${prices || "<small>No price set</small>"}</div>
+        ${plan.description ? `<p class="sa-sub" style="margin:4px 0 0">${escapeHtml(plan.description)}</p>` : ""}
+        <ul>${features.length ? features.map(f => `<li>${escapeHtml(PLAN_FEATURE_LABELS[f] || f)}</li>`).join("") : "<li>All features</li>"}</ul>
+        <div class="sa-plan-meta"><span>${live.length} subscribed</span><strong>${fmtCurrency(Math.round(monthly))} / mo</strong></div>
+      </article>`;
+    }).join("");
+    return `<div style="grid-column:1/-1;margin:14px 0 2px"><strong style="font-size:15px">${escapeHtml(heading)}</strong></div>${cards}`;
+  }).join("");
+}
+
+const PLAN_FEATURE_LABELS = {
+  qrOrdering: "QR Ordering", tableManagement: "Table Management", kitchen: "Kitchen Display",
+  kot: "KOT / Kitchen", inventory: "Inventory", reports: "Reports", onlineOrders: "Online Orders",
+  preOrder: "Pre-Orders", whatsapp: "WhatsApp Alerts", advancedReports: "Advanced Reports",
+  hotelRooms: "Rooms", appointments: "Appointments"
+};
 
 function reportRows(entries) { return entries.length ? entries.map(([label,value]) => `<div class="sa-report-row"><span>${escapeHtml(label)}</span><strong>${fmtCurrency(value)}</strong></div>`).join("") : `<div class="sa-empty">No revenue yet.</div>`; }
 function renderReports() { const thisMonth = new Date().toISOString().slice(0,7); const monthly = new Map(); orders.filter(order => String(order.paymentStatus || "").toLowerCase()==="paid").forEach(order => { const date=dateFrom(order.createdAt); if (!date) return; const key=date.toISOString().slice(0,7); monthly.set(key,(monthly.get(key)||0)+Number(order.grandTotal||0)); }); const byPlan = new Map(); restaurants.forEach(restaurant => { const plan=normalizePlan(restaurant.plan); byPlan.set(plan,(byPlan.get(plan)||0)+orderStats(restaurant.id).revenue); }); const byRestaurant = restaurants.map(restaurant => [restaurant.name || restaurant.id, orderStats(restaurant.id).revenue]).filter(([,value])=>value>0).sort((a,b)=>b[1]-a[1]).slice(0,10); $("#monthlyRevenueReport").innerHTML = reportRows([...monthly.entries()].sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6)); $("#planRevenueReport").innerHTML = reportRows([...byPlan.entries()]); $("#restaurantRevenueReport").innerHTML = reportRows(byRestaurant); }
@@ -223,7 +334,9 @@ $("#exportCsvBtn")?.addEventListener("click",()=>{const header=["Restaurant","ID
 function loadSettings(){try{const raw=localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey) || "{}"; superSettings={...defaultSuperSettings,...JSON.parse(raw)}; localStorage.setItem(storageKey,JSON.stringify(superSettings)); ["companyName","supportPhone","supportEmail","basicPrice","advancePrice","enterprisePrice","aiHelpEnabled","aiProvider","aiModel","dailyAiLimitBasic","dailyAiLimitAdvanced"].forEach(id=>{if($("#"+id)) $("#"+id).value=superSettings[id] ?? defaultSuperSettings[id];});}catch{superSettings={...defaultSuperSettings};}} $("#saveCompanySettings")?.addEventListener("click",()=>{const settings={};["companyName","supportPhone","supportEmail","basicPrice","advancePrice","enterprisePrice","aiHelpEnabled","aiProvider","aiModel","dailyAiLimitBasic","dailyAiLimitAdvanced"].forEach(id=>settings[id]=$("#"+id)?.value||"");superSettings={...defaultSuperSettings,...settings,basicPrice:Number(settings.basicPrice)||1999,advancePrice:Number(settings.advancePrice)||2999,enterprisePrice:Number(settings.enterprisePrice)||4999,dailyAiLimitBasic:Number(settings.dailyAiLimitBasic)||20,dailyAiLimitAdvanced:Number(settings.dailyAiLimitAdvanced)||100};localStorage.setItem(storageKey,JSON.stringify(superSettings));renderSummary();renderPlans();renderRestaurants();alert("Settings saved. Plan prices are updated everywhere immediately.");});
 
 async function loadBusinessCollection(collectionName) { try { const snapshot = await getDocs(collection(db,collectionName)); return snapshot.docs.map(item => ({ id:item.id, sourceCollection:collectionName, ...item.data() })); } catch(error) { console.warn(`Could not load ${collectionName}`, error); return []; } }
-async function loadData() { try { const [restaurantDocs,businessDocs,settingsDocs,orderSnap,ticketSnap] = await Promise.all([loadBusinessCollection("restaurants"),loadBusinessCollection("businesses"),loadBusinessCollection("restaurantSettings"),getDocs(collection(db,"orders")),getDocs(collection(db,"supportTickets"))]); const byId = new Map(); [...settingsDocs,...businessDocs,...restaurantDocs].forEach(item => { const current = byId.get(item.id) || {}; byId.set(item.id,{...current,...item,name:item.name || item.restaurantName || item.businessName || current.name || current.restaurantName || current.businessName || item.id}); }); restaurants=[...byId.values()].map(data=>({ ...data, businessType:businessTypeOf(data), orderMode:orderModeOf(data), panelType:panelTypeOf(data) })).sort((a,b)=>(dateFrom(b.createdAt)?.getTime()||0)-(dateFrom(a.createdAt)?.getTime()||0)); orders=orderSnap.docs.map(snapshot=>({id:snapshot.id,...snapshot.data()})); supportTickets=ticketSnap.docs.map(snapshot=>({id:snapshot.id,...snapshot.data()})).sort((a,b)=>(dateFrom(b.createdAt)?.getTime()||0)-(dateFrom(a.createdAt)?.getTime()||0)); await Promise.all(restaurants.map(async restaurant => { try { restaurant.menuItemCount=(await getDocs(collection(db,"restaurants",restaurant.id,"menu"))).size; } catch { restaurant.menuItemCount=null; } })); applyBusinessTerminology(); renderSummary();renderAlerts();renderRecent();renderRestaurants();renderOnboarding();renderPlans();renderReports();renderSupportTickets();populateQrRestaurants(); } catch(error) { console.error("Super admin data load failed",error); [recentRestaurants,restaurantRows,onboardingRows,$("#supportTicketRows")].filter(Boolean).forEach(element=>element.innerHTML=`<div class="sa-empty">Unable to load data. Please refresh.</div>`); } }
+async function loadData() { try { const [restaurantDocs,businessDocs,settingsDocs,orderSnap,ticketSnap,planSnap,subSnap] = await Promise.all([loadBusinessCollection("restaurants"),loadBusinessCollection("businesses"),loadBusinessCollection("restaurantSettings"),getDocs(collection(db,"orders")),getDocs(collection(db,"supportTickets")),getDocs(collection(db,"subscriptionPlans")).catch(()=>({docs:[]})),getDocs(collection(db,"subscriptions")).catch(()=>({docs:[]}))]);
+  subscriptionPlans = planSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>Number(a.displayOrder||0)-Number(b.displayOrder||0));
+  subscriptionRows = subSnap.docs.map(d=>({id:d.id,...d.data()})); const byId = new Map(); [...settingsDocs,...businessDocs,...restaurantDocs].forEach(item => { const current = byId.get(item.id) || {}; byId.set(item.id,{...current,...item,name:item.name || item.restaurantName || item.businessName || current.name || current.restaurantName || current.businessName || item.id}); }); restaurants=[...byId.values()].map(data=>({ ...data, businessType:businessTypeOf(data), orderMode:orderModeOf(data), panelType:panelTypeOf(data) })).sort((a,b)=>(dateFrom(b.createdAt)?.getTime()||0)-(dateFrom(a.createdAt)?.getTime()||0)); orders=orderSnap.docs.map(snapshot=>({id:snapshot.id,...snapshot.data()})); supportTickets=ticketSnap.docs.map(snapshot=>({id:snapshot.id,...snapshot.data()})).sort((a,b)=>(dateFrom(b.createdAt)?.getTime()||0)-(dateFrom(a.createdAt)?.getTime()||0)); await Promise.all(restaurants.map(async restaurant => { try { restaurant.menuItemCount=(await getDocs(collection(db,"restaurants",restaurant.id,"menu"))).size; } catch { restaurant.menuItemCount=null; } })); applyBusinessTerminology(); renderSummary();renderAlerts();renderRecent();renderRestaurants();renderOnboarding();renderPlans();renderReports();renderSupportTickets();populateQrRestaurants(); } catch(error) { console.error("Super admin data load failed",error); [recentRestaurants,restaurantRows,onboardingRows,$("#supportTicketRows")].filter(Boolean).forEach(element=>element.innerHTML=`<div class="sa-empty">Unable to load data. Please refresh.</div>`); } }
 
 // Static markup still uses legacy IDs and class names. Change only visible text
 // nodes, never script/style content or Firebase field/collection names.

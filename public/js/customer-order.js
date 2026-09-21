@@ -280,9 +280,9 @@ function renderMenu() {
   const items = activeCategory === "All" ? menuItems : menuItems.filter(item => (item.category || "Other") === activeCategory);
   $("menuGrid").innerHTML = items.length ? items.map(item => {
     const variants = validVariants(item);
-    const image = item.imageUrl || item.image || "./assets/placeholder-food.jpg";
+    const image = item.imageUrl || item.image || "./assets/menu-placeholder.svg";
     return `<article class="menu-card">
-      <img src="${escapeHtml(image)}" alt="${escapeHtml(item.name || "Menu item")}" loading="lazy" onerror="this.src='./assets/placeholder-food.jpg'">
+      <img src="${escapeHtml(image)}" alt="${escapeHtml(item.name || "Menu item")}" loading="lazy" onerror="this.src='./assets/menu-placeholder.svg'">
       <div>
         <h3>${escapeHtml(item.name || "Item")}</h3>
         <p>${escapeHtml(item.description || item.category || "")}</p>

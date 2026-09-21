@@ -294,6 +294,25 @@ expiry, and the lock genuinely blocks: `checkRestaurantSubscription()` returns
 true and the boot path skips loading any data behind it. Access comes back
 only when the webhook says the payment happened.
 
+### One source of pricing
+
+`subscriptionPlans` is now the only place a price is defined. Three surfaces
+used to carry their own copy, and they had drifted apart:
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| Super Admin → Plans | Hardcoded Basic ₹249 / Advance ₹999 / Enterprise ₹1999, priced from **localStorage** — so it differed per browser | Reads `subscriptionPlans`, grouped by business type |
+| Super Admin → Renew | The same three tiers for every business, so a hostel could be renewed onto a restaurant's price | Lists the real plans that business type is sold |
+| Landing page | A single `₹499` card written into `index.html` | Rendered from `subscriptionPlans`, with a business-type chooser |
+
+The landing page keeps the static card in its markup as a deliberate
+fallback. It is a marketing page: if Firestore is slow, blocked or the
+catalogue is empty, a visitor deciding whether to buy should see a price
+rather than an empty section.
+
+Revenue on the Plans page counts only `active` and `trial` subscriptions, and
+normalises a yearly amount to a monthly figure, so the total means one thing.
+
 ### The two Super Admin screens agree
 
 Businesses and Subscriptions used to disagree about the same business.
