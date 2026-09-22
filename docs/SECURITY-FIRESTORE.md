@@ -102,6 +102,32 @@ The project is **`scan2serve-23bf6`**, now set as the default in `.firebaserc`.
 It previously held the literal placeholder `your-firebase-project-id`, so a
 deploy would have failed before it started.
 
+### Option A — one click, no local setup
+
+`.github/workflows/deploy-firestore.yml` runs the deploy on GitHub, so
+nobody needs a local Firebase login or a Node toolchain.
+
+**Once:**
+
+1. Firebase console → Project settings → Service accounts →
+   *Generate new private key*. A JSON file downloads.
+2. This repo → Settings → Secrets and variables → Actions →
+   *New repository secret*
+   - Name: `FIREBASE_SERVICE_ACCOUNT`
+   - Value: the entire contents of that JSON file
+3. Actions → **Deploy Firestore rules** → *Run workflow*.
+
+Tick *Also deploy the website* to push `public/` in the same run — which
+is the better choice the first time, since the hosting side carries the
+auth gates on `restaurant-list.html` and `restaurant-onboarding.html`.
+
+The workflow runs `npm run test:rules` **before** deploying and stops if
+it fails, so a broken rule cannot reach the live database. It never runs
+on a push: replacing the rules on a live database should not happen
+because somebody edited a README.
+
+### Option B — from your own machine
+
 ### 1. Sign in
 
 ```bash
