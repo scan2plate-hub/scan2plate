@@ -16,13 +16,14 @@
    updates this panel in place — no page reload.
 ========================================================= */
 import {
-  pricingFor, currentSubscription, watchSubscription, loadPlan, promotableOffer,
+  pricingFor, currentSubscription, watchSubscription, loadPlan, promotableOffer, loadBusiness,
   isOfferDismissed, dismissOffer, startSubscription, cancelSubscription, openRazorpayCheckout
-} from "./subscription-client.js?v=s2p-20260918c";
-import { businessTypeLabel } from "./business-types.js?v=s2p-20260918c";
+} from "./subscription-client.js?v=s2p-20260922d";
+import { businessTypeLabel } from "./business-types.js?v=s2p-20260922d";
 import {
-  formatMoney, statusLabel, statusTone, toDate, isEntitled, graceEndsAt, limitLabel, planAllowsFeature
-} from "./subscription-core.js?v=s2p-20260918c";
+  formatMoney, statusLabel, statusTone, toDate, isEntitled, graceEndsAt, limitLabel, planAllowsFeature,
+  legacySubscriptionFrom
+} from "./subscription-core.js?v=s2p-20260922d";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -35,6 +36,9 @@ const dateLabel = value => {
 
 let context = { businessId: "", businessType: "restaurant", businessName: "", email: "", phone: "" };
 let subscription = null;
+// The legacy view of the business's own plan fields, kept so a `subscriptions`
+// snapshot that arrives empty cannot wipe a hand-activated plan off the panel.
+let legacySubscription = null;
 let currentPlan = null;
 let billingCycle = "monthly";
 let unsubscribeWatch = null;
@@ -47,7 +51,15 @@ export async function mountBusinessSubscription(options = {}) {
   if (!context.businessId) return;
   if (!document.getElementById("section-subscription")) buildSection();
 
-  subscription = await currentSubscription(context.businessId).catch(() => null);
+  // The business document decides two things this panel gets wrong on its
+  // own: which plans to offer (its businessType is the one the SERVER checks
+  // at checkout, so offering any other type's plans just fails later), and
+  // whether a plan Scan2Plate activated by hand exists at all.
+  const business = await loadBusiness(context.businessId).catch(() => null);
+  if (business?.businessType) context.businessType = business.businessType;
+  legacySubscription = legacySubscriptionFrom(business);
+
+  subscription = await currentSubscription(context.businessId).catch(() => null) || legacySubscription;
   currentPlan = subscription?.planId ? await loadPlan(subscription.planId).catch(() => null) : null;
   render();
   await renderPlans();
@@ -56,7 +68,7 @@ export async function mountBusinessSubscription(options = {}) {
   // the panel re-renders itself.
   unsubscribeWatch?.();
   unsubscribeWatch = watchSubscription(context.businessId, async next => {
-    subscription = next;
+    subscription = next || legacySubscription;
     if (next?.planId && next.planId !== currentPlan?.id) currentPlan = await loadPlan(next.planId).catch(() => null);
     render();
   }, error => console.warn("subscription listener failed", error?.message));
@@ -125,13 +137,17 @@ function render() {
   const entitled = isEntitled(subscription);
   const grace = graceEndsAt(subscription);
   const failed = subscription.status === "payment_failed" || subscription.status === "halted";
+  // A plan Scan2Plate activated by hand has no Razorpay mandate behind it:
+  // nothing to cancel, no billing cycle, no next charge. Say so plainly
+  // rather than dressing it up as a subscription it is not.
+  const legacy = subscription.source === "legacy";
 
   host.innerHTML = `<div class="card-body">
     <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
       <div>
         <div style="font-size:12px;font-weight:800;color:var(--text-3);letter-spacing:.06em;">SUBSCRIPTION</div>
         <h3 style="margin:6px 0 4px;">${esc(subscription.planName || currentPlan?.name || "Plan")}</h3>
-        <div class="muted" style="font-size:13px;">${esc(businessTypeLabel(subscription.businessType || context.businessType))} · ${esc(subscription.billingCycle || "monthly")}</div>
+        <div class="muted" style="font-size:13px;">${esc(businessTypeLabel(subscription.businessType || context.businessType))}${subscription.billingCycle ? ` · ${esc(subscription.billingCycle)}` : ""}</div>
       </div>
       <span class="status-badge ${tone === "success" ? "success" : tone === "danger" ? "danger" : "warning"}" style="font-size:12px;">● ${esc(statusLabel(subscription.status))}</span>
     </div>
@@ -141,10 +157,17 @@ function render() {
       <span><strong>Payment failed.</strong> Please update your payment method to continue Scan2Plate.${grace && entitled ? ` Your access continues until <strong>${esc(dateLabel(grace))}</strong>.` : ""}</span>
     </div>` : ""}
 
+    ${legacy ? `<div class="notice-box ${entitled ? "info" : "warning"}" style="margin-top:14px;">
+      <i class="fas fa-circle-info"></i>
+      <span>${entitled
+        ? `This plan was activated for you by Scan2Plate and runs to <strong>${esc(dateLabel(subscription.endDate))}</strong>. To renew or change it, pick a plan below or contact Scan2Plate support.`
+        : `This plan has ended. Choose a plan below to continue, or contact Scan2Plate support.`}</span>
+    </div>` : ""}
+
     <div class="form-row" style="margin-top:16px;">
-      <div><div class="muted" style="font-size:12px;">Price</div><strong>${formatMoney(subscription.amount || 0)}</strong></div>
+      ${legacy && !Number(subscription.amount) ? "" : `<div><div class="muted" style="font-size:12px;">Price</div><strong>${formatMoney(subscription.amount || 0)}</strong></div>`}
       <div><div class="muted" style="font-size:12px;">Started</div><strong>${esc(dateLabel(subscription.startDate))}</strong></div>
-      <div><div class="muted" style="font-size:12px;">Next billing</div><strong>${esc(dateLabel(subscription.nextBillingDate))}</strong></div>
+      ${legacy ? "" : `<div><div class="muted" style="font-size:12px;">Next billing</div><strong>${esc(dateLabel(subscription.nextBillingDate))}</strong></div>`}
       <div><div class="muted" style="font-size:12px;">Access until</div><strong>${esc(dateLabel(subscription.endDate))}</strong></div>
     </div>
 
@@ -157,8 +180,8 @@ function render() {
     </div>` : ""}
 
     <div class="btn-group" style="margin-top:16px;flex-wrap:wrap;">
-      <button class="btn btn-outline" id="viewPlansBtn" type="button">Change Plan</button>
-      ${["active", "trial", "payment_failed"].includes(subscription.status)
+      <button class="btn btn-outline" id="viewPlansBtn" type="button">${legacy ? "View Plans" : "Change Plan"}</button>
+      ${subscription.id && ["active", "trial", "payment_failed"].includes(subscription.status)
         ? `<button class="btn btn-outline" id="cancelSubscriptionBtn" type="button">Cancel Subscription</button>` : ""}
     </div>
   </div>`;

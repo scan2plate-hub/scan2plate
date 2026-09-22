@@ -22,7 +22,7 @@
    cards writing into settings/general, which is schemaless — so
    this is additive and backward compatible.
 ========================================================= */
-import { businessTypeConfig, businessTypeLabel, normalizeBusinessType, showsSettingsGroup, supportsModule } from "./business-types.js?v=s2p-20260918c";
+import { businessTypeConfig, businessTypeLabel, normalizeBusinessType, showsSettingsGroup, supportsModule } from "./business-types.js?v=s2p-20260922d";
 
 // Which settings group each existing card belongs to, keyed by a stable
 // element inside it. Cards are matched by the id of a field they contain, so

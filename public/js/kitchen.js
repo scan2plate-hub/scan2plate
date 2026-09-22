@@ -21,7 +21,7 @@ import {
   registerCleanup,
   guardedAction
 } from "./common.js?v=freeze-fix-20260816";
-import { orderTypeOf, orderTypeLabel, needsTable, formatDeliveryAddress } from "./order-types.js?v=s2p-20260922a";
+import { orderTypeOf, orderTypeLabel, needsTable, formatDeliveryAddress } from "./order-types.js?v=s2p-20260922d";
 
 installAppSafety({ pageName: "Kitchen Dashboard", stuckTimeoutMs: 15000 });
 

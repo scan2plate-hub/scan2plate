@@ -1,5 +1,5 @@
 import { db } from "./firebase.js";
-import { splitRestaurantPayload } from "./restaurant-private.js?v=s2p-20260922b";
+import { splitRestaurantPayload } from "./restaurant-private.js?v=s2p-20260922d";
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";

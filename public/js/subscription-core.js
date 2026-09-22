@@ -10,7 +10,7 @@
    Money is handled in whole rupees at this layer and converted to
    paise only at the Razorpay boundary, to avoid float drift.
 ========================================================= */
-import { normalizeBusinessType } from "./business-types.js?v=s2p-20260918c";
+import { normalizeBusinessType, businessTypeOf } from "./business-types.js?v=s2p-20260922d";
 
 export const BILLING_CYCLES = ["monthly", "yearly"];
 
@@ -397,4 +397,96 @@ export function statusTone(status) {
   if (["created", "authenticated", "pending", "paused"].includes(value)) return "warning";
   if (["payment_failed", "halted"].includes(value)) return "danger";
   return "muted";
+}
+
+/* ---------------------------------------------------------
+   LEGACY (SUPER-ADMIN-ACTIVATED) SUBSCRIPTIONS
+
+   Scan2Plate has carried two subscription models side by side.
+   The newer one is a document in the `subscriptions` collection,
+   written by the Razorpay webhook. The older one — still the only
+   model for every business Scan2Plate activates or renews by hand —
+   is a set of fields on the business's own document: `plan`,
+   `status`, `subscriptionStatus` and `planExpiryDate`/`expiryDate`.
+   Super Admin's Renew button writes exactly those fields.
+
+   The owner's Subscription panel only ever read the `subscriptions`
+   collection, so a business on a hand-activated plan was told "No
+   active subscription" while Super Admin showed it Active with a
+   year still to run, and while the dashboard it was saying that on
+   had already let the owner in on the strength of those same fields.
+
+   This turns the legacy fields into the shape the panel already
+   renders, so one code path draws both. It is a READ-side bridge:
+   nothing here writes, and no business is migrated.
+--------------------------------------------------------- */
+
+const LEGACY_PLAN_LABELS = { basic: "Basic Plan", advance: "Advance Plan", enterprise: "Enterprise Plan", trial: "Trial" };
+
+/**
+ * Whether the legacy fields lock the business out.
+ *
+ * Deliberately identical to isRestaurantExpired() in admin.js, which is the
+ * gate that actually decides whether the dashboard opens. The panel must
+ * agree with the lock, or it goes back to contradicting the screen it is on.
+ */
+export function isLegacyLocked(business = {}, now = new Date()) {
+  const status = String(business.status || "").toLowerCase();
+  const subscriptionStatus = String(business.subscriptionStatus || "").toLowerCase();
+  if (["expired", "suspended"].includes(status) || ["expired", "suspended"].includes(subscriptionStatus)) return true;
+  const expiry = toDate(business.planExpiryDate || business.expiryDate);
+  if (!expiry) return false;
+  const today = new Date(now.getTime());
+  today.setHours(0, 0, 0, 0);
+  const endOfExpiryDay = new Date(expiry.getTime());
+  endOfExpiryDay.setHours(0, 0, 0, 0);
+  return endOfExpiryDay < today;
+}
+
+export function legacyPlanLabel(plan) {
+  const value = String(plan || "").trim().toLowerCase();
+  if (!value) return "";
+  return LEGACY_PLAN_LABELS[value] || `${value.charAt(0).toUpperCase()}${value.slice(1)} Plan`;
+}
+
+/**
+ * A subscription-shaped view of a business's legacy plan fields, or null when
+ * the business records no plan at all (a genuinely unsubscribed business —
+ * the one case where "No active subscription" is the truth).
+ *
+ * `status` is reduced to active/expired rather than carried across verbatim,
+ * because the legacy model has no grace period, no mandate and no retry: it
+ * is a date and a switch. Reporting "cancelled" for a suspended business
+ * would make isEntitled() consult a grace period that does not exist and
+ * hand back access the dashboard itself refuses. The raw values stay on
+ * `legacyStatus`/`legacyPlan` for display.
+ */
+export function legacySubscriptionFrom(business, now = new Date()) {
+  if (!business) return null;
+  const endDate = toDate(business.planExpiryDate || business.expiryDate);
+  const planId = String(business.subscriptionPlanId || "").trim();
+  const planName = String(business.subscriptionPlanName || "").trim() || legacyPlanLabel(business.plan);
+  const rawStatus = String(business.subscriptionStatus || business.status || "").trim().toLowerCase();
+  if (!endDate && !planId && !planName && !rawStatus) return null;
+
+  const locked = isLegacyLocked(business, now);
+  const iso = endDate ? endDate.toISOString() : null;
+  return {
+    id: "",
+    source: "legacy",
+    businessId: String(business.id || ""),
+    planId,
+    planName: planName || "Plan",
+    businessType: businessTypeOf(business),
+    billingCycle: "",
+    status: locked ? "expired" : "active",
+    legacyStatus: rawStatus,
+    legacyPlan: String(business.plan || "").trim().toLowerCase(),
+    amount: Number(business.amount || business.subscriptionAmount || 0),
+    startDate: business.planStartDate || null,
+    endDate: iso,
+    nextBillingDate: iso,
+    // No mandate, so no failed charge to forgive: access ends on the date.
+    gracePeriodDays: 0
+  };
 }

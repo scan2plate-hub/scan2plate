@@ -28,7 +28,7 @@ import { createCoalescedRunner, registerCleanup, devError } from "./common.js?v=
 // orders into the dashboard's shape HERE means the order list, the reports
 // and the best-selling chart all pick them up without any of them learning
 // a second schema.
-import { toDashboardOrder } from "./offline-pos-view.js?v=s2p-20260922c";
+import { toDashboardOrder } from "./offline-pos-view.js?v=s2p-20260922d";
 
 const subscribers = new Set();
 const errorHandlers = new Set();

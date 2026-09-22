@@ -1,7 +1,7 @@
 import { db, auth } from "./firebase.js";
 import { collection, getDocs, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { qs, escapeHtml, fmtCurrency, toast } from "./common.js";
-import { ownerEmailOf } from "./restaurant-private.js?v=s2p-20260922b";
+import { ownerEmailOf } from "./restaurant-private.js?v=s2p-20260922d";
 
 /* -------------------------------------------------------------
    This page lists every restaurant with its owner e-mail, and its
