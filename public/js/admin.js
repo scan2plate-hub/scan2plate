@@ -605,7 +605,7 @@ function currentPermissions() {
 
 function applyStaffPermissions() {
   const role = currentRole() || "owner";
-  const moduleMap = { dashboard: "dashboard", orders: "orders", billing: "billing", kot: "kot", tables: "tables", menu: "menu", inventory: "inventory", settings: "settings", reports: "reports", staff: "staff" };
+  const moduleMap = { dashboard: "dashboard", orders: "orders", billing: "billing", kot: "kot", tables: "tables", menu: "menu", inventory: "inventory", settings: "settings", reports: "reports", staff: "staff", "offline-pos": "settings" };
   Object.entries(moduleMap).forEach(([section, moduleName]) => {
     const allowed = canAccessModule(role, moduleName, currentPermissions()) || isOwnerLike();
     document.querySelector(`.nav-item[data-section="${section}"]`)?.classList.toggle("hidden", !allowed);
@@ -6822,6 +6822,112 @@ removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
 createManualBillBtn?.addEventListener("click", () => guardedAction(createManualBillBtn, createManualBill, { loadingText: "Saving...", timeoutMs: 30000 }));
 manualUpiBtn?.addEventListener("click", openManualUpi);
 clearCartBtn?.addEventListener("click", resetManualBillForm);
+
+/* =========================================================
+   CONNECT OFFLINE POS
+   ---------------------------------------------------------
+   Issues and revokes the device API keys the Scan2Plate
+   Billing app authenticates with. The key itself crosses the
+   wire once, in the response to the POST that creates it:
+   only a SHA-256 of it is stored, so it can never be shown
+   again and a copy of the database yields no usable keys.
+========================================================= */
+async function offlinePosFetch(path, options = {}) {
+  const token = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${getBackendBaseUrl()}/api/offline-pos/${encodeURIComponent(restaurantId)}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token || ""}`, ...(options.headers || {}) }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.ok === false) throw new Error(body.error || body.message || "Request failed.");
+  return body;
+}
+
+function setOfflinePosNotice(message, type = "info") {
+  const box = document.getElementById("posKeyNotice");
+  if (!box) return;
+  box.className = `notice-box ${type}${message ? "" : " hidden"}`;
+  const span = box.querySelector("span");
+  if (span) span.textContent = message;
+}
+
+function renderOfflinePosKeys(keys = [], devices = []) {
+  const keyRows = document.getElementById("posKeyRows");
+  if (keyRows) {
+    keyRows.innerHTML = keys.length ? keys.map(key => `
+      <tr${key.revoked_at ? ' style="opacity:.5"' : ""}>
+        <td>${escapeHtml(key.label || "Device")}</td>
+        <td style="font-family:monospace;font-size:12px;">${escapeHtml(key.masked || "—")}</td>
+        <td>${escapeHtml(String(key.created_at || "—").slice(0, 10))}</td>
+        <td>${key.last_seen_at ? escapeHtml(String(key.last_seen_at).slice(0, 16).replace("T", " ")) : "Never"}</td>
+        <td>${key.revoked_at
+          ? '<span class="muted">Revoked</span>'
+          : `<button class="btn btn-sm btn-danger pos-revoke-btn" data-hash="${escapeHtml(key.hash)}">Revoke</button>`}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="muted">No keys yet. Generate one for each device.</td></tr>';
+    keyRows.querySelectorAll(".pos-revoke-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        if (!confirm("Revoke this key? The device using it will stop syncing immediately.")) return;
+        try {
+          await offlinePosFetch(`/keys/${encodeURIComponent(button.dataset.hash)}`, { method: "DELETE" });
+          setOfflinePosNotice("Key revoked.", "info");
+          loadOfflinePos();
+        } catch (error) { setOfflinePosNotice(error.message, "danger"); }
+      });
+    });
+  }
+
+  const deviceRows = document.getElementById("posDeviceRows");
+  if (deviceRows) {
+    deviceRows.innerHTML = devices.length ? devices.map(device => `
+      <tr>
+        <td style="font-family:monospace;font-size:12px;">${escapeHtml(device.device_id)}</td>
+        <td>${escapeHtml(device.app_version || "—")}</td>
+        <td>${device.last_seen_at ? escapeHtml(String(device.last_seen_at).slice(0, 16).replace("T", " ")) : "Never"}</td>
+        <td>${Number(device.orders_synced || 0)}</td>
+      </tr>`).join("") : '<tr><td colspan="4" class="muted">No device has connected yet.</td></tr>';
+  }
+}
+
+async function loadOfflinePos() {
+  const urlField = document.getElementById("posServerUrl");
+  const codeField = document.getElementById("posRestaurantCode");
+  if (!urlField || !codeField) return;
+  urlField.value = getBackendBaseUrl();
+  codeField.value = restaurantId;
+  try {
+    const data = await offlinePosFetch("/keys");
+    codeField.value = data.restaurantCode || restaurantId;
+    renderOfflinePosKeys(data.keys || [], data.devices || []);
+  } catch (error) {
+    setOfflinePosNotice(`Could not load keys: ${error.message}`, "danger");
+    renderOfflinePosKeys([], []);
+  }
+}
+
+window.scan2plateLoadOfflinePos = loadOfflinePos;
+
+document.getElementById("posGenerateKeyBtn")?.addEventListener("click", async () => {
+  if (!isOwnerLike()) return alert("Owner access required to generate an API key.");
+  try {
+    const data = await offlinePosFetch("/keys", {
+      method: "POST",
+      body: JSON.stringify({ label: prompt("Name this device (e.g. Counter till)", "Offline POS device") || "Offline POS device" })
+    });
+    const field = document.getElementById("posApiKey");
+    if (field) field.value = data.apiKey;
+    setOfflinePosNotice(data.notice || "Copy this key now — it cannot be shown again.", "warning");
+    loadOfflinePos();
+  } catch (error) { setOfflinePosNotice(error.message, "danger"); }
+});
+
+document.querySelectorAll("[data-copy]").forEach(button => {
+  button.addEventListener("click", async () => {
+    const field = document.getElementById(button.dataset.copy);
+    if (!field?.value) return;
+    try { await navigator.clipboard.writeText(field.value); button.textContent = "Copied"; setTimeout(() => { button.textContent = "Copy"; }, 1400); }
+    catch { field.select(); document.execCommand("copy"); }
+  });
+});
 
 manualOrderTypeTabsEl?.addEventListener("click", event => {
   const button = event.target.closest("[data-order-type]");

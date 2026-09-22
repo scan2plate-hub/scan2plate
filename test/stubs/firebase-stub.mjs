@@ -15,12 +15,30 @@ export function onSnapshot(ref, onNext, onError) {
   return () => { listener.active = false; };
 }
 
-export function emitSnapshot(docs) {
-  activeListeners.filter(l => l.active).forEach(l => l.onNext({ docs: docs.map(d => ({ id: d.id, data: () => d })) }));
+/** The collection a listener is on, seeing through a query() wrapper. */
+export function listenerPath(listener) {
+  const ref = listener?.ref?.type === "query" ? listener.ref.ref : listener?.ref;
+  return ref?.path || ref?.name || "";
 }
 
-export function emitError(error) {
-  activeListeners.filter(l => l.active).forEach(l => l.onError?.(error));
+/**
+ * Emits to the listeners on ONE collection, defaulting to top-level `orders`.
+ *
+ * The store now runs two listeners — online orders and the offline POS
+ * subcollection — and they carry different document shapes. Emitting online
+ * documents into the offline listener would map them a second time and
+ * silently double every order, so a test has to say which stream it means.
+ */
+export function emitSnapshot(docs, { path = "orders" } = {}) {
+  activeListeners
+    .filter(l => l.active && listenerPath(l) === path)
+    .forEach(l => l.onNext({ docs: docs.map(d => ({ id: d.id, data: () => d })) }));
+}
+
+export function emitError(error, { path = "orders" } = {}) {
+  activeListeners
+    .filter(l => l.active && listenerPath(l) === path)
+    .forEach(l => l.onError?.(error));
 }
 
 export function liveListenerCount() {

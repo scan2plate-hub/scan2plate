@@ -24,9 +24,15 @@ test("two subscribers share ONE underlying listener", () => {
   const a = [];
   const b = [];
   const offA = subscribeOrders("rest-1", orders => a.push(orders));
+  const afterFirst = stub.liveListenerCount();
   const offB = subscribeOrders("rest-1", orders => b.push(orders));
 
-  assert.equal(stub.liveListenerCount(), 1, "a second subscriber must not open a second query");
+  // The contract is that subscribers SHARE listeners, not that there is
+  // exactly one: the store also watches the offline-POS subcollection. What
+  // must never happen is a listener opening per subscriber.
+  assert.equal(stub.liveListenerCount(), afterFirst, "a second subscriber must not open another query");
+  assert.equal(stub.activeListeners.filter(l => l.active && stub.listenerPath(l) === "orders").length, 1,
+    "exactly one listener on the orders collection, however many subscribers");
 
   stub.emitSnapshot([{ id: "o1", restaurantId: "rest-1", grandTotal: 100 }]);
   assert.equal(a.length, 1);
@@ -41,11 +47,12 @@ test("two subscribers share ONE underlying listener", () => {
 test("the listener is torn down when the last subscriber leaves", () => {
   stub.resetListeners();
   const offA = subscribeOrders("rest-1", () => {});
+  const shared = stub.liveListenerCount();
   const offB = subscribeOrders("rest-1", () => {});
-  assert.equal(stub.liveListenerCount(), 1);
+  assert.equal(stub.liveListenerCount(), shared);
 
   offA();
-  assert.equal(stub.liveListenerCount(), 1, "still one subscriber left, keep reading");
+  assert.equal(stub.liveListenerCount(), shared, "still one subscriber left, keep reading");
   offB();
   assert.equal(stub.liveListenerCount(), 0, "nothing keeps reading after the last subscriber leaves");
 });
@@ -58,7 +65,8 @@ test("a late subscriber gets the current orders from memory, with no extra read"
   const late = [];
   const offLate = subscribeOrders("rest-1", orders => late.push(orders));
 
-  assert.equal(stub.liveListenerCount(), 1, "joining late must not open another query");
+  assert.equal(stub.activeListeners.filter(l => l.active && stub.listenerPath(l) === "orders").length, 1,
+    "joining late must not open another query");
   assert.equal(late.length, 1, "the late subscriber is handed the cached snapshot immediately");
   assert.equal(late[0].length, 2);
 
@@ -103,4 +111,63 @@ test("a listener error reaches the error handler", () => {
   } finally {
     off();
   }
+});
+
+/* ---------------- offline POS orders ---------------- */
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 260));
+
+test("offline POS orders are merged in alongside online ones", async () => {
+  stub.resetListeners();
+  const seen = [];
+  const off = subscribeOrders("rest-1", orders => seen.push(orders));
+
+  stub.emitSnapshot([{ id: "o1", restaurantId: "rest-1", grandTotal: 100 }]);
+  stub.emitSnapshot(
+    [{ id: "p1", uuid: "p1", status: "billed", total: 250, table_name: "Table 3", table_type: "table", items: [] }],
+    { path: "restaurants/rest-1/offlinePosOrders" }
+  );
+  await settle();   // the store coalesces a burst of snapshots over 200 ms
+
+  const latest = seen[seen.length - 1];
+  assert.equal(latest.length, 2, "both streams reach the subscriber");
+  const offline = latest.find(order => order.isOfflinePosOrder);
+  assert.ok(offline, "the offline order is present");
+  assert.equal(offline.sourceLabel, "Offline POS");
+  assert.equal(offline.grandTotal, 250);
+  assert.equal(offline.paymentStatus, "paid", "a billed offline order counts as revenue");
+  off();
+});
+
+test("an OPEN offline order reaches the dashboard but is not revenue", async () => {
+  stub.resetListeners();
+  const seen = [];
+  const off = subscribeOrders("rest-1", orders => seen.push(orders));
+  stub.emitSnapshot(
+    [{ id: "p2", uuid: "p2", status: "open", total: 400, table_name: "Table 5", table_type: "table", items: [] }],
+    { path: "restaurants/rest-1/offlinePosOrders" }
+  );
+  await settle();
+  const order = seen[seen.length - 1].find(o => o.isOfflinePosOrder);
+  assert.equal(order.status, "pending", "a running table is visible");
+  assert.notEqual(order.paymentStatus, "paid", "but it is not money");
+  off();
+});
+
+test("online orders are not double-counted by the offline listener", () => {
+  stub.resetListeners();
+  const seen = [];
+  const off = subscribeOrders("rest-1", orders => seen.push(orders));
+  stub.emitSnapshot([{ id: "o1", restaurantId: "rest-1", grandTotal: 100 }]);
+  const latest = seen[seen.length - 1];
+  assert.equal(latest.length, 1, "one online order must appear exactly once");
+  off();
+});
+
+test("the offline stream is torn down with the online one", () => {
+  stub.resetListeners();
+  const off = subscribeOrders("rest-1", () => {});
+  assert.ok(stub.liveListenerCount() >= 2, "both streams are open");
+  off();
+  assert.equal(stub.liveListenerCount(), 0, "and both are closed");
 });

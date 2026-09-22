@@ -19,6 +19,10 @@ import { normalizeBusinessType } from "../public/js/business-types.js";
 // reimplemented so what a customer is shown and what they are charged can
 // never drift apart — and so the server, not the page, has the final word.
 import { findCouponOffer, normalizeCouponCode, discountAmount, isCouponOffer } from "../public/js/subscription-core.js";
+// The offline billing app's backup/restore API. Kept in its own module: it
+// authenticates with device API keys rather than Firebase ID tokens, so it
+// shares none of this file's auth middleware and would only tangle with it.
+import { createOfflinePosRouter, issueApiKey, listApiKeys, revokeApiKey, listDevices } from "./offline-pos.js";
 
 dotenv.config();
 const app = express();
@@ -2294,5 +2298,63 @@ async function saveReviewedPurchase(req, res) {
 
 app.post("/api/inventory/save-purchase", verifyAdmin, saveReviewedPurchase);
 app.post("/api/inventory/purchase-review/save", verifyAdmin, saveReviewedPurchase);
+
+/* =========================================================
+   OFFLINE POS (Scan2Plate Billing app)
+   ---------------------------------------------------------
+   Device-key authenticated backup and restore. Mounted before
+   the listener so the router owns everything under its base
+   path, including its own 404s and error shape.
+========================================================= */
+app.use("/api/v1/restaurants/:restaurantCode", createOfflinePosRouter());
+
+/* Dashboard side: the owner issues, lists and revokes the keys their
+   devices use. These are Firebase-ID-token routes like the rest of the
+   dashboard, NOT device-key routes. A key is returned in full exactly
+   once, at creation; afterwards only its masked form is available. */
+app.get("/api/offline-pos/:restaurantId/keys", verifyAdmin, async (req, res) => {
+  try {
+    const restaurant = await assertRestaurantAccess(req.user.uid, req.params.restaurantId, req.user);
+    const db = getFirestore();
+    const [keys, devices] = await Promise.all([
+      listApiKeys(db, restaurant.id),
+      listDevices(db, restaurant.id)
+    ]);
+    res.json({ ok: true, restaurantCode: restaurant.id, keys, devices });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post("/api/offline-pos/:restaurantId/keys", verifyAdmin, async (req, res) => {
+  try {
+    const restaurant = await assertRestaurantAccess(req.user.uid, req.params.restaurantId, req.user);
+    const issued = await issueApiKey(getFirestore(), restaurant.id, {
+      label: req.body?.label || "",
+      createdBy: req.user.email || req.user.uid || ""
+    });
+    // The only time the full key leaves the server. It is not logged.
+    res.json({
+      ok: true,
+      restaurantCode: restaurant.id,
+      apiKey: issued.key,
+      masked: issued.masked,
+      hash: issued.hash,
+      notice: "Copy this key now. It is stored hashed and cannot be shown again."
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.message });
+  }
+});
+
+app.delete("/api/offline-pos/:restaurantId/keys/:hash", verifyAdmin, async (req, res) => {
+  try {
+    const restaurant = await assertRestaurantAccess(req.user.uid, req.params.restaurantId, req.user);
+    await revokeApiKey(getFirestore(), restaurant.id, req.params.hash);
+    res.json({ ok: true, revoked: req.params.hash });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.message });
+  }
+});
 
 app.listen(process.env.PORT || 5000, () => console.log(`Scan2Plate backend running on port ${process.env.PORT || 5000}`));

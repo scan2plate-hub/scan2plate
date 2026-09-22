@@ -1,0 +1,317 @@
+openapi: 3.0.3
+info:
+  title: Scan2Plate — Offline POS Backup & Restore
+  version: "1.0.0"
+  description: |
+    Backup and restore for the **Scan2Plate Billing** Flutter app, which runs
+    fully offline on a local SQLite database and syncs when it has a connection.
+
+    **Identity.** Every record the app sends carries a client-generated `uuid`
+    (UUID v4). That uuid is the idempotency key: a POST or PUT with an existing
+    uuid updates the record, it never creates a duplicate. The app's local
+    integer ids are not unique across reinstalls and are stored only as
+    `local_id`, for reference.
+
+    **Time.** The app sends local time with no zone (`2026-09-22T13:05:11.123`).
+    It is stored exactly as sent — reinterpreting it as UTC would shift every
+    timestamp by the device's offset — alongside a server `received_at` in UTC.
+
+    **Money.** Rupees, as a number, to 2 decimals.
+servers:
+  - url: https://api.scan2plate.com
+    description: Production
+  - url: http://localhost:5000
+    description: Local development
+security:
+  - ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: |
+        The device API key issued in the restaurant dashboard under
+        **Connect Offline POS**. HTTPS only. Keys are stored hashed; a key
+        that is lost is regenerated, never recovered.
+  parameters:
+    RestaurantCode:
+      name: restaurant_code
+      in: path
+      required: true
+      schema: { type: string, example: RST006 }
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: Stable per install.
+    AppVersion:
+      name: X-App-Version
+      in: header
+      required: true
+      schema: { type: string, example: "1.4.2" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, example: false }
+        error: { type: string, example: validation_error }
+        message: { type: string, example: "updated_at must be an ISO-8601 timestamp." }
+    Settings:
+      type: object
+      required: [updated_at]
+      properties:
+        restaurant_name: { type: string }
+        address: { type: string }
+        phone: { type: string }
+        gstin: { type: string }
+        fssai_number: { type: string }
+        upi_id: { type: string }
+        bill_footer_message: { type: string }
+        cgst_percent: { type: number, example: 2.5 }
+        sgst_percent: { type: number, example: 2.5 }
+        logo_base64:
+          type: string
+          nullable: true
+          description: PNG or JPG. Must decode to at most 500 KB, or the call is 413.
+        print_settings:
+          type: object
+          additionalProperties: true
+          description: Free-form; stored and returned exactly as sent.
+        updated_at: { type: string, example: "2026-09-22T13:05:11.123" }
+    MenuSnapshot:
+      type: object
+      required: [categories, menu_items, updated_at]
+      description: |
+        A full snapshot. Anything absent from it is deleted server-side — the
+        whole menu is one document, so there is no partial state to reconcile.
+      properties:
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid: { type: string, format: uuid }
+              name: { type: string, example: Starters }
+              sort_order: { type: integer, example: 0 }
+        menu_items:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid: { type: string, format: uuid }
+              category_uuid: { type: string, format: uuid, nullable: true }
+              name: { type: string, example: Paneer Tikka }
+              price: { type: number, example: 220.0 }
+              half_price: { type: number, nullable: true, example: 120.0 }
+              veg: { type: boolean }
+              active: { type: boolean }
+              favorite: { type: boolean }
+        updated_at: { type: string }
+    TablesSnapshot:
+      type: object
+      required: [tables, updated_at]
+      properties:
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid: { type: string, format: uuid }
+              name: { type: string, example: Table 1 }
+              type: { type: string, enum: [table, cabin] }
+              capacity: { type: integer, example: 4 }
+              sort_order: { type: integer }
+        updated_at: { type: string }
+    Order:
+      type: object
+      required: [uuid, status, business_date, created_at, updated_at]
+      properties:
+        uuid: { type: string, format: uuid }
+        local_id: { type: integer, nullable: true, description: Reference only; never an identity. }
+        table_name: { type: string, example: Table 2 }
+        table_type: { type: string, enum: [table, cabin, takeaway, delivery] }
+        table_uuid: { type: string, format: uuid, nullable: true }
+        status: { type: string, enum: [open, billed, cancelled] }
+        order_number: { type: integer, example: 14 }
+        business_date: { type: string, example: "2026-09-22" }
+        created_at: { type: string, example: "2026-09-22T13:05:11.123" }
+        closed_at: { type: string, nullable: true }
+        kot_count: { type: integer }
+        discount: { type: number }
+        discount_type: { type: string, enum: [flat, percent] }
+        payment_mode: { type: string, nullable: true, enum: [Cash, UPI, Card, null] }
+        subtotal: { type: number }
+        cgst: { type: number }
+        sgst: { type: number }
+        total: { type: number }
+        customer_name: { type: string, nullable: true }
+        company_name: { type: string, nullable: true }
+        customer_phone: { type: string, nullable: true }
+        customer_gst: { type: string, nullable: true }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid: { type: string, format: uuid }
+              menu_item_uuid: { type: string, format: uuid, nullable: true }
+              name: { type: string }
+              price: { type: number }
+              qty: { type: integer }
+              kot_batch: { type: integer }
+        updated_at: { type: string }
+paths:
+  /api/v1/restaurants/{restaurant_code}/ping:
+    get:
+      summary: Verify the link
+      parameters:
+        - $ref: '#/components/parameters/RestaurantCode'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/AppVersion'
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              example: { ok: true, restaurant_name: "Old Monk Cafe", server_time: "2026-09-22T07:35:02.411Z" }
+        "401": { description: Missing, unknown or revoked key, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        "403": { description: Key belongs to a different restaurant, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/restaurants/{restaurant_code}/backup/settings:
+    put:
+      summary: Replace bill settings
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { example: { ok: true, saved: settings, updated_at: "2026-09-22T13:05:11.123" } } } }
+        "413": { description: Logo over 500 KB }
+    get:
+      summary: Read bill settings
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      responses:
+        "200": { description: Settings, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+        "404": { description: Never uploaded }
+  /api/v1/restaurants/{restaurant_code}/backup/menu:
+    put:
+      summary: Replace the whole menu
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MenuSnapshot' } } } }
+      responses:
+        "200": { description: Saved, content: { application/json: { example: { ok: true, saved: menu, categories: 4, menu_items: 62, updated_at: "2026-09-22T13:05:11.123" } } } }
+    get:
+      summary: Read the menu snapshot
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      responses:
+        "200": { description: Menu, content: { application/json: { schema: { $ref: '#/components/schemas/MenuSnapshot' } } } }
+        "404": { description: Never uploaded }
+  /api/v1/restaurants/{restaurant_code}/menu:
+    get:
+      summary: Legacy menu shape, for app builds that predate this API
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      responses:
+        "200":
+          description: Legacy shape, unchanged
+          content:
+            application/json:
+              example:
+                categories: [ { id: "a1b2…", name: Starters } ]
+                menu_items: [ { category_id: "a1b2…", name: Paneer Tikka, price: 220.0, veg: true } ]
+  /api/v1/restaurants/{restaurant_code}/backup/tables:
+    put:
+      summary: Replace dining tables and cabins
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TablesSnapshot' } } } }
+      responses: { "200": { description: Saved } }
+    get:
+      summary: Read the tables snapshot
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      responses:
+        "200": { description: Tables, content: { application/json: { schema: { $ref: '#/components/schemas/TablesSnapshot' } } } }
+        "404": { description: Never uploaded }
+  /api/v1/restaurants/{restaurant_code}/orders/batch:
+    post:
+      summary: Upload new and changed orders (upsert by uuid)
+      description: |
+        Re-sending an order with the same uuid replaces it **entirely**,
+        including its items — an edit that removed a line must not leave that
+        line behind. At most 500 orders per request. One bad record does not
+        cost the device the batch: results are returned per record.
+      parameters: [ { $ref: '#/components/parameters/RestaurantCode' }, { $ref: '#/components/parameters/DeviceId' }, { $ref: '#/components/parameters/AppVersion' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orders: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Order' } }
+      responses:
+        "200":
+          description: Per-record results
+          content:
+            application/json:
+              example:
+                ok: true
+                saved: 2
+                failed: 1
+                results:
+                  - { uuid: "3f1c…", status: saved }
+                  - { uuid: "7a2d…", status: error, error: "status must be one of: open, billed, cancelled." }
+        "413": { description: More than 500 records }
+  /api/v1/restaurants/{restaurant_code}/orders/{uuid}:
+    delete:
+      summary: Permanently delete one order
+      parameters:
+        - $ref: '#/components/parameters/RestaurantCode'
+        - { name: uuid, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/AppVersion'
+      responses:
+        "200": { description: Deleted }
+        "404": { description: Unknown uuid — the app may treat this as success }
+  /api/v1/restaurants/{restaurant_code}/orders:
+    get:
+      summary: Download orders for restore
+      description: |
+        Sorted by `created_at`, with `uuid` breaking ties so the order is total
+        and a cursor can never skip or repeat a record. Still-open orders are
+        included, so running tables come back after a reinstall.
+      parameters:
+        - $ref: '#/components/parameters/RestaurantCode'
+        - { name: from, in: query, schema: { type: string, example: "2026-09-01" } }
+        - { name: to, in: query, schema: { type: string, example: "2026-09-22" } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 500, default: 500 } }
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/AppVersion'
+      responses:
+        "200":
+          description: A page of orders
+          content:
+            application/json:
+              example: { ok: true, orders: [], next_cursor: "MjAyNi0wOS0yMlQxMDowMDowMC4wMDB8M2YxYw" }
+  /api/v1/restaurants/{restaurant_code}/restore:
+    get:
+      summary: Everything except orders, for a fresh install
+      description: |
+        `counters` are computed from stored data so numbering continues instead
+        of restarting at 1. All three are scoped to one business date, since the
+        app's numbering resets daily; pass `business_date` to pick the day,
+        otherwise the server's current UTC date is used.
+      parameters:
+        - $ref: '#/components/parameters/RestaurantCode'
+        - { name: business_date, in: query, schema: { type: string, example: "2026-09-22" } }
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/AppVersion'
+      responses:
+        "200":
+          description: Everything needed to rebuild the local database
+          content:
+            application/json:
+              example:
+                ok: true
+                settings: null
+                menu: null
+                tables: null
+                counters: { order_number_date: "2026-09-22", order_number_counter: 14, takeaway_counter: 37, delivery_counter: 12 }
+                orders_available: { count: 1234, first_date: "2026-01-04", last_date: "2026-09-22" }
