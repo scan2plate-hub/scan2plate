@@ -24,6 +24,11 @@ import {
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { createCoalescedRunner, registerCleanup, devError } from "./common.js?v=freeze-fix-20260816";
+// The offline billing app syncs into its own subcollection. Mapping those
+// orders into the dashboard's shape HERE means the order list, the reports
+// and the best-selling chart all pick them up without any of them learning
+// a second schema.
+import { toDashboardOrder } from "./offline-pos-view.js?v=s2p-20260922c";
 
 const subscribers = new Set();
 const errorHandlers = new Set();
@@ -34,6 +39,14 @@ let tokenRefreshRetried = false;
 let latestOrders = null;
 let hasLoadedOnce = false;
 let notifySubscribers = null;
+let onlineOrders = [];
+let offlinePosOrders = [];
+let unsubscribeOfflinePos = null;
+
+/** Both streams, in one list, in the dashboard's own shape. */
+function mergedOrders() {
+  return [...onlineOrders, ...offlinePosOrders];
+}
 
 function emit(orders) {
   latestOrders = orders;
@@ -50,14 +63,31 @@ function emitError(error) {
   });
 }
 
+function startOfflinePosListener() {
+  if (unsubscribeOfflinePos || !restaurantScope) return;
+  unsubscribeOfflinePos = onSnapshot(
+    collection(db, "restaurants", restaurantScope, "offlinePosOrders"),
+    snapshot => {
+      offlinePosOrders = snapshot.docs.map(docSnap => toDashboardOrder({ ...docSnap.data(), restaurant_code: restaurantScope }));
+      if (notifySubscribers) notifySubscribers(mergedOrders());
+    },
+    // A restaurant that has never linked the offline app has no such
+    // subcollection, and a staff account may not be allowed to read it.
+    // Neither is an error worth showing: the online orders still load.
+    error => devError("offline pos orders listener", { code: error?.code, message: error?.message })
+  );
+}
+
 function startListener() {
   if (unsubscribe || !restaurantScope) return;
   notifySubscribers = createCoalescedRunner(emit, 200);
+  startOfflinePosListener();
   unsubscribe = onSnapshot(
     query(collection(db, "orders"), where("restaurantId", "==", restaurantScope)),
     snapshot => {
       tokenRefreshRetried = false;
-      notifySubscribers(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
+      onlineOrders = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+      notifySubscribers(mergedOrders());
     },
     async error => {
       devError("orders listener error", { code: error?.code, message: error?.message, restaurantId: restaurantScope });
@@ -86,6 +116,12 @@ function stopListener() {
     try { unsubscribe(); } catch (error) { devError("orders listener cleanup failed", error); }
   }
   unsubscribe = null;
+  if (typeof unsubscribeOfflinePos === "function") {
+    try { unsubscribeOfflinePos(); } catch (error) { devError("offline pos listener cleanup failed", error); }
+  }
+  unsubscribeOfflinePos = null;
+  onlineOrders = [];
+  offlinePosOrders = [];
   notifySubscribers = null;
 }
 

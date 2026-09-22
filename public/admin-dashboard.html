@@ -615,6 +615,9 @@
         <a class="nav-item" data-section="inventory">
           <span class="nav-icon"><i class="fas fa-boxes-stacked"></i></span>Inventory
         </a>
+        <a class="nav-item" data-section="offline-pos">
+          <span class="nav-icon"><i class="fas fa-plug"></i></span><span>Connect Offline POS</span>
+        </a>
         <a class="nav-item" data-section="settings">
           <span class="nav-icon"><i class="fas fa-cog"></i></span>Settings
         </a>
@@ -1164,6 +1167,67 @@
       </section>
 
       <!-- SETTINGS -->
+      <!-- CONNECT OFFLINE POS -->
+      <section class="content-section" id="section-offline-pos">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title"><i class="fas fa-plug"></i> Connect Offline POS</h3></div>
+          <div class="card-body">
+            <p class="muted" style="margin-bottom:14px;font-size:13px;">
+              Enter these three values in the Scan2Plate Billing app under <strong>Settings → Cloud Backup</strong>.
+              The app keeps working without internet and uploads everything the next time it connects.
+            </p>
+            <div class="form-group">
+              <label class="form-label">Server URL</label>
+              <div style="display:flex;gap:8px;">
+                <input class="form-input" id="posServerUrl" readonly />
+                <button class="btn btn-outline" type="button" data-copy="posServerUrl">Copy</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Restaurant Code</label>
+              <div style="display:flex;gap:8px;">
+                <input class="form-input" id="posRestaurantCode" readonly />
+                <button class="btn btn-outline" type="button" data-copy="posRestaurantCode">Copy</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <input class="form-input" id="posApiKey" readonly placeholder="Generate a key for this device" style="flex:1;min-width:240px;font-family:monospace;" />
+                <button class="btn btn-outline" type="button" data-copy="posApiKey">Copy</button>
+                <button class="btn btn-primary" id="posGenerateKeyBtn" type="button"><i class="fas fa-key"></i> Generate Key</button>
+              </div>
+              <p class="muted" style="margin-top:7px;font-size:12px;">
+                A key is shown <strong>once</strong>. Scan2Plate stores only a hash of it, so it cannot be shown
+                again — if it is lost, generate a new one and revoke the old.
+              </p>
+            </div>
+            <div id="posKeyNotice" class="notice-box info hidden"><i class="fas fa-info-circle"></i><span></span></div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px;">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-list"></i> Keys</h3></div>
+            <div class="card-body">
+              <table class="data-table">
+                <thead><tr><th>Label</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+                <tbody id="posKeyRows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-mobile-screen"></i> Devices</h3></div>
+            <div class="card-body">
+              <table class="data-table">
+                <thead><tr><th>Device</th><th>App version</th><th>Last sync</th><th>Orders synced</th></tr></thead>
+                <tbody id="posDeviceRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="content-section" id="section-settings">
         <div class="grid-2">
           <div class="card">
@@ -1559,6 +1623,7 @@
         dashboard: { title:"Dashboard",     subtitle:"Overview & Statistics" },
         orders:    { title:"Live Orders",    subtitle:"Manage active orders" },
         billing:   { title:"Quick Billing",  subtitle:"Create manual orders" },
+        "offline-pos": { title:"Connect Offline POS", subtitle:"Link the Scan2Plate Billing app" },
         kot:       { title:"KOT Management", subtitle:"Kitchen order tickets" },
         menu:      { title:"Menu Items",     subtitle:"Manage your menu" },
         inventory: { title:"Inventory",      subtitle:"Manage stock & ingredient usage" },
@@ -1588,6 +1653,9 @@
         // now, so opening a section is instant and always shows current data
         // without re-reading anything from Firestore.
         window.scan2plateFlushSection?.(name);
+        // Keys and device status are fetched from the backend, so they are
+        // loaded when the screen is opened rather than on every dashboard boot.
+        if (name === "offline-pos") window.scan2plateLoadOfflinePos?.();
         window.closeSidebarOnMobile();
       }
 
