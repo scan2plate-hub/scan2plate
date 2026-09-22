@@ -41,7 +41,13 @@ function lastmod(name) {
   const file = existsSync(direct) ? direct : `public/${name}/index.html`;
   try {
     const iso = execFileSync("git", ["log", "-1", "--format=%cI", "--", file], { encoding: "utf8" }).trim();
-    if (iso) return iso.slice(0, 10);
+    // %cI renders in the COMMITTER'S timezone offset, so slicing the string
+    // takes that person's calendar day, not UTC's. A merge committed at
+    // 02:59 +05:30 slices to a date that is still tomorrow in UTC, and
+    // validate-sitemap.mjs — which compares against UTC, as a crawler does —
+    // then rejects every page in the file as modified in the future. Parse it
+    // and re-render in UTC so the date means the same thing to both.
+    if (iso) return new Date(iso).toISOString().slice(0, 10);
   } catch { /* not a git checkout, or the file is untracked */ }
   // A file git does not know about is genuinely new; its mtime is the honest
   // answer, and is still better than a hardcoded date.

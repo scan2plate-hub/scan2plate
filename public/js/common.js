@@ -865,3 +865,70 @@ export function reconcileKeyedList(container, items = [], keyOf, htmlOf) {
   keyedCaches.set(container, cache);
   return { changed, total: items.length };
 }
+
+/* =========================================================
+   WHICH BUSINESS IS THIS PANEL SHOWING?
+
+   Super Admin's "Open Admin" button opened a panel with no
+   business attached to the link. Every panel resolves its id from
+   localStorage, and a super admin's session deliberately clears
+   the staff session, so the panel fell through to
+   `scan2plate_last_restaurant_id` — whichever business this
+   BROWSER last signed into. Clicking Open Admin on a Hotel opened
+   the hotel panel showing a completely different business's data,
+   and every row in the table opened that same one.
+
+   The link now carries the id. These helpers decide when to
+   honour it.
+
+   This is not a security boundary and is not meant to be one. The
+   id only says which document to ASK for; Firestore's rules
+   decide whether the signed-in account may read it, and they check
+   the real uid against the business's owner and staff records. A
+   stranger appending ?restaurantId= to the URL gets a dashboard
+   that cannot load anything.
+========================================================= */
+
+/** True when this browser holds a Super Admin console session. */
+export function isSuperAdminSession() {
+  try {
+    const raw = localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin");
+    if (!raw) return false;
+    return String(JSON.parse(raw)?.role || "").toLowerCase() === "super_admin";
+  } catch {
+    return false;
+  }
+}
+
+/** The business id asked for in the URL, if any. */
+export function requestedRestaurantId() {
+  try {
+    return new URLSearchParams(window.location.search).get("restaurantId")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The business this panel should show, and where that answer came from.
+ *
+ * A signed-in owner or staff member is pinned to their OWN business: their
+ * session wins, so a link cannot quietly move them somewhere else. A super
+ * admin has no business of their own, so for them the link wins — that is the
+ * entire point of Open Admin.
+ *
+ * `fromSuperAdminLink` is returned because the caller must not write this id
+ * to `scan2plate_last_restaurant_id`. Doing so would leave the owner of this
+ * browser pointed at whichever business the super admin last inspected.
+ */
+export function resolveActiveRestaurantId(sessionRestaurantId = "") {
+  const requested = requestedRestaurantId();
+  if (requested && isSuperAdminSession() && !sessionRestaurantId) {
+    return { restaurantId: requested, fromSuperAdminLink: true };
+  }
+  const own = sessionRestaurantId
+    || localStorage.getItem("restaurantId")
+    || localStorage.getItem("scan2plate_last_restaurant_id")
+    || "";
+  return { restaurantId: own || requested, fromSuperAdminLink: false };
+}

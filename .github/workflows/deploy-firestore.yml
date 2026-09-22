@@ -34,7 +34,14 @@ jobs:
     name: Test, then deploy
     runs-on: ubuntu-latest
     steps:
+      # Full history, not the default depth-1. The sitemap takes each page's
+      # lastmod from that file's last commit; in a shallow clone the only
+      # commit that exists is the merge, so every page collapses to one date —
+      # a lastmod a crawler can prove wrong, which is the exact thing
+      # build-sitemap.mjs was written to stop.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

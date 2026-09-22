@@ -18,7 +18,7 @@ import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https:
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList, resolveActiveRestaurantId } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
 import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260922d";
 import { resolveBusinessType } from "./business-types.js?v=s2p-20260922d";
@@ -49,18 +49,23 @@ if (!currentUser) {
   throw new Error("Invalid login data");
 }
 
-const restaurantId =
-  currentUser.restaurantId ||
-  localStorage.getItem("restaurantId") ||
-  localStorage.getItem("scan2plate_last_restaurant_id");
+// A super admin opening this from the console has no business of their own,
+// so the id rides in the link. An owner or staff member stays pinned to
+// theirs; see resolveActiveRestaurantId in common.js.
+const { restaurantId, fromSuperAdminLink } = resolveActiveRestaurantId(currentUser.restaurantId);
 
 if (!restaurantId) {
   alert("Restaurant ID not found. Please login again.");
   window.location.href = "./admin-login.html";
   throw new Error("Restaurant ID missing");
 }
-localStorage.setItem("restaurantId", restaurantId);
-localStorage.setItem("scan2plate_last_restaurant_id", restaurantId);
+// Remembering a business a SUPER ADMIN was inspecting would leave the owner
+// of this browser pointed at it on their next sign-in, which is the fault
+// this whole change exists to fix.
+if (!fromSuperAdminLink) {
+  localStorage.setItem("restaurantId", restaurantId);
+  localStorage.setItem("scan2plate_last_restaurant_id", restaurantId);
+}
 
 const isDevHost = ["localhost", "127.0.0.1"].includes(location.hostname);
 const devLog = (...args) => { if (isDevHost) console.log("[Scan2Plate Admin]", ...args); };

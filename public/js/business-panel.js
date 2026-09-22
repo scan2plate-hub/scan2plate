@@ -5,13 +5,15 @@ import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { parseMenuPdf, parseMenuSpreadsheet, importMenuItems, normalizeKey } from "./menu-import-service.js";
 import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, withTimeout, readValidatedLocal, guardedAction, formatBillSerial, allocateFromCounter } from "./common.js";
+import { getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, withTimeout, readValidatedLocal, guardedAction, formatBillSerial, allocateFromCounter, resolveActiveRestaurantId } from "./common.js";
 
 installAppSafety({ pageName: "Business Panel", stuckTimeoutMs: 16000 });
 
 const $ = id => document.getElementById(id), esc = value => String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"), money = value => new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(Number(value||0));
 const session = readValidatedLocal(localStorage.getItem("scan2plate_user") ? "scan2plate_user" : "scan2serve_user", {}, value => value && typeof value === "object");
-const restaurantId = session.restaurantId || localStorage.getItem("scan2plate_last_restaurant_id");
+// Same rule as the main dashboard: a super admin follows the link, an owner
+// or staff member stays on their own business.
+const { restaurantId } = resolveActiveRestaurantId(session.restaurantId);
 const requestedType = new URLSearchParams(location.search).get("panel") === "vendor" ? "Street Vendor" : document.body.dataset.panelType || "Cafe";
 if (!restaurantId) location.replace("./admin-login.html");
 let settings = {}, orders = [], menu = [], inventory = [], expenses = [], staff = [], cart = [], selectedStatus = "all", lastPendingIds = new Set(), alarmMuted = false, alarmTimer = null, importedMenuRows = [], importInvalidCount = 0;
