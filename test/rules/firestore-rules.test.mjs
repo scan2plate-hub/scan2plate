@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const env = await initializeTestEnvironment({
-  projectId: "scan2plate-test",
+  projectId: "scan2serve-23bf6",
   firestore: { rules: readFileSync(new URL("../../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 }
 });
 
