@@ -96,6 +96,19 @@ test("the owner CAN read their own contact details", async () => {
   await assertSucceeds(getDoc(doc(owner, "restaurants", RID, "private", "profile")));
 });
 
+test("a super admin CAN read the private profile — the dashboard depends on it", async () => {
+  await assertSucceeds(getDoc(doc(sup, "restaurants", RID, "private", "profile")));
+});
+
+test("the owner can update their own private profile", async () => {
+  await assertSucceeds(setDoc(doc(owner, "restaurants", RID, "private", "profile"), { ownerName: "New Name" }, { merge: true }));
+});
+
+test("a stranger CANNOT write to the private profile", async () => {
+  await assertFails(setDoc(doc(anon, "restaurants", RID, "private", "profile"), { adminEmail: "attacker@x.com" }));
+  await assertFails(setDoc(doc(other, "restaurants", RID, "private", "profile"), { adminEmail: "attacker@x.com" }));
+});
+
 /* ================= staff and money data ================= */
 
 test("a stranger CANNOT read staff records or salaries", async () => {

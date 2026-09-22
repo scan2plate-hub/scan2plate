@@ -1,4 +1,5 @@
 import { db } from "./firebase.js";
+import { splitRestaurantPayload } from "./restaurant-private.js?v=s2p-20260922b";
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -82,7 +83,14 @@ saveRestaurantBtn?.addEventListener("click", async () => {
     authUser = await createAdminAuthUser(adminEmailValue, password);
     const locationLat = restaurantLat?.value === "" ? null : Number(restaurantLat?.value); const locationLng = restaurantLng?.value === "" ? null : Number(restaurantLng?.value);
     const settings = { restaurantName:name, phone:phoneValue, address:address?.value.trim() || "", upiId:upiId?.value.trim() || "", taxPercent:Number(taxPercent?.value || 0), logoUrl:logoUrl?.value.trim() || "", kitchenWhatsApp:kitchenWhatsApp?.value.trim() || "", gstNumber:gstNumber?.value.trim() || "", restaurantLat:Number.isFinite(locationLat) ? locationLat : null, restaurantLng:Number.isFinite(locationLng) ? locationLng : null, allowedOrderRadiusMeters:Number(allowedOrderRadius?.value || 150), updatedAt:serverTimestamp() };
-    await setDoc(doc(db, "restaurants", id), { name, restaurantName:name, restaurantId:id, slug:name.toLowerCase().replace(/\s+/g,"-"), restaurantType:restaurantType?.value || "Restaurant", ownerName:owner, phone:phoneValue, email:adminEmailValue, adminEmail:adminEmailValue, adminUid:authUser.uid, address:address?.value.trim() || "", city:city?.value.trim() || "", state:state?.value.trim() || "", pincode:pincode?.value.trim() || "", plan:planValue, amount:amountValue, billingType:billingType?.value || "monthly", planStartDate:startValue, expiryDate:expiryValue, planExpiryDate:expiryValue, status:statusValue, upiId:settings.upiId, gstNumber:settings.gstNumber, taxPercent:settings.taxPercent, logoUrl:settings.logoUrl, kitchenWhatsApp:settings.kitchenWhatsApp, supportWhatsApp:supportWhatsApp?.value.trim() || "", restaurantLat:settings.restaurantLat, restaurantLng:settings.restaurantLng, allowedOrderRadiusMeters:settings.allowedOrderRadiusMeters, tableCount:tables, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+    const rootPayload = { name, restaurantName:name, restaurantId:id, slug:name.toLowerCase().replace(/\s+/g,"-"), restaurantType:restaurantType?.value || "Restaurant", ownerName:owner, phone:phoneValue, email:adminEmailValue, adminEmail:adminEmailValue, adminUid:authUser.uid, address:address?.value.trim() || "", city:city?.value.trim() || "", state:state?.value.trim() || "", pincode:pincode?.value.trim() || "", plan:planValue, amount:amountValue, billingType:billingType?.value || "monthly", planStartDate:startValue, expiryDate:expiryValue, planExpiryDate:expiryValue, status:statusValue, upiId:settings.upiId, gstNumber:settings.gstNumber, taxPercent:settings.taxPercent, logoUrl:settings.logoUrl, kitchenWhatsApp:settings.kitchenWhatsApp, supportWhatsApp:supportWhatsApp?.value.trim() || "", restaurantLat:settings.restaurantLat, restaurantLng:settings.restaurantLng, allowedOrderRadiusMeters:settings.allowedOrderRadiusMeters, tableCount:tables, createdAt:serverTimestamp(), updatedAt:serverTimestamp() };
+    // The owner's login e-mail and name never go into the public document:
+    // the ordering site lists every restaurant, so anything written there is
+    // world-readable. They go to private/profile, which firestore.rules
+    // restricts to this restaurant's admin and to super admins.
+    const { publicFields, privateFields } = splitRestaurantPayload(rootPayload);
+    await setDoc(doc(db, "restaurants", id), publicFields);
+    await setDoc(doc(db, "restaurants", id, "private", "profile"), { ...privateFields, updatedAt:serverTimestamp() }, { merge:true });
     const businessType = restaurantType?.value || "Restaurant";
     const type = businessType.toLowerCase();
     // Hostel and Salon are new types with no production records yet, so

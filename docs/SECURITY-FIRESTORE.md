@@ -120,43 +120,69 @@ place an order, and that a stranger cannot read salaries or redirect payments.
 Both halves matter: rules that pass only the "deny" tests would take the
 business offline.
 
-## What is NOT fixed yet
+## The owner's login e-mail — fixed
 
-**Owner contact details are still readable in the restaurant's root document.**
+`restaurants/{id}` used to hold `adminEmail`, `email` and `ownerName` alongside
+the fields the public ordering site needs. Firestore rules are **document-level,
+not field-level**, and the public site lists every restaurant, so that document
+has to stay readable — which made `adminEmail` world-readable. That field names
+the login account for every business on the platform.
 
-`restaurants/{id}` currently holds `ownerName`, `adminEmail`, `email`, `phone`,
-`adminUid`, `upiId` and `gstNumber` alongside the fields the public ordering
-site needs (name, city, business type, whether it is accepting orders).
+Those three fields now live in `restaurants/{id}/private/profile`, which the
+rules restrict to the restaurant's own admin and to super admins.
 
-Firestore rules are **document-level, not field-level** — there is no way to
-allow reading some fields of a document and not others. And the public "order
-from home" site lists every restaurant, so that document has to stay publicly
-readable for that feature to work.
+### What deliberately did NOT move
 
-`adminEmail` is the field that matters: it names the login account for every
-business on the platform, which is the first half of an account takeover.
+| Field | Why it stays public |
+|---|---|
+| `phone` | The order tracking page renders a **Call Staff** button from it. It is business contact information the customer is meant to have. |
+| `adminUid` | An opaque Firebase id, not a credential — and `firestore.rules` reads it from the root document to decide who owns the restaurant. |
+| `upiId`, `gstNumber`, `taxPercent` | The customer cannot pay or read their bill without them, and they are already in the publicly readable `settings/general`. A GST number is printed on every invoice by law. |
 
-The rules already define `restaurants/{id}/private/*` as owner-only, so the
-destination exists. What remains is the move itself, which is a real change and
-should be done deliberately rather than bundled here:
+### The code
 
-**Option A — move the private fields out (recommended).** Copy `ownerName`,
-`adminEmail`, `email`, `phone` and `adminUid` into
-`restaurants/{id}/private/profile`, delete them from the root document, and
-update the three writers (`add-restaurant.js`) and readers
-(`super-admin-dashboard.js`, `business-panel.js`). Cost: the super admin
-business list needs one extra document read per restaurant, and its
-search-by-email needs rethinking.
+`public/js/restaurant-private.js` is the single place that decides what is
+private. `splitRestaurantPayload()` is used by every writer, and
+`mergeRestaurantProfile()` / `ownerEmailOf()` by every reader — so a restaurant
+migrated and one not yet migrated both read correctly, and there is no window
+where the dashboard shows a dash instead of an e-mail.
 
-**Option B — add a public projection.** Keep the root document private and give
-the public site a `restaurants/{id}/public/card` document holding only the
-discovery fields. Cost: it changes the customer ordering path, which is the
-revenue path, so it carries more risk than Option A.
+Writers updated: `add-restaurant.js`, `business-panel.js`.
+Readers updated: `super-admin-dashboard.js`, `restaurant-list.js`,
+`restaurant-onboarding.html`, `business-panel.js`.
 
-Either way a one-time backfill is needed for the restaurants that already exist.
+`business-panel.js` was writing the **same payload** to `settings/general` *and*
+the root document, so it was leaking the owner name into a second publicly
+readable place. Both writes are now split.
 
-Until one of these is done, treat `adminEmail` on the platform as public
-information, and make sure every admin account has a strong, unique password.
+### A third unauthenticated admin page
+
+`public/restaurant-list.html` had **no sign-in code at all**. It listed every
+business with its owner e-mail and carried working **Suspend**, **Activate** and
+**Renew +30d** buttons. It is now super-admin gated, like the onboarding sheet,
+and checks the Firebase session as well as `localStorage`.
+
+## Running the backfill — this is the step that removes the data
+
+Deploying the rules does **not** move anything. Existing restaurants keep their
+`adminEmail` in the public document until this runs:
+
+```bash
+cd backend                      # where firebase-admin is installed
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+node ../scripts/migrate-private-profile.mjs           # dry run — shows the plan, changes nothing
+node ../scripts/migrate-private-profile.mjs --apply   # performs the move
+```
+
+It copies to `private/profile` **before** deleting from the public document, one
+restaurant at a time, so an interrupted run can never lose a field — worst case
+a rerun repeats the copy. It is idempotent, and one restaurant failing does not
+stop the rest. Eleven tests cover it, including both interruption points.
+
+Afterwards, confirm in the Firebase console that a restaurant document no longer
+has an `adminEmail` field, and that the super admin dashboard still shows owner
+e-mails in its business list.
 
 ---
 
