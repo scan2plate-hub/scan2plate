@@ -1,0 +1,84 @@
+name: Deploy Firestore rules
+
+# The rules protect nothing until they are deployed, and deploying needs a
+# Google credential that cannot live in the repository. This workflow is the
+# way to run that deploy without anyone needing a local Firebase login: add
+# the service-account secret once, then press the button.
+#
+# SETUP (once)
+#   1. Firebase console -> Project settings -> Service accounts
+#      -> Generate new private key. A JSON file downloads.
+#   2. This repo -> Settings -> Secrets and variables -> Actions
+#      -> New repository secret
+#        Name:  FIREBASE_SERVICE_ACCOUNT
+#        Value: the entire contents of that JSON file
+#   3. Actions -> Deploy Firestore rules -> Run workflow.
+#
+# The service account needs the "Firebase Rules Admin" role, which the
+# default App Engine / Firebase Admin SDK account already has.
+#
+# Nothing deploys on a push. This is deliberate: replacing the rules on a
+# live database is not something that should happen because someone edited
+# a README.
+
+on:
+  workflow_dispatch:
+    inputs:
+      also_hosting:
+        description: "Also deploy the website (public/)"
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    name: Test, then deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      # The gate. These 36 tests run the rules that are about to be
+      # deployed — not a copy — against the real Firestore emulator, and
+      # they check BOTH directions: that a customer can still read a menu
+      # and place an order, and that a stranger cannot read salaries or
+      # redirect payments. Rules that only passed the "deny" half would
+      # take every restaurant offline.
+      - name: Test the rules against the emulator
+        run: npm run test:rules
+
+      - name: Rebuild the site and re-run the SEO gates
+        if: ${{ inputs.also_hosting }}
+        run: npm run predeploy
+
+      # google-github-actions/auth turns the JSON secret into an
+      # application-default credential on disk; firebase-tools picks it up
+      # without the secret ever being echoed into a command line.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy rules
+        run: npx --no-install firebase deploy --only firestore:rules --project scan2serve-23bf6 --non-interactive
+
+      - name: Deploy hosting
+        if: ${{ inputs.also_hosting }}
+        run: npx --no-install firebase deploy --only hosting --project scan2serve-23bf6 --non-interactive
+
+      - name: What to check now
+        run: |
+          echo "Rules deployed to scan2serve-23bf6."
+          echo
+          echo "Smoke-test with a MANAGER OR CASHIER login, not the owner:"
+          echo "  - scan a table QR and place an order"
+          echo "  - open the public order-from-home site"
+          echo "  - sign in as manager/cashier: Inventory, Expenses, Staff"
+          echo "  - print a bill"
+          echo "  - sign in as owner: Settings"
+          echo
+          echo "Anything denied names its collection in the browser console."

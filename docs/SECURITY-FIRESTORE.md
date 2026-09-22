@@ -95,16 +95,84 @@ could have upgraded any restaurant to Advance. The file is removed.
 
 ## Deploying the rules — this is the step that actually fixes it
 
-**Nothing above protects anything until the rules are deployed.** Committing the
-file changes nothing on its own.
+**Nothing in this repository protects anything until the rules are deployed.**
+Merging changes nothing on its own.
+
+The project is **`scan2serve-23bf6`**, now set as the default in `.firebaserc`.
+It previously held the literal placeholder `your-firebase-project-id`, so a
+deploy would have failed before it started.
+
+### Option A — one click, no local setup
+
+`.github/workflows/deploy-firestore.yml` runs the deploy on GitHub, so
+nobody needs a local Firebase login or a Node toolchain.
+
+**Once:**
+
+1. Firebase console → Project settings → Service accounts →
+   *Generate new private key*. A JSON file downloads.
+2. This repo → Settings → Secrets and variables → Actions →
+   *New repository secret*
+   - Name: `FIREBASE_SERVICE_ACCOUNT`
+   - Value: the entire contents of that JSON file
+3. Actions → **Deploy Firestore rules** → *Run workflow*.
+
+Tick *Also deploy the website* to push `public/` in the same run — which
+is the better choice the first time, since the hosting side carries the
+auth gates on `restaurant-list.html` and `restaurant-onboarding.html`.
+
+The workflow runs `npm run test:rules` **before** deploying and stops if
+it fails, so a broken rule cannot reach the live database. It never runs
+on a push: replacing the rules on a live database should not happen
+because somebody edited a README.
+
+### Option B — from your own machine
+
+### 1. Sign in
 
 ```bash
-npx firebase deploy --only firestore:rules
+npx firebase login          # opens a browser
+npx firebase projects:list  # confirm scan2serve-23bf6 is listed
 ```
 
-Verify in the Firebase console under **Firestore → Rules** that the published
-rules are dated after this deploy, then re-check that the app still works:
-scan a table QR and place an order, open the admin dashboard, and print a bill.
+On a machine with no browser, use `npx firebase login --no-localhost`, or a
+service account:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+### 2. Check what you are about to replace
+
+The console shows the rules currently live at
+**Firestore → Rules**. Today that is the default, which allows everything.
+Copy it somewhere first if you want a way back.
+
+### 3. Test, then deploy
+
+```bash
+npm install
+npm run test:rules     # 36 tests against the emulator, on this same project id
+npx firebase deploy --only firestore:rules --project scan2serve-23bf6
+```
+
+`test:rules` runs the rules being deployed, not a copy of them. If it fails,
+do not deploy.
+
+### 4. Smoke-test immediately, with a NON-owner account
+
+The two faults fixed in #21 both only show up on a staff login, so testing as
+the owner proves very little:
+
+- [ ] Scan a table QR and place an order (unauthenticated customer path)
+- [ ] Open the public "order from home" site and confirm restaurants list
+- [ ] Sign in as a **manager or cashier** and open Inventory, Expenses and Staff
+- [ ] Print a bill
+- [ ] Sign in as the owner and open Settings
+
+If anything is denied, the rules are too strict somewhere — the browser console
+names the collection. Reverting is `firebase deploy` of the previous rules from
+the console, or ask and it can be narrowed instead.
 
 ## Testing the rules
 

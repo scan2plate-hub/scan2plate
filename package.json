@@ -12,7 +12,7 @@
     "predeploy": "npm run build:blog && npm run build:schema && npm run sync:copies && npm run build:sitemap && npm run seo:check",
     "sync:copies": "node scripts/sync-directory-copies.mjs",
     "build:blog": "node scripts/build-blog.mjs",
-    "test:rules": "npx --no-install firebase emulators:exec --only firestore --project scan2plate-test \"node --test test/rules/firestore-rules.test.mjs\""
+    "test:rules": "npx --no-install firebase emulators:exec --only firestore --project scan2serve-23bf6 \"node --test test/rules/firestore-rules.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
