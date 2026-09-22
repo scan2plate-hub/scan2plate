@@ -13,6 +13,8 @@ const RID = "RST006";
 const OWNER_UID = "owner-uid-1";
 const OTHER_UID = "other-uid-2";
 const SUPER_UID = "super-uid-3";
+const STAFF_UID = "staff-uid-4";     // a manager at RID, not the owner
+const RID2 = "RST007";               // a different restaurant
 
 // Seed with rules disabled, the way real data already exists.
 await env.withSecurityRulesDisabled(async ctx => {
@@ -27,6 +29,11 @@ await env.withSecurityRulesDisabled(async ctx => {
   await setDoc(doc(db, "restaurants", RID, "attendance", "a1"), { present: true });
   await setDoc(doc(db, "restaurants", RID, "inventory_items", "i1"), { name: "Tea leaves" });
   await setDoc(doc(db, "restaurants", RID, "users", "owner_example_com"), { uid: OWNER_UID, role: "admin", email: "owner@example.com" });
+  // A manager: their own Firebase account, not the restaurant's adminUid.
+  await setDoc(doc(db, "restaurants", RID, "users", "manager_example_com"), { uid: STAFF_UID, role: "manager", email: "manager@example.com", status: "active" });
+  // A second restaurant, to prove staff cannot cross the boundary.
+  await setDoc(doc(db, "restaurants", RID2), { restaurantName: "Other Cafe", adminUid: "someone-else", status: "active" });
+  await setDoc(doc(db, "restaurants", RID2, "staff", "s9"), { name: "Their Staff", salary: 20000 });
   await setDoc(doc(db, "orders", "ORD1"), { restaurantId: RID, grandTotal: 500, paymentStatus: "unpaid" });
   await setDoc(doc(db, "superAdmins", SUPER_UID), { role: "super_admin", status: "active" });
   await setDoc(doc(db, "subscriptionPlans", "p1"), { name: "Starter", monthlyPrice: 499 });
@@ -39,6 +46,7 @@ const anon  = env.unauthenticatedContext().firestore();
 const owner = env.authenticatedContext(OWNER_UID, { email: "owner@example.com" }).firestore();
 const other = env.authenticatedContext(OTHER_UID, { email: "attacker@example.com" }).firestore();
 const sup   = env.authenticatedContext(SUPER_UID, { email: "super@example.com" }).firestore();
+const staff = env.authenticatedContext(STAFF_UID, { email: "manager@example.com" }).firestore();
 
 /* ================= what a customer MUST still be able to do ================= */
 
@@ -108,6 +116,30 @@ test("a signed-in stranger CANNOT read another restaurant's staff", async () => 
 test("the owner CAN read their own staff and expenses", async () => {
   await assertSucceeds(getDoc(doc(owner, "restaurants", RID, "staff", "s1")));
   await assertSucceeds(getDoc(doc(owner, "restaurants", RID, "expenses", "e1")));
+});
+
+/* ================= non-owner staff must still be able to work ================= */
+
+test("a manager (not the owner) can read their restaurant's inventory and expenses", async () => {
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "inventory_items", "i1")));
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "expenses", "e1")));
+});
+
+test("a manager can read their restaurant's staff and attendance", async () => {
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "staff", "s1")));
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "attendance", "a1")));
+});
+
+test("a manager can edit the menu", async () => {
+  await assertSucceeds(updateDoc(doc(staff, "restaurants", RID, "menu", "item1"), { price: 35 }));
+});
+
+test("a manager CANNOT read another restaurant's staff", async () => {
+  await assertFails(getDoc(doc(staff, "restaurants", RID2, "staff", "s9")));
+});
+
+test("a manager CANNOT read the owner's private contact details", async () => {
+  await assertFails(getDoc(doc(staff, "restaurants", RID, "private", "profile")));
 });
 
 /* ================= tampering ================= */

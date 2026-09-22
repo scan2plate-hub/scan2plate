@@ -44,23 +44,38 @@ service cloud.firestore {
       );
     }
 
-    // A staff member of this restaurant: a users/{doc} record whose
-    // uid matches the caller and whose status has not been revoked.
-    function staffDoc(rid) {
-      return get(/databases/$(database)/documents/restaurants/$(rid)/users/$(request.auth.token.email.replace('@','_').replace('.','_'))).data;
-    }
-
-    function isStaffOf(rid) {
+    // Owner-level: the restaurant's own admin account, or a super admin.
+    // This is the level that may change settings (the UPI ID lives there),
+    // manage staff accounts, and read the owner's private details.
+    function isOwnerOf(rid) {
       return signedIn() && (
-        // The restaurant's own admin account.
-        get(/databases/$(database)/documents/restaurants/$(rid)).data.adminUid == uid()
-        || isSuperAdmin()
+        isSuperAdmin()
+        || get(/databases/$(database)/documents/restaurants/$(rid)).data.adminUid == uid()
       );
     }
 
-    // Owner-level: the restaurant's admin account, or a super admin.
-    function isOwnerOf(rid) {
-      return isStaffOf(rid);
+    // The document id of a staff record is derived from the e-mail address,
+    // exactly as login.js writes it: "a.b@c.com" -> "a_b_c_com". The dot is
+    // escaped because replace() takes a regex, and an unescaped '.' would
+    // match every character and mangle the whole address.
+    function staffDocId() {
+      return request.auth.token.email.lower().replace('@', '_').replace('\\.', '_');
+    }
+
+    // A manager, cashier or kitchen account: not the restaurant's adminUid,
+    // but a users/{doc} record of this restaurant whose uid is the caller's
+    // and whose status has not been revoked. Without this, deploying these
+    // rules would lock every non-owner staff account out of the dashboard.
+    function hasStaffRecord(rid) {
+      return request.auth.token.email != null
+        && exists(/databases/$(database)/documents/restaurants/$(rid)/users/$(staffDocId()))
+        && get(/databases/$(database)/documents/restaurants/$(rid)/users/$(staffDocId())).data.uid == uid()
+        && !(get(/databases/$(database)/documents/restaurants/$(rid)/users/$(staffDocId())).data.get('status', 'active') in ['disabled', 'suspended', 'inactive', 'removed']);
+    }
+
+    // Staff-level: anyone who works at this restaurant, owner included.
+    function isStaffOf(rid) {
+      return isOwnerOf(rid) || hasStaffRecord(rid);
     }
 
     /* ---------------- restaurants ---------------- */
@@ -138,9 +153,13 @@ service cloud.firestore {
         allow list, delete: if isStaffOf(rid);
       }
 
-      // Anything not named above is closed.
+      // Anything not named above is owner-only, NOT staff-level. A recursive
+      // wildcard also matches private/, and Firestore grants access when ANY
+      // matching rule allows it — so a staff-level catch-all here would hand
+      // every cashier the owner's contact details. Every subcollection staff
+      // actually use is listed explicitly above.
       match /{document=**} {
-        allow read, write: if isStaffOf(rid);
+        allow read, write: if isOwnerOf(rid);
       }
     }
 
