@@ -450,6 +450,12 @@ const manualCustomerNameEl = document.getElementById("manualCustomerName");
 const manualCustomerPhoneEl = document.getElementById("manualCustomerPhone");
 const manualTableNoEl = document.getElementById("manualTableNo");
 const manualOrderTypeTabsEl = document.getElementById("manualOrderTypeTabs");
+const tableDecBtn = document.getElementById("tableDecBtn");
+const tableIncBtn = document.getElementById("tableIncBtn");
+const tablePickBtnEl = document.getElementById("tablePickBtn");
+const tablePickLabelEl = document.getElementById("tablePickLabel");
+const tablePickPanelEl = document.getElementById("tablePickPanel");
+const tablePickGridEl = document.getElementById("tablePickGrid");
 const manualTableGroupEl = document.getElementById("manualTableGroup");
 const manualDeliveryDetailsEl = document.getElementById("manualDeliveryDetails");
 const manualTakeawayDetailsEl = document.getElementById("manualTakeawayDetails");
@@ -4405,6 +4411,9 @@ function renderTablesSection() {
 
   reconcileKeyedList(tablesGridEl, visibleTableStatuses, table => table.tableNo, tableCardHtml);
   bindTableGridActions();
+  // The Quick Billing picker shows the same free/running state, so it is
+  // refreshed from the same snapshot rather than going stale behind a tab.
+  if (tablePickPanelEl && !tablePickPanelEl.classList.contains("hidden")) renderTablePicker();
 }
 
 // Bound ONCE on the grid. The grid used to re-attach a click handler to every
@@ -4423,12 +4432,9 @@ function bindTableGridActions() {
 
     const newBill = event.target.closest(".table-new-bill-btn");
     if (newBill) {
-      const selectedTable = String(newBill.dataset.table || "01").padStart(2, "0");
-      resetManualBillForm();
-      renderTableNumberOptions(selectedTable);
-      if (manualTableNoEl) manualTableNoEl.value = selectedTable;
-      if (typeof window.switchSection === "function") window.switchSection("billing");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      // One tap: dine-in, that table, billing screen, cursor in the menu
+      // search box. Nothing else to click before the first item goes on.
+      startQuickOrder("dine_in", String(newBill.dataset.table || "01").padStart(2, "0"));
       return;
     }
 
@@ -4466,6 +4472,73 @@ function bindTableGridActions() {
    for a pickup time. Delivery drops it and asks where the food
    is going. Nothing here changes what a dine-in bill does.
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   TABLE PICKER
+   Stepping from table 01 to table 14 used to mean fourteen
+   taps on "+". This is a tap-to-pick grid that also shows
+   which tables already have a running bill, so the counter
+   never has to leave Quick Billing to find out.
+--------------------------------------------------------- */
+function tableHasOpenBill(tableNo) {
+  const wanted = String(tableNo).padStart(2, "0");
+  return (allOrders || []).some(order =>
+    String(order.tableNo || order.tableNumber || "").padStart(2, "0") === wanted
+    && !isOrderWorkflowClosed(order)
+    && String(order.paymentStatus || "").toLowerCase() !== "paid");
+}
+
+function selectedManualTable() {
+  return String(manualTableNoEl?.value || "01").padStart(2, "0");
+}
+
+function renderTablePicker() {
+  if (!tablePickGridEl) return;
+  const selected = selectedManualTable();
+  if (tablePickLabelEl) tablePickLabelEl.textContent = `Table ${selected}`;
+  tablePickGridEl.innerHTML = getTableOptions().map(value => {
+    const tableNo = String(value).padStart(2, "0");
+    const busy = tableHasOpenBill(tableNo);
+    return `<button type="button" class="s2p-table-chip ${busy ? "busy" : "free"}${tableNo === selected ? " selected" : ""}" data-pick-table="${escapeHtml(tableNo)}">${escapeHtml(tableNo)}<small>${busy ? "Running" : "Free"}</small></button>`;
+  }).join("");
+}
+
+function setManualTable(tableNo, { closePanel = true } = {}) {
+  const value = String(tableNo).padStart(2, "0");
+  renderTableNumberOptions(value);
+  if (tablePickLabelEl) tablePickLabelEl.textContent = `Table ${value}`;
+  if (closePanel) tablePickPanelEl?.classList.add("hidden");
+  renderTablePicker();
+}
+
+function toggleTablePicker(force) {
+  if (!tablePickPanelEl) return;
+  const show = force === undefined ? tablePickPanelEl.classList.contains("hidden") : force;
+  tablePickPanelEl.classList.toggle("hidden", !show);
+  if (show) renderTablePicker();
+}
+
+function stepManualTable(delta) {
+  const options = getTableOptions().map(value => String(value).padStart(2, "0"));
+  if (!options.length) return;
+  const index = options.indexOf(selectedManualTable());
+  const next = options[(((index < 0 ? 0 : index) + delta) % options.length + options.length) % options.length];
+  setManualTable(next, { closePanel: false });
+}
+
+/**
+ * Start a fresh order of one type and land on the billing screen ready to
+ * take items. One tap from the Tables screen instead of switch-section,
+ * pick-order-type, clear-cart.
+ */
+function startQuickOrder(orderType, tableNo = "") {
+  resetManualBillForm();
+  setManualOrderType(orderType, { silent: true });
+  if (needsTable(orderType) && tableNo) setManualTable(tableNo);
+  if (typeof window.switchSection === "function") window.switchSection("billing");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  manualMenuSearchEl?.focus();
+}
+
 function applyManualOrderTypeUi() {
   const type = normalizeOrderType(manualOrderType);
   manualOrderTypeTabsEl?.querySelectorAll("[data-order-type]").forEach(btn => {
@@ -6757,6 +6830,25 @@ manualOrderTypeTabsEl?.addEventListener("click", event => {
 });
 manualDeliveryFeeEl?.addEventListener("input", renderManualTotals);
 applyManualOrderTypeUi();
+
+/* ---- fast table picking ---- */
+tablePickBtnEl?.addEventListener("click", () => toggleTablePicker());
+tablePickGridEl?.addEventListener("click", event => {
+  const chip = event.target.closest("[data-pick-table]");
+  if (chip) setManualTable(chip.dataset.pickTable);
+});
+tableDecBtn?.addEventListener("click", () => stepManualTable(-1));
+tableIncBtn?.addEventListener("click", () => stepManualTable(1));
+// Tapping outside closes the picker, so it never covers the cart.
+document.addEventListener("click", event => {
+  if (!tablePickPanelEl || tablePickPanelEl.classList.contains("hidden")) return;
+  if (tablePickPanelEl.contains(event.target) || tablePickBtnEl?.contains(event.target)) return;
+  tablePickPanelEl.classList.add("hidden");
+});
+
+/* ---- start a no-table order straight from the Tables screen ---- */
+document.getElementById("tablesStartTakeawayBtn")?.addEventListener("click", () => startQuickOrder("takeaway"));
+document.getElementById("tablesStartDeliveryBtn")?.addEventListener("click", () => startQuickOrder("delivery"));
 
 printKotFromBillingBtn?.addEventListener("click", () => {
   if (!manualCart.length) return alert("No items in current bill.");

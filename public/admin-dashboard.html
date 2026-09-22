@@ -809,6 +809,16 @@
 
       <!-- QUICK BILLING -->
       <section class="content-section" id="section-billing">
+        <style>
+          .s2p-step-btn{width:40px;height:40px;flex-shrink:0;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);font-size:19px;font-weight:800;cursor:pointer;color:var(--text-2);}
+          .s2p-step-btn:hover{background:var(--surface);}
+          .s2p-table-chip{padding:9px 4px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);font-weight:800;font-size:14px;cursor:pointer;text-align:center;line-height:1.15;}
+          .s2p-table-chip small{display:block;font-size:9px;font-weight:700;opacity:.7;margin-top:2px;}
+          .s2p-table-chip.free{border-color:#bfe6cb;background:#f2fbf5;color:#177342;}
+          .s2p-table-chip.busy{border-color:#f3d9ae;background:#fff8ec;color:#a25500;}
+          .s2p-table-chip.selected{outline:3px solid var(--primary,#e07c1a);outline-offset:-1px;}
+          .s2p-table-chip:disabled{opacity:.4;cursor:not-allowed;}
+        </style>
         <div class="grid-60-40">
           <div class="card">
             <div class="card-header"><h3 class="card-title"><i class="fas fa-utensils"></i> Select Items</h3></div>
@@ -847,11 +857,18 @@
               </div>
               <div class="form-row">
                 <div class="form-group" id="manualTableGroup">
-                  <label class="form-label">Table No</label>
-                  <div style="display:flex;align-items:center;border:1.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface);">
-                    <button type="button" id="tableDecBtn" style="width:40px;height:40px;border:none;background:var(--surface-2);font-size:18px;font-weight:800;cursor:pointer;color:var(--text-2);flex-shrink:0;border-right:1px solid var(--border);">−</button>
-                    <input class="form-input" id="manualTableNo" placeholder="01" style="border:none;border-radius:0;text-align:center;font-weight:800;font-size:15px;width:100%;outline:none;" />
-                    <button type="button" id="tableIncBtn" style="width:40px;height:40px;border:none;background:var(--surface-2);font-size:18px;font-weight:800;cursor:pointer;color:var(--text-2);flex-shrink:0;border-left:1px solid var(--border);">+</button>
+                  <label class="form-label">Table No <span class="muted" style="font-weight:600;">— tap to pick</span></label>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <button type="button" id="tablePickBtn" class="form-input" style="flex:1;display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-weight:800;font-size:15px;text-align:left;background:var(--surface);">
+                      <span id="tablePickLabel">Table 01</span><i class="fas fa-chevron-down" style="opacity:.55;font-size:12px;"></i>
+                    </button>
+                    <button type="button" id="tableDecBtn" class="s2p-step-btn">−</button>
+                    <button type="button" id="tableIncBtn" class="s2p-step-btn">+</button>
+                  </div>
+                  <select class="form-input" id="manualTableNo" style="display:none;"></select>
+                  <div id="tablePickPanel" class="hidden" style="margin-top:8px;padding:10px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface-2);max-height:230px;overflow:auto;">
+                    <div id="tablePickGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:7px;"></div>
+                    <div class="muted" style="margin-top:8px;font-size:11px;">Green = free · Orange = running bill</div>
                   </div>
                 </div>
                 <div class="form-group">
@@ -1275,6 +1292,15 @@
       <section class="content-section" id="section-tables">
 
         <div class="tables-toolbar card"><div class="card-body"><div class="form-group"><label class="form-label">Add Tables</label><input id="addTablesCount" class="form-input" type="number" min="1" max="200" placeholder="e.g. 5" /></div><div class="form-group table-search-group"><label class="form-label">Search Tables</label><input id="tableSearch" class="form-input" type="search" placeholder="Table, order, customer..." /></div><button id="addTablesBtn" class="btn btn-primary" type="button"><i class="fas fa-plus"></i> Add</button><button id="downloadAllTableQrsBtn" class="btn btn-outline" type="button"><i class="fas fa-download"></i> QR Codes</button></div></div>
+
+        <!-- Start an order that has no table, without leaving this screen. -->
+        <div class="card" style="margin-bottom:10px;">
+          <div class="card-body" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:12px 14px;">
+            <span style="font-size:13px;font-weight:800;color:var(--text-2);">No table?</span>
+            <button class="btn btn-primary" id="tablesStartTakeawayBtn" type="button"><i class="fas fa-bag-shopping"></i> New Takeaway</button>
+            <button class="btn btn-primary" id="tablesStartDeliveryBtn" type="button"><i class="fas fa-motorcycle"></i> New Delivery</button>
+          </div>
+        </div>
 
         <!-- Summary stats -->
         <div class="table-summary-grid" id="tableSummary"></div>
