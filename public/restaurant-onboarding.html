@@ -5,7 +5,46 @@
 <header class="top"><div class="container nav"><div class="brand"><img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo">Restaurant Onboarding <span class="sub">Scan2Plate setup summary</span></div><div class="actions no-print"><a class="btn ghost" href="./super-admin-dashboard.html">Dashboard</a><a class="btn ghost" href="./qr-generator.html">QR Generator</a></div></div></header>
 <main class="container"><section class="hero no-print"><h1>Printable restaurant setup sheet</h1><p>Load business, plan, payment, location, and saved table QR details from Firestore.</p></section><section class="card load-card no-print"><div class="form"><div><label class="label" for="restaurantId">Restaurant ID</label><input id="restaurantId" class="input" placeholder="RST006"></div><button id="loadBtn" class="btn">Load Sheet</button></div><div id="msg" class="notice"></div></section><section id="sheetRoot" class="card sheet"></section></main>
 <script type="module">
-import {db} from "./js/firebase.js";import {doc,getDoc,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {db,auth} from "./js/firebase.js";import {doc,getDoc,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* -------------------------------------------------------------
+   This sheet prints a business's owner name, admin email, phone,
+   address, UPI ID and GST number. It used to render all of that
+   for ANY Restaurant ID typed into the box, with no sign-in at
+   all, and restaurant IDs are short and guessable.
+
+   It is now super-admin only. The authoritative check is in
+   firestore.rules — this gate stops the page being a self-serve
+   scraper, it is not what protects the data.
+------------------------------------------------------------- */
+function superAdminSession(){
+  try{
+    const raw = localStorage.getItem("scan2serve_super_admin") || localStorage.getItem("scan2plate_super_admin");
+    const parsed = raw ? JSON.parse(raw) : null;
+    if(!parsed || typeof parsed !== "object") return null;
+    if(String(parsed.role||"").toLowerCase() !== "super_admin") return null;
+    if(["disabled","suspended","inactive"].includes(String(parsed.status||"active").toLowerCase())) return null;
+    return parsed;
+  }catch{ return null; }
+}
+
+function denyAccess(reason){
+  document.querySelector(".load-card")?.remove();
+  document.querySelector(".hero")?.remove();
+  const root=document.getElementById("sheetRoot");
+  root.className="card sheet show";
+  root.innerHTML=`<h2>Super admin sign-in required</h2><p class="muted" style="margin:10px 0 18px">${reason}</p><a class="btn" href="./super-admin-login.html">Go to Super Admin Login</a>`;
+  throw new Error("restaurant-onboarding: access denied");
+}
+
+const session = superAdminSession();
+if(!session) denyAccess("This setup sheet shows a business's owner contact details, UPI ID and GST number, so it is limited to Scan2Plate super admins.");
+
+// A localStorage entry is trivially forged, so the Firebase session has
+// to agree before anything is read.
+await auth.authStateReady();
+if(!auth.currentUser) denyAccess("Your session has expired. Please sign in again.");
+if(session.uid && auth.currentUser.uid !== session.uid) denyAccess("This session does not match the signed-in account. Please sign in again.");
 const $=id=>document.getElementById(id),idEl=$("restaurantId"),load=$("loadBtn"),msg=$("msg"),root=$("sheetRoot");const params=new URLSearchParams(location.search);idEl.value=(params.get("restaurantId")||params.get("r")||"").trim();
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");const date=v=>{if(!v)return"—";const d=v.toDate?v.toDate():typeof v.seconds==="number"?new Date(v.seconds*1000):new Date(v);return Number.isNaN(d)?String(v):d.toLocaleDateString("en-IN")};const url=(page,id,extra="")=>`${location.origin}${location.pathname.replace(/restaurant-onboarding\.html$/i,page)}?restaurantId=${encodeURIComponent(id)}${extra}`;const note=(text,type)=>{msg.textContent=text;msg.className=`notice show ${type}`};
 function check(label,done){return`<div class="check ${done?"done":"todo"}">${done?"✓":"!"} ${label}</div>`}function qrSection(qrs,id){if(!qrs.length)return`<article class="block full"><div class="head"><h3>Generated Table QR Codes</h3><a class="btn no-print" href="${url("qr-generator.html",id,"&start=1&end=10")}">Generate QR Codes</a></div><p class="muted">No QR codes generated yet.</p></article>`;const cards=qrs.map(q=>{const table=String(q.tableNo||q.id).padStart(2,"0"),link=q.customerMenuUrl||q.qrUrl||url("index.html",id,`&table=${table}`),img=`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(link)}`;return`<div class="qr"><div class="brand"><img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo">Scan2Plate</div><div class="muted">${esc(id)}</div><b>Table ${esc(table)}</b><img src="${img}" alt="Table ${esc(table)} QR"><div>Scan to Order</div><small>${esc(link)}</small></div>`}).join("");return`<article id="generatedQrSection" class="block full"><div class="head"><h3>Generated Table QR Codes</h3><button id="printQrBtn" class="btn ghost no-print">Print QR Codes</button></div><div class="qr-grid">${cards}</div></article>`}
