@@ -358,17 +358,27 @@ export function isRevenueOrder(order = {}) {
  * Rebuilds the app's numbering so a reinstalled device carries on instead of
  * restarting at 1 and colliding with bills that already exist.
  *
- * All three counters are scoped to one business date, the date passed in,
- * because the app's order numbering resets daily. If takeaway and delivery
- * numbering is meant to run continuously rather than per day, this is the
- * one place that changes.
+ * The scoping is NOT the same for all three, because the app does not treat
+ * them the same:
+ *
+ *   order_number  resets every business day (SettingsService.nextOrderNumber
+ *                 compares the stored date and restarts at 1), so it is the
+ *                 highest number used on THAT date.
+ *
+ *   takeaway /    never reset. SettingsService._nextCounter just increments a
+ *   delivery      stored integer forever, deliberately, "so numbers keep
+ *                 incrementing rather than reusing #1 every time". Scoping
+ *                 these to one day would hand a reinstalled device a number
+ *                 it had already printed.
  */
 export function computeCounters(orders = [], forDate) {
   const date = businessDate(forDate, "business_date");
   const sameDay = orders.filter(order => order.business_date === date);
 
-  const maxNumberIn = (list, pattern) => list.reduce((highest, order) => {
-    const match = pattern.exec(String(order.table_name || ""));
+  // "Takeaway #37", "Takeaway 37" and "Delivery-37" all yield 37.
+  const trailingNumber = /(\d+)\s*$/;
+  const highestNumberIn = list => list.reduce((highest, order) => {
+    const match = trailingNumber.exec(String(order.table_name || ""));
     const value = match ? Number(match[1]) : 0;
     return Number.isFinite(value) && value > highest ? value : highest;
   }, 0);
@@ -376,8 +386,8 @@ export function computeCounters(orders = [], forDate) {
   return {
     order_number_date: date,
     order_number_counter: sameDay.reduce((highest, order) => Math.max(highest, integer(order.order_number, 0)), 0),
-    takeaway_counter: maxNumberIn(sameDay.filter(o => o.table_type === "takeaway"), /(\d+)\s*$/),
-    delivery_counter: maxNumberIn(sameDay.filter(o => o.table_type === "delivery"), /(\d+)\s*$/)
+    takeaway_counter: highestNumberIn(orders.filter(o => o.table_type === "takeaway")),
+    delivery_counter: highestNumberIn(orders.filter(o => o.table_type === "delivery"))
   };
 }
 

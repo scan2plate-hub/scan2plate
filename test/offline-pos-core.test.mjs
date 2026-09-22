@@ -291,10 +291,30 @@ test("yesterday's higher number does not leak into today's counter", () => {
     "yesterday's 99 must not become today's starting point");
 });
 
-test("a day with no orders starts at zero, not at one", () => {
+test("takeaway and delivery counters do NOT reset daily", () => {
+  // SettingsService._nextCounter never resets these — it increments a stored
+  // integer forever. A day-scoped counter would hand a reinstalled device a
+  // takeaway number it had already printed.
+  const history = [
+    { business_date: "2026-09-21", order_number: 5, table_type: "takeaway", table_name: "Takeaway 80" },
+    { business_date: "2026-09-22", order_number: 2, table_type: "takeaway", table_name: "Takeaway 81" },
+    { business_date: "2026-09-21", order_number: 5, table_type: "delivery", table_name: "Delivery 40" }
+  ];
+  const counters = computeCounters(history, "2026-09-22");
+  assert.equal(counters.takeaway_counter, 81, "the highest takeaway number ever used");
+  assert.equal(counters.delivery_counter, 40, "even though it was yesterday");
+  assert.equal(counters.order_number_counter, 2, "but order_number is still today's only");
+});
+
+test("a quiet day still returns the running takeaway number", () => {
+  const history = [{ business_date: "2026-09-01", order_number: 1, table_type: "takeaway", table_name: "Takeaway 37" }];
+  assert.equal(computeCounters(history, "2026-09-22").takeaway_counter, 37,
+    "no takeaways today must not restart numbering at 1");
+});
+
+test("a day with no orders starts its order numbering at zero, not at one", () => {
   const counters = computeCounters(counterOrders, "2026-09-23");
   assert.equal(counters.order_number_counter, 0);
-  assert.equal(counters.takeaway_counter, 0);
 });
 
 test("a Takeaway # style name is parsed for its number", () => {
