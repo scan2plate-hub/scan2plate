@@ -21,6 +21,7 @@ import {
   registerCleanup,
   guardedAction
 } from "./common.js?v=freeze-fix-20260816";
+import { orderTypeOf, orderTypeLabel, needsTable, formatDeliveryAddress } from "./order-types.js?v=s2p-20260922a";
 
 installAppSafety({ pageName: "Kitchen Dashboard", stuckTimeoutMs: 15000 });
 
@@ -241,7 +242,9 @@ function printKOT(orderData, items, label = "") {
   <table class="meta">
     <tr><td>Order No</td><td><strong>${escapeHtml(orderData.displayOrderNo || orderData.dailyOrderNo || "-")}</strong></td></tr>
     <tr><td>KOT ID</td><td><strong>${escapeHtml(orderData.orderId || "")}</strong></td></tr>
-    <tr><td>${orderData.businessMode === "vendor" || orderData.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(orderData.businessMode === "vendor" || orderData.orderMode === "token" ? (orderData.tokenNo || `T-${orderData.tokenNumber || "-"}`) : orderData.tableNo || "-")}</strong></td></tr>
+    <tr><td>Type</td><td><strong>${escapeHtml(orderTypeLabel(orderTypeOf(orderData)))}</strong></td></tr>
+    ${needsTable(orderTypeOf(orderData)) ? `<tr><td>${orderData.businessMode === "vendor" || orderData.orderMode === "token" ? "Token" : "Table"}</td><td><strong>${escapeHtml(orderData.businessMode === "vendor" || orderData.orderMode === "token" ? (orderData.tokenNo || `T-${orderData.tokenNumber || "-"}`) : orderData.tableNo || "-")}</strong></td></tr>` : ""}
+    ${orderTypeOf(orderData) === "delivery" && formatDeliveryAddress(orderData) ? `<tr><td>Deliver To</td><td>${escapeHtml(formatDeliveryAddress(orderData))}</td></tr>` : ""}
     <tr><td>Customer</td><td>${escapeHtml(orderData.customerName || "Walk-in")}</td></tr>
     <tr><td>Time</td><td>${now.toLocaleTimeString()}</td></tr>
     <tr><td>Date</td><td>${now.toLocaleDateString()}</td></tr>

@@ -827,6 +827,14 @@
               <button class="btn btn-sm btn-outline" id="clearCartBtn"><i class="fas fa-trash"></i> Clear</button>
             </div>
             <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">Order Type</label>
+                <div class="tab-pills" id="manualOrderTypeTabs" role="group" aria-label="Order type">
+                  <button class="tab-pill active" type="button" data-order-type="dine_in"><i class="fas fa-utensils"></i> Dine-in</button>
+                  <button class="tab-pill" type="button" data-order-type="takeaway"><i class="fas fa-bag-shopping"></i> Takeaway</button>
+                  <button class="tab-pill" type="button" data-order-type="delivery"><i class="fas fa-motorcycle"></i> Delivery</button>
+                </div>
+              </div>
               <div class="form-row">
                 <div class="form-group">
                   <label class="form-label">Customer Name</label>
@@ -838,7 +846,7 @@
                 </div>
               </div>
               <div class="form-row">
-                <div class="form-group">
+                <div class="form-group" id="manualTableGroup">
                   <label class="form-label">Table No</label>
                   <div style="display:flex;align-items:center;border:1.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface);">
                     <button type="button" id="tableDecBtn" style="width:40px;height:40px;border:none;background:var(--surface-2);font-size:18px;font-weight:800;cursor:pointer;color:var(--text-2);flex-shrink:0;border-right:1px solid var(--border);">−</button>
@@ -863,6 +871,44 @@
                   <option value="paid">✅ Paid</option>
                 </select>
               </div>
+              <div id="manualDeliveryDetails" class="hidden" style="margin-bottom:13px;padding:13px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
+                <div style="font-size:13px;font-weight:800;margin-bottom:10px;color:var(--text-2);" id="manualDeliveryDetailsTitle"><i class="fas fa-location-dot"></i> Delivery Details</div>
+                <div class="form-group">
+                  <label class="form-label">Delivery Address</label>
+                  <textarea class="form-input" id="manualDeliveryAddress" rows="2" placeholder="House / flat, street, area"></textarea>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">Landmark</label>
+                    <input class="form-input" id="manualDeliveryLandmark" placeholder="Near ..." />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Pincode</label>
+                    <input class="form-input" id="manualDeliveryPincode" inputmode="numeric" maxlength="6" placeholder="846004" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">Delivery Fee</label>
+                    <input class="form-input" id="manualDeliveryFee" type="number" min="0" step="1" placeholder="0" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Rider / Partner</label>
+                    <input class="form-input" id="manualDeliveryRider" placeholder="Name or platform" />
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label">Delivery Note</label>
+                  <input class="form-input" id="manualDeliveryNote" placeholder="Gate code, call on arrival, ..." />
+                </div>
+              </div>
+              <div id="manualTakeawayDetails" class="hidden" style="margin-bottom:13px;padding:13px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);">
+                <div style="font-size:13px;font-weight:800;margin-bottom:10px;color:var(--text-2);"><i class="fas fa-bag-shopping"></i> Pickup Details</div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label">Pickup Time</label>
+                  <input class="form-input" id="manualPickupTime" type="time" />
+                </div>
+              </div>
               <div id="manualCartList">
                 <div class="empty-state" style="padding:18px 10px;">
                   <i class="fas fa-shopping-cart"></i>
@@ -873,6 +919,7 @@
               <div class="bill-summary">
                 <div class="bill-row"><span>Subtotal</span><span id="manualItemsTotal">₹0</span></div>
                 <div class="bill-row"><span>Tax</span><span id="manualTaxTotal">₹0</span></div>
+                <div class="bill-row hidden" id="manualDeliveryFeeRow"><span>Delivery Fee</span><span id="manualDeliveryFeeText">₹0</span></div>
                 <div class="bill-row total"><span>Grand Total</span><span id="manualGrandTotalText">₹0</span></div>
               </div>
               <div class="btn-group" style="margin-top:13px;">
@@ -1336,7 +1383,9 @@
           </div>
           <div class="kot-details">
             <div><span>KOT #:</span><span id="kotNumber">001</span></div>
+            <div><span>Type:</span><span id="kotOrderType">Dine-in</span></div>
             <div><span>Table:</span><span id="kotTable">01</span></div>
+            <div id="kotDeliveryRow" style="display:none;"><span>Deliver To:</span><span id="kotDeliveryAddress"></span></div>
             <div><span>Date:</span><span id="kotDate">--</span></div>
             <div><span>Time:</span><span id="kotTime">--</span></div>
             <div><span>Server:</span><span id="kotServer">Admin</span></div>
@@ -1372,10 +1421,12 @@
           </div>
           <div class="kot-details">
             <div><span>Bill No:</span><span id="billNumber">001</span></div>
-            <div><span>Table:</span><span id="billTable">01</span></div>
+            <div><span>Type:</span><span id="billOrderType">Dine-in</span></div>
+            <div id="billTableRow"><span>Table:</span><span id="billTable">01</span></div>
             <div><span>Date:</span><span id="billDate">--</span></div>
             <div><span>Customer:</span><span id="billCustomer">Walk-in</span></div>
             <div><span>Contact:</span><span id="billContact">-</span></div>
+            <div id="billDeliveryRow" style="display:none;"><span>Address:</span><span id="billDeliveryAddress"></span></div>
           </div>
           <div class="kot-items" id="billItems"></div>
           <div style="border-top:1px dashed #ccc;padding-top:8px;">
