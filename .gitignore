@@ -7,3 +7,15 @@ desktop/dist/
 mobile/node_modules/
 public/.DS_Store
 public/js/.DS_Store
+
+# Dependencies. 165 files under node_modules/ are already tracked from an
+# earlier accidental commit and stay tracked — git ignores this pattern only
+# for files it does not already know about. This stops NEW dependencies (the
+# rules test tooling is ~500MB) being added to the repository.
+node_modules/
+
+# Firebase emulator artefacts, written by `npm run test:rules`.
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+database-debug.log
