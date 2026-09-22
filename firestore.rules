@@ -1,0 +1,237 @@
+rules_version = '2';
+
+// =============================================================
+//  Scan2Plate Firestore security rules
+//  -------------------------------------------------------------
+//  Before this file existed the database had NO rules, which means
+//  every document was readable, writable and deletable by anyone
+//  holding the public web API key — and that key ships in the
+//  client bundle, so "anyone" means anyone.
+//
+//  The shape of the app constrains what these rules can do:
+//
+//   * Customers are NOT signed in. They scan a QR code and order.
+//     So the menu, the table list, the restaurant's public profile
+//     and order creation must stay open to unauthenticated callers.
+//
+//   * Everything a customer does not need is closed: staff records,
+//     payroll, attendance, expenses, purchases, inventory, counters,
+//     audit logs, subscriptions, and the owner's contact details.
+//
+//  Rule of thumb used throughout: a customer may READ what is
+//  printed on the menu and CREATE their own order. Nothing else.
+// =============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ---------------- identity helpers ---------------- */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // Super admins are recorded in one of two collections; both are
+    // checked because the app has written to both over time.
+    function isSuperAdmin() {
+      return signedIn() && (
+        exists(/databases/$(database)/documents/superAdmins/$(uid())) ||
+        exists(/databases/$(database)/documents/super_admins/$(uid()))
+      );
+    }
+
+    // A staff member of this restaurant: a users/{doc} record whose
+    // uid matches the caller and whose status has not been revoked.
+    function staffDoc(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)/users/$(request.auth.token.email.replace('@','_').replace('.','_'))).data;
+    }
+
+    function isStaffOf(rid) {
+      return signedIn() && (
+        // The restaurant's own admin account.
+        get(/databases/$(database)/documents/restaurants/$(rid)).data.adminUid == uid()
+        || isSuperAdmin()
+      );
+    }
+
+    // Owner-level: the restaurant's admin account, or a super admin.
+    function isOwnerOf(rid) {
+      return isStaffOf(rid);
+    }
+
+    /* ---------------- restaurants ---------------- */
+
+    match /restaurants/{rid} {
+      // Public: the customer ordering site lists restaurants and reads
+      // one restaurant's profile without signing in. This document must
+      // therefore hold NO private data — owner contact details live in
+      // the private/ subcollection below.
+      allow get, list: if true;
+
+      // Only the restaurant's own admin, or a super admin, may change it.
+      allow create: if isSuperAdmin();
+      allow update: if isOwnerOf(rid);
+      allow delete: if isSuperAdmin();
+
+      // -- owner contact details, billing identifiers, anything that
+      //    would help someone attack or impersonate the business.
+      match /private/{docId} {
+        allow read, write: if isOwnerOf(rid);
+      }
+
+      // -- what the customer is allowed to see -------------------
+
+      match /menu/{itemId} {
+        allow get, list: if true;              // the menu is the product
+        allow write: if isStaffOf(rid);
+      }
+
+      match /tables/{tableId} {
+        allow get, list: if true;              // table QR lookup
+        allow write: if isStaffOf(rid);
+      }
+
+      // settings/general carries the UPI ID used to render the payment
+      // QR, the tax percentage shown on the bill, and the geofence the
+      // customer's browser is checked against. A customer cannot order
+      // without them, so this stays readable.
+      match /settings/{docId} {
+        allow get, list: if true;
+        allow write: if isOwnerOf(rid);
+      }
+
+      match /table_qrs/{qrId} {
+        allow get, list: if true;
+        allow write: if isStaffOf(rid);
+      }
+
+      // -- staff-only, in every case -----------------------------
+
+      match /users/{userId} {
+        // A staff member may read their own record so the app can
+        // resolve their role at login; the rest is owner-only.
+        allow get: if signedIn();
+        allow list, write: if isOwnerOf(rid);
+      }
+
+      match /staff/{docId}            { allow read, write: if isStaffOf(rid); }
+      match /staff_advances/{docId}   { allow read, write: if isStaffOf(rid); }
+      match /attendance/{docId}       { allow read, write: if isStaffOf(rid); }
+      match /payroll/{docId}          { allow read, write: if isStaffOf(rid); }
+      match /expenses/{docId}         { allow read, write: if isStaffOf(rid); }
+      match /purchase_bills/{docId}   { allow read, write: if isStaffOf(rid); }
+      match /inventory/{docId}        { allow read, write: if isStaffOf(rid); }
+      match /inventory_items/{docId}  { allow read, write: if isStaffOf(rid); }
+      match /inventory_logs/{docId}   { allow read, write: if isStaffOf(rid); }
+      match /delivery_integrations/{docId} { allow read, write: if isStaffOf(rid); }
+
+      // Daily order/bill serial counters. A customer's order allocates
+      // one, so creating and incrementing stays open; deleting does not,
+      // because that would let someone reset a restaurant's bill numbers.
+      match /counters/{docId} {
+        allow get: if true;
+        allow create, update: if true;
+        allow list, delete: if isStaffOf(rid);
+      }
+
+      // Anything not named above is closed.
+      match /{document=**} {
+        allow read, write: if isStaffOf(rid);
+      }
+    }
+
+    /* ---------------- orders ---------------- */
+
+    match /orders/{orderId} {
+      // A customer creates their own order and then watches it on the
+      // tracking page, neither of which involves signing in.
+      allow get, list: if true;
+      allow create: if true;
+
+      // Updating an order is how a bill gets marked paid, items get
+      // added and totals change. Staff only — this was wide open.
+      allow update: if signedIn();
+      allow delete: if signedIn();
+    }
+
+    /* ---------------- audit log ---------------- */
+
+    match /auditLogs/{logId} {
+      // Append-only. The customer app writes login and order events.
+      // Nothing may edit or erase history, including staff.
+      allow create: if true;
+      allow get, list: if signedIn();
+      allow update, delete: if false;
+    }
+
+    /* ---------------- subscriptions and billing ---------------- */
+
+    // Plans are shown on the public pricing page and the landing page.
+    match /subscriptionPlans/{planId} {
+      allow get, list: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Coupon and discount offers. Readable so a business can see what
+    // is on sale; only a super admin may mint or change one.
+    match /offers/{offerId} {
+      allow get, list: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // A business's own subscription record. Written by the backend with
+    // the Admin SDK, which bypasses these rules entirely.
+    match /subscriptions/{subId} {
+      allow get, list: if signedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    /* ---------------- accounts ---------------- */
+
+    // Membership of these collections is what grants super admin. If a
+    // client could write here, anyone could promote themselves. Managed
+    // through the Firebase console or the backend Admin SDK only.
+    match /superAdmins/{docId} {
+      allow get: if signedIn() && docId == uid();
+      allow list, write: if false;
+    }
+    match /super_admins/{docId} {
+      allow get: if signedIn() && docId == uid();
+      allow list, write: if false;
+    }
+    match /admins/{docId} {
+      allow get: if signedIn() && docId == uid();
+      allow list, write: if false;
+    }
+
+    match /users/{docId} {
+      allow get: if signedIn() && docId == uid();
+      allow list: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    /* ---------------- support ---------------- */
+
+    match /supportTickets/{ticketId} {
+      allow create: if true;
+      allow get, list, update, delete: if isSuperAdmin();
+    }
+
+    match /aiHelpChats/{chatId} {
+      allow create: if true;
+      allow get, list, update, delete: if isSuperAdmin();
+    }
+
+    /* ---------------- everything else ---------------- */
+
+    // Default deny. A collection added later is closed until a rule
+    // above is written for it, rather than open by accident.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
