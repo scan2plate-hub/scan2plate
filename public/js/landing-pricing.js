@@ -16,10 +16,10 @@
    showing an empty pricing section to someone deciding whether
    to buy.
 ========================================================= */
-import { db } from "./firebase.js?v=s2p-20260918c";
+import { db } from "./firebase.js?v=s2p-20260922d";
 import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { listBusinessTypes, normalizeBusinessType, businessTypeLabel } from "./business-types.js?v=s2p-20260918c";
-import { plansForBusinessType, quotePlan, formatMoney } from "./subscription-core.js?v=s2p-20260918c";
+import { listBusinessTypes, normalizeBusinessType, businessTypeLabel } from "./business-types.js?v=s2p-20260922d";
+import { plansForBusinessType, quotePlan, formatMoney } from "./subscription-core.js?v=s2p-20260922d";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")

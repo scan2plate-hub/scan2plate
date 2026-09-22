@@ -211,3 +211,45 @@ export function businessTypeOf(record = {}) {
     record.businessType || record.restaurantType || record.type || record.panelType || ""
   );
 }
+
+/**
+ * True when this record actually stores a business type, as opposed to
+ * merely defaulting to one. businessTypeOf() cannot answer this: it returns
+ * "restaurant" both for a record that says Restaurant and for a record that
+ * says nothing, and telling those apart is the whole point here.
+ */
+export function hasBusinessType(record = {}) {
+  return Boolean(String(
+    record?.businessType || record?.restaurantType || record?.type || record?.panelType || ""
+  ).trim());
+}
+
+/**
+ * The business type of a business, from the documents that claim to hold it,
+ * MOST AUTHORITATIVE FIRST.
+ *
+ * WHY THIS EXISTS. A business's type was being stored in three places — the
+ * `restaurants/{id}` document, its `settings/general` sub-document, and the
+ * top-level `restaurantSettings/{id}` document — and the screens disagreed
+ * about which one won. Super Admin read the root document; the owner's
+ * dashboard spread `settings/general` over the root, so the sub-document won.
+ * Super Admin's "Save business type" writes the root document only, so
+ * correcting a type there left the owner's dashboard on the old one: Super
+ * Admin showed Restaurant while the owner was offered Street Vendor plans,
+ * for the same business, on the same day.
+ *
+ * The root document is authoritative, and not arbitrarily: it is what Super
+ * Admin edits, what login.js gates the panel choice on, and — decisively —
+ * what the server reads when it decides whether a plan may be bought
+ * (see businessTypeOfDoc in backend/server.js). A client that offered plans
+ * for any other document's type would have its checkout rejected.
+ *
+ * Later arguments are consulted only when the earlier ones store nothing at
+ * all, which keeps businesses that predate the root field working.
+ */
+export function resolveBusinessType(...records) {
+  for (const record of records) {
+    if (record && hasBusinessType(record)) return businessTypeOf(record);
+  }
+  return DEFAULT_BUSINESS_TYPE;
+}

@@ -20,9 +20,10 @@ import { mountSafeReset } from "./safe-reset.js";
 import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
 import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList } from "./common.js?v=freeze-fix-20260816";
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
-import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260918c";
-import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260918c";
-import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-20260922a";
+import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260922d";
+import { resolveBusinessType } from "./business-types.js?v=s2p-20260922d";
+import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260922d";
+import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-20260922d";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -2780,8 +2781,19 @@ async function loadSettings() {
     if (restaurantLogoUploadEl) restaurantLogoUploadEl.value = "";
     const snap = await getDoc(doc(db, "restaurants", restaurantId, "settings", "general"));
     const restaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
+    const restaurantRoot = restaurantSnap.exists() ? restaurantSnap.data() : {};
+    const generalSettings = snap.exists() ? snap.data() : {};
     // Root fallback keeps legacy restaurants in Restaurant Mode and supports mode set by Super Admin.
-    restaurantSettings = { ...(restaurantSnap.exists() ? restaurantSnap.data() : {}), ...(snap.exists() ? snap.data() : {}) };
+    restaurantSettings = { ...restaurantRoot, ...generalSettings };
+    // ...but NOT for businessType. The spread above lets settings/general win,
+    // and Super Admin's "Save business type" writes the root document only, so
+    // a type corrected in the console never reached this screen: Super Admin
+    // showed Restaurant while the owner's dashboard hid tables and KOT and
+    // offered Street Vendor plans, for the same business. The root document is
+    // authoritative here because it is the one Super Admin edits, the one
+    // login.js gates the panel choice on, and the one the server reads when it
+    // decides whether a plan may be bought.
+    restaurantSettings.businessType = resolveBusinessType(restaurantRoot, generalSettings, currentUser);
     devLog("Restaurant settings logo fields", logoDebugFields(restaurantSettings));
 
     if (restaurantFieldEl) restaurantFieldEl.value = restaurantSettings.restaurantName || "";
@@ -7336,7 +7348,7 @@ try {
     // Subscription panel, the plans for THIS business type, and the offer
     // popup. Imported lazily and not awaited, so a slow plan read can never
     // delay the dashboard itself.
-    import("./business-subscription.js?v=s2p-20260918c").then(module => module.mountBusinessSubscription({
+    import("./business-subscription.js?v=s2p-20260922d").then(module => module.mountBusinessSubscription({
       businessId: restaurantId,
       businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
       businessName: restaurantSettings.restaurantName || "",

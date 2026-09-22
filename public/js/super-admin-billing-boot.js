@@ -8,7 +8,7 @@
    call would never see it and the nav items would simply never appear with no
    clue why. A dynamic import inside the try catches that too, and says so. */
 function boot() {
-  import("./super-admin-billing.js?v=s2p-20260918c")
+  import("./super-admin-billing.js?v=s2p-20260922d")
     .then(module => module.mountSuperAdminBilling())
     .catch(error => {
       // A failure here must never take down the rest of the console, but it

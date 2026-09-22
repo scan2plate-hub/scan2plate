@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase.js";
-import { splitRestaurantPayload, mergeRestaurantProfile } from "./restaurant-private.js?v=s2p-20260922b";
+import { splitRestaurantPayload, mergeRestaurantProfile } from "./restaurant-private.js?v=s2p-20260922d";
 import { collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { parseMenuPdf, parseMenuSpreadsheet, importMenuItems, normalizeKey } from "./menu-import-service.js";
