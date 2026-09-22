@@ -15,7 +15,7 @@ In the restaurant dashboard, sidebar → **Connect Offline POS**.
 
 | Value | Where it comes from |
 |---|---|
-| **Server URL** | Shown on that screen. It is the restaurant's configured backend URL — the same one in Settings → Backend URL. Production is `https://api.scan2plate.com`. |
+| **Server URL** | Shown on that screen. It is the restaurant's configured backend URL — the same one in Settings → Backend URL. This is whatever the restaurant's backend is deployed at — currently `https://scan2plate.onrender.com`. The screen reads it from the saved Backend URL, so it is always the right one; do not type a hostname from this document. |
 | **Restaurant Code** | Shown on that screen. It **is** the existing Scan2Plate restaurant id, e.g. `RST006` — not a new number to keep track of. |
 | **API Key** | Press **Generate Key**. Name the device when prompted. |
 
@@ -30,13 +30,13 @@ immediately and leaves the others alone.
 ### Server URL format
 
 ```
-https://api.scan2plate.com/api/v1/restaurants/{restaurant_code}
+https://scan2plate.onrender.com/api/v1/restaurants/{restaurant_code}
 ```
 
 Everything below hangs off that base. Example for `RST006`:
 
 ```
-https://api.scan2plate.com/api/v1/restaurants/RST006/ping
+https://scan2plate.onrender.com/api/v1/restaurants/RST006/ping
 ```
 
 ---
@@ -79,7 +79,7 @@ Errors are always `{ "ok": false, "error": "<code>", "message": "<human text>" }
 Set these first:
 
 ```bash
-BASE="https://api.scan2plate.com/api/v1/restaurants/RST006"
+BASE="https://scan2plate.onrender.com/api/v1/restaurants/RST006"
 KEY="s2p_pos_…"                                  # from Connect Offline POS
 DEV="11111111-2222-4333-8444-555555555555"       # stable per install
 AUTH=(-H "Authorization: Bearer $KEY" -H "X-Device-Id: $DEV" -H "X-App-Version: 1.4.2" -H "Content-Type: application/json")
@@ -258,6 +258,52 @@ keys.
 `firestore.rules` denies clients everything under `offlinePosKeys`, and the
 `restaurants/{id}` catch-all makes the rest owner-only. The API itself runs on
 the Admin SDK, which bypasses rules, so the checks above are the access control.
+
+## What the Flutter app still has to change
+
+As of `scan2plate-billing@51e3bf2`, `lib/services/sync_service.dart` is a
+placeholder written against an assumed contract — its own comment says so:
+
+> *"The endpoint paths below (`/api/v1/...`) are the expected contract —
+> adjust to match the live API if it differs."*
+
+It differs. Replaying the app's exact requests against this API:
+
+| The app sends | Result |
+|---|---|
+| `POST /api/v1/restaurants/{code}/orders` | **404** — there is no such route. The batch endpoint is `POST /orders/batch`. |
+| `GET /api/v1/restaurants/{code}/menu` | **200** — the legacy menu shape works and needs no change. |
+| No `X-Device-Id` header | **0 devices recorded** — which is why the dashboard reads *"No device has connected yet."* |
+
+Five changes are needed, in rough order of size:
+
+1. **UUIDs.** The local schema has integer ids only. Every order, order item,
+   menu item, category and table needs a client-generated UUID v4 column, set
+   on insert and never reused. This API keys on `uuid`; without it there is no
+   idempotency and a re-upload after a reinstall would duplicate everything.
+   This is a SQLite migration, and it is the largest piece of the work.
+
+2. **Device identity.** Generate a UUID once on first run, persist it, and
+   send it as `X-Device-Id` on every request, with `X-App-Version` alongside.
+
+3. **Batch upload.** `POST /orders/batch` with `{ "orders": [ … ] }`, up to 500
+   at a time, reading the per-record `results` to decide what to retry. The
+   current code posts one order per request to a path that does not exist, and
+   only marks an order synced on a 2xx, so nothing is ever marked.
+
+4. **Order payload.** Add `uuid`, `status` (`open`/`billed`/`cancelled`),
+   `business_date`, `table_name`, `table_type`, `order_number`, `kot_count`,
+   `subtotal`, `cgst`, `sgst`, `updated_at`; items need `uuid` and `kot_batch`.
+   Upload open and cancelled orders too, not only billed ones — a running table
+   has to survive a reinstall.
+
+5. **The rest of the backup.** Nothing currently uploads settings, the menu or
+   tables, and nothing calls `GET /restore`, so a reinstall recovers nothing.
+   Add `PUT /backup/settings`, `PUT /backup/menu`, `PUT /backup/tables` on
+   change, and a restore path on first run.
+
+Until at least 1–4 land, the dashboard will keep showing no device and no
+orders, however correct the key and URL are.
 
 ## Tests
 
