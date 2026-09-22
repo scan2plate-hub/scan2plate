@@ -22,6 +22,7 @@ import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrd
 import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
 import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260918c";
 import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260918c";
+import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-20260922a";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -448,6 +449,19 @@ const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const manualCustomerNameEl = document.getElementById("manualCustomerName");
 const manualCustomerPhoneEl = document.getElementById("manualCustomerPhone");
 const manualTableNoEl = document.getElementById("manualTableNo");
+const manualOrderTypeTabsEl = document.getElementById("manualOrderTypeTabs");
+const manualTableGroupEl = document.getElementById("manualTableGroup");
+const manualDeliveryDetailsEl = document.getElementById("manualDeliveryDetails");
+const manualTakeawayDetailsEl = document.getElementById("manualTakeawayDetails");
+const manualDeliveryAddressEl = document.getElementById("manualDeliveryAddress");
+const manualDeliveryLandmarkEl = document.getElementById("manualDeliveryLandmark");
+const manualDeliveryPincodeEl = document.getElementById("manualDeliveryPincode");
+const manualDeliveryFeeEl = document.getElementById("manualDeliveryFee");
+const manualDeliveryRiderEl = document.getElementById("manualDeliveryRider");
+const manualDeliveryNoteEl = document.getElementById("manualDeliveryNote");
+const manualPickupTimeEl = document.getElementById("manualPickupTime");
+const manualDeliveryFeeRowEl = document.getElementById("manualDeliveryFeeRow");
+const manualDeliveryFeeTextEl = document.getElementById("manualDeliveryFeeText");
 const manualPaymentMethodEl = document.getElementById("manualPaymentMethod");
 const manualPaymentStatusEl = document.getElementById("manualPaymentStatus");
 const createManualBillBtn = document.getElementById("createManualBillBtn");
@@ -526,6 +540,7 @@ let allMenuItems = [];
 let manualMenuItems = [];
 let allOrders = [];
 let manualCart = [];
+let manualOrderType = "dine_in";
 let allInventoryItems = [];
 let inventoryLogs = [];
 let purchaseBills = [];
@@ -765,7 +780,7 @@ function renderOnlineOrders() {
       ${order.deliveryAddress ? `<div style="margin:10px 0;font-size:13px;color:#555;"><strong>Address:</strong> ${escapeHtml(order.deliveryAddress)} ${order.landmark ? `· ${escapeHtml(order.landmark)}` : ""}</div>` : ""}
       ${order.expectedArrivalTime ? `<div style="margin:10px 0;font-size:13px;color:#555;"><strong>Expected:</strong> ${escapeHtml(order.expectedArrivalTime)}</div>` : ""}
       <div class="order-items">${(order.items || []).map(item => `<div class="order-item"><span><span class="qty">${Number(item.qty || item.quantity || 0)}</span>${escapeHtml(itemDisplayName(item))}</span><span>${money(Number(item.price || 0) * Number(item.qty || item.quantity || 0))}</span></div>`).join("")}</div>
-      <div class="order-total"><span>${getPaymentMethodPill(order)}</span><span>${money(effective.grandTotal + Number(order.deliveryFee || 0))}</span></div>
+      <div class="order-total"><span>${getPaymentMethodPill(order)}</span><span>${money(effective.grandTotal)}</span></div>
       <div style="font-size:13px;color:#555;margin-top:8px;">Paid: <strong>${money(order.amountPaid || order.paidAmount || 0)}</strong> · Remaining: <strong>${money(order.remainingAmount || 0)}</strong> · Payment: <strong>${escapeHtml(order.paymentStatus || "unpaid")}</strong></div>
       <div class="order-actions">
         <button class="btn btn-outline admin-order-action" data-id="${order.id}" data-action="accept">Accept</button>
@@ -1636,20 +1651,30 @@ function orderItemsArray(order = {}) {
 }
 
 function effectiveOrderTotals(order = {}) {
+  const rawFee = Number(order.deliveryFee);
+  const deliveryFee = Number.isFinite(rawFee) && rawFee > 0 ? rawFee : 0;
+
   if (!Array.isArray(order.items) && order.grandTotal != null) {
     // Legacy/malformed record with no usable items array: keep its own stored totals
     // instead of recomputing from an empty item list (which would report it as ₹0).
+    // A stored grandTotal already includes any delivery fee, so it is not re-added.
     return {
       itemsTotal: Number(order.itemsTotal ?? order.subtotal ?? order.grandTotal ?? 0),
       subtotal: Number(order.subtotal ?? order.itemsTotal ?? order.grandTotal ?? 0),
       discountAmount: Number(order.discountAmount || 0),
       taxableAmount: Number(order.taxableAmount ?? order.grandTotal ?? 0),
       tax: Number(order.tax || 0),
+      deliveryFee,
       grandTotal: Number(order.grandTotal || 0),
       taxPercent: Number(order.taxPercent ?? order.taxPercentSnapshot ?? 0)
     };
   }
-  return calculateOrderTotals(orderItemsArray(order), restaurantSettings, order);
+
+  // calculateOrderTotals only knows about items, discount and tax. The delivery
+  // fee is added here, once, so every screen that reads effective totals — order
+  // cards, bills, reports — shows the same amount the customer was charged.
+  const totals = calculateOrderTotals(orderItemsArray(order), restaurantSettings, order);
+  return { ...totals, deliveryFee, grandTotal: totals.grandTotal + deliveryFee };
 }
 
 function withEffectiveOrderTotals(order = {}) {
@@ -4435,20 +4460,67 @@ function bindTableGridActions() {
 /* =========================================================
    MANUAL BILLING
 ========================================================= */
+/* ---------------------------------------------------------
+   ORDER TYPE: dine-in / takeaway / delivery
+   Dine-in keeps the table picker. Takeaway drops it and asks
+   for a pickup time. Delivery drops it and asks where the food
+   is going. Nothing here changes what a dine-in bill does.
+--------------------------------------------------------- */
+function applyManualOrderTypeUi() {
+  const type = normalizeOrderType(manualOrderType);
+  manualOrderTypeTabsEl?.querySelectorAll("[data-order-type]").forEach(btn => {
+    btn.classList.toggle("active", normalizeOrderType(btn.dataset.orderType) === type);
+  });
+  manualTableGroupEl?.classList.toggle("hidden", !needsTable(type));
+  manualDeliveryDetailsEl?.classList.toggle("hidden", type !== "delivery");
+  manualTakeawayDetailsEl?.classList.toggle("hidden", type !== "takeaway");
+  if (manualCustomerPhoneEl) {
+    manualCustomerPhoneEl.required = type !== "dine_in";
+    manualCustomerPhoneEl.placeholder = type === "dine_in" ? "+91..." : "+91... (required)";
+  }
+}
+
+function setManualOrderType(nextType, { silent = false } = {}) {
+  const type = normalizeOrderType(nextType);
+  if (type === "delivery" && !silent && restaurantSettings.deliveryEnabled === false && restaurantSettings.enableDelivery === false) {
+    setNotice("Delivery is switched off in Settings. Turn on Delivery Settings to take delivery orders.", "info");
+  }
+  manualOrderType = type;
+  // A blank fee box on a delivery order picks up the restaurant's own
+  // default rather than silently billing nothing.
+  if (type === "delivery" && manualDeliveryFeeEl && manualDeliveryFeeEl.value.trim() === "") {
+    const itemsTotal = manualCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
+    const suggested = deliveryFeeFor("delivery", itemsTotal, restaurantSettings);
+    if (suggested > 0) manualDeliveryFeeEl.value = String(suggested);
+  }
+  applyManualOrderTypeUi();
+  renderManualTotals();
+}
+
+function manualDeliveryFeeValue() {
+  if (normalizeOrderType(manualOrderType) !== "delivery") return 0;
+  const typed = Number(manualDeliveryFeeEl?.value);
+  if (Number.isFinite(typed) && typed >= 0) return typed;
+  return 0;
+}
+
 function renderManualTotals() {
   const itemsTotal = manualCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
   const discountAmount = calculateDiscountAmount(itemsTotal, manualDiscount);
   const taxableAmount = Math.max(0, itemsTotal - discountAmount);
   const tax = taxableAmount * (getTaxPercent() / 100);
-  const grandTotal = taxableAmount + tax;
+  const deliveryFee = manualDeliveryFeeValue();
+  const grandTotal = taxableAmount + tax + deliveryFee;
 
   if (manualItemsTotalEl) manualItemsTotalEl.textContent = money(itemsTotal);
   if (manualTaxTotalEl) manualTaxTotalEl.textContent = money(tax);
+  if (manualDeliveryFeeRowEl) manualDeliveryFeeRowEl.classList.toggle("hidden", deliveryFee <= 0);
+  if (manualDeliveryFeeTextEl) manualDeliveryFeeTextEl.textContent = money(deliveryFee);
   if (manualGrandTotalTextEl) manualGrandTotalTextEl.textContent = money(grandTotal);
   const discountEl = document.getElementById("manualDiscountTotal");
   if (discountEl) discountEl.textContent = discountAmount ? `-${money(discountAmount)}` : money(0);
 
-  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, grandTotal };
+  return { itemsTotal, subtotal: itemsTotal, discountAmount, taxableAmount, tax, deliveryFee, grandTotal };
 }
 
 function calculateDiscountAmount(subtotal, discount = {}) {
@@ -4723,6 +4795,10 @@ function resetManualBillForm() {
   renderTableNumberOptions();
   if (manualPaymentMethodEl) manualPaymentMethodEl.value = "cash";
   if (manualPaymentStatusEl) manualPaymentStatusEl.value = "unpaid";
+  [manualDeliveryAddressEl, manualDeliveryLandmarkEl, manualDeliveryPincodeEl, manualDeliveryFeeEl, manualDeliveryRiderEl, manualDeliveryNoteEl, manualPickupTimeEl]
+    .forEach(el => { if (el) el.value = ""; });
+  manualOrderType = "dine_in";
+  applyManualOrderTypeUi();
 
   manualCart = [];
   editingOrderDocId = null;
@@ -4752,6 +4828,15 @@ async function loadOrderIntoManualBill(orderDocId) {
 
     if (manualCustomerNameEl) manualCustomerNameEl.value = order.customerName || "";
     if (manualCustomerPhoneEl) manualCustomerPhoneEl.value = order.customerPhone || "";
+    manualOrderType = orderTypeOf(order);
+    if (manualDeliveryAddressEl) manualDeliveryAddressEl.value = order.deliveryAddress || "";
+    if (manualDeliveryLandmarkEl) manualDeliveryLandmarkEl.value = order.landmark || "";
+    if (manualDeliveryPincodeEl) manualDeliveryPincodeEl.value = order.postalCode || "";
+    if (manualDeliveryFeeEl) manualDeliveryFeeEl.value = Number(order.deliveryFee || 0) ? String(Number(order.deliveryFee)) : "";
+    if (manualDeliveryRiderEl) manualDeliveryRiderEl.value = order.deliveryRider || "";
+    if (manualDeliveryNoteEl) manualDeliveryNoteEl.value = order.deliveryNote || "";
+    if (manualPickupTimeEl) manualPickupTimeEl.value = order.pickupTime || "";
+    applyManualOrderTypeUi();
     renderTableNumberOptions(order.tableNo || "01");
     if (manualPaymentMethodEl) manualPaymentMethodEl.value = order.paymentMethod || "cash";
     if (manualPaymentStatusEl) manualPaymentStatusEl.value = order.paymentStatus || "unpaid";
@@ -4817,6 +4902,19 @@ function openManualUpi() {
   }
 }
 
+function setPrintText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = String(value ?? "");
+}
+
+/** Fills a print row and hides the whole row when there is nothing to print. */
+function setPrintRow(rowId, valueId, value) {
+  const text = String(value ?? "").trim();
+  setPrintText(valueId, text);
+  const row = document.getElementById(rowId);
+  if (row) row.style.display = text ? "" : "none";
+}
+
 function fillKotPreviewFromCart(orderId = "") {
   const now = new Date();
   const restaurantName =
@@ -4824,15 +4922,26 @@ function fillKotPreviewFromCart(orderId = "") {
     restaurantSettings.restaurantName ||
     "Restaurant";
 
-  const tableNo = manualTableNoEl?.value.trim() || "01";
+  const orderType = normalizeOrderType(manualOrderType);
+  const tableNo = needsTable(orderType) ? (manualTableNoEl?.value.trim() || "01") : "-";
+  const deliveryAddress = orderType === "delivery"
+    ? formatDeliveryAddress({
+      deliveryAddress: manualDeliveryAddressEl?.value.trim() || "",
+      landmark: manualDeliveryLandmarkEl?.value.trim() || "",
+      postalCode: manualDeliveryPincodeEl?.value.trim() || ""
+    })
+    : "";
 
   if (kotRestaurantNameEl) kotRestaurantNameEl.textContent = restaurantName;
   if (kotNumberEl) kotNumberEl.textContent = orderId || "KOT" + Date.now();
+  setPrintText("kotOrderType", orderTypeLabel(orderType));
+  // The kitchen needs the address on the ticket that rides with the food.
+  setPrintRow("kotDeliveryRow", "kotDeliveryAddress", deliveryAddress);
   if (kotTableEl) kotTableEl.textContent = tableNo;
   if (kotDateEl) kotDateEl.textContent = now.toLocaleDateString();
   if (kotTimeEl) kotTimeEl.textContent = now.toLocaleTimeString();
   if (kotServerEl) kotServerEl.textContent = currentUser.name || "Admin";
-  if (kotNotesEl) kotNotesEl.textContent = "Source: Manual Order";
+  if (kotNotesEl) kotNotesEl.textContent = `Source: Manual Order • ${orderTypeLabel(orderType)}`;
 
   if (kotItemsEl) {
     kotItemsEl.innerHTML = manualCart.length
@@ -4878,6 +4987,11 @@ function fillBillPreview(order) {
     billFooterMessageEl.style.display = footer ? "block" : "none";
   }
   if (billNumberEl) billNumberEl.textContent = billSerialText(order);
+  const billOrderType = orderTypeOf(order);
+  setPrintText("billOrderType", orderTypeLabel(billOrderType));
+  const billTableRow = document.getElementById("billTableRow");
+  if (billTableRow) billTableRow.style.display = needsTable(billOrderType) ? "" : "none";
+  setPrintRow("billDeliveryRow", "billDeliveryAddress", billOrderType === "delivery" ? formatDeliveryAddress(order) : "");
   if (billTableEl) billTableEl.textContent = order.tableNo || "-";
   if (billDateEl) billDateEl.textContent = formatDateTime(order.createdAt);
   if (billCustomerEl) billCustomerEl.textContent = displayCustomerName(order);
@@ -4901,6 +5015,16 @@ function fillBillPreview(order) {
     document.getElementById("billDiscountReasonRow").style.display = order.discountReason ? "" : "none";
   }
   if (billTaxEl) billTaxEl.textContent = money(order.tax || 0);
+  // Without this line a delivery bill's rows would not add up to its total.
+  const billFee = Number(order.deliveryFee || 0);
+  let billDeliveryFeeEl = document.getElementById("billDeliveryFeeAmount");
+  if (!billDeliveryFeeEl && billTotalEl) {
+    billTotalEl.closest(".kot-item")?.insertAdjacentHTML("beforebegin", `<div class="kot-item" id="billDeliveryFeeRow"><span>Delivery Fee:</span><span id="billDeliveryFeeAmount">₹0</span></div>`);
+    billDeliveryFeeEl = document.getElementById("billDeliveryFeeAmount");
+  }
+  if (billDeliveryFeeEl) billDeliveryFeeEl.textContent = money(billFee);
+  const billDeliveryFeeRow = document.getElementById("billDeliveryFeeRow");
+  if (billDeliveryFeeRow) billDeliveryFeeRow.style.display = billFee > 0 ? "" : "none";
   if (billTotalEl) billTotalEl.textContent = money(order.grandTotal || 0);
 
   if (billPaymentMethodEl) {
@@ -5100,13 +5224,31 @@ async function createManualBill() {
   try {
     const customerName = manualCustomerNameEl?.value.trim() || "";
     const customerPhone = manualCustomerPhoneEl?.value.trim() || "";
-    const tableNo = String(manualTableNoEl?.value || "01").trim().padStart(2, "0");
+    const orderType = normalizeOrderType(manualOrderType);
+    const tableNo = needsTable(orderType) ? String(manualTableNoEl?.value || "01").trim().padStart(2, "0") : "";
     const paymentMethod = manualPaymentMethodEl?.value || "cash";
     const paymentStatus = manualPaymentStatusEl?.value || "unpaid";
 
     if (!manualCart.length) return alert("Select at least one menu item.");
 
-    const { itemsTotal, subtotal, discountAmount, taxableAmount, tax, grandTotal } = renderManualTotals();
+    const deliveryAddress = needsDeliveryAddress(orderType) ? (manualDeliveryAddressEl?.value.trim() || "") : "";
+    const detailError = validateOrderTypeDetails(orderType, { tableNo, customerPhone, deliveryAddress });
+    if (detailError) return alert(detailError);
+
+    const orderTypeFields = {
+      orderType,
+      orderMode: orderType === "delivery" ? "delivery" : orderType === "takeaway" ? "takeaway" : "table",
+      tableNo,
+      tableNumber: tableNo || null,
+      deliveryAddress,
+      landmark: orderType === "delivery" ? (manualDeliveryLandmarkEl?.value.trim() || "") : "",
+      postalCode: orderType === "delivery" ? (manualDeliveryPincodeEl?.value.trim() || "") : "",
+      deliveryRider: orderType === "delivery" ? (manualDeliveryRiderEl?.value.trim() || "") : "",
+      deliveryNote: orderType === "delivery" ? (manualDeliveryNoteEl?.value.trim() || "") : "",
+      pickupTime: orderType === "takeaway" ? (manualPickupTimeEl?.value || "") : ""
+    };
+
+    const { itemsTotal, subtotal, discountAmount, taxableAmount, tax, deliveryFee, grandTotal } = renderManualTotals();
     const taxPercentSnapshot = taxPercentFromSettings(restaurantSettings);
     let cartItems = manualCartPayload();
     if (editingOrderDocId) {
@@ -5140,7 +5282,8 @@ async function createManualBill() {
       await updateDoc(orderRef, {
         customerName,
         customerPhone,
-        tableNo,
+        ...orderTypeFields,
+        deliveryFee,
         items: cartItems,
         itemsText: cartItems.map(i => `${itemDisplayName(i)} x${i.qty}`).join(", "),
         note: "Bill updated by admin",
@@ -5189,7 +5332,8 @@ async function createManualBill() {
         restaurantId,
         customerName,
         customerPhone,
-        tableNo,
+        ...orderTypeFields,
+        deliveryFee,
         createdBy: currentUser.email || currentUser.name || currentUser.uid || "",
         staffId: currentUser.uid || "",
         items: cartItems,
@@ -5760,6 +5904,54 @@ function bindOrderListActions(targetEl) {
   });
 }
 
+/**
+ * Short destination for the badge on an order card. Delivery and takeaway
+ * say so; dine-in keeps the Table/Token wording the counter already knows.
+ */
+function orderCardDestination(order = {}) {
+  const type = orderTypeOf(order);
+  if (type === "delivery") return "Delivery";
+  if (type === "takeaway") return "Takeaway";
+  return orderDestinationText(order);
+}
+
+/**
+ * The delivery / pickup strip under the customer row. Dine-in orders get
+ * nothing, so existing table orders look exactly as they did before.
+ */
+function orderFulfilmentBlock(order = {}) {
+  const type = orderTypeOf(order);
+  if (type === "dine_in") return "";
+
+  const phone = displayCustomerPhone(order) || "";
+  const fee = Number(order.deliveryFee || 0);
+  const rows = [];
+
+  if (type === "delivery") {
+    const address = formatDeliveryAddress(order);
+    if (address) rows.push(["Address", address]);
+    if (order.deliveryNote) rows.push(["Delivery note", order.deliveryNote]);
+    if (order.deliveryRider) rows.push(["Rider / partner", order.deliveryRider]);
+    if (fee > 0) rows.push(["Delivery fee", money(fee)]);
+  } else if (order.pickupTime) {
+    rows.push(["Pickup time", order.pickupTime]);
+  }
+  if (phone) rows.push(["Contact", phone]);
+
+  const callButton = phone
+    ? `<a class="btn btn-sm btn-outline" href="tel:${escapeHtml(phone.replace(/[^+\d]/g, ""))}" style="margin-top:8px;display:inline-flex;"><i class="fas fa-phone"></i> Call</a>`
+    : "";
+
+  return `
+    <div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:${type === "delivery" ? "#eef6ff" : "#f4f1ff"};border:1px solid ${type === "delivery" ? "#c9e0fb" : "#ded6fb"};">
+      <div style="font-weight:800;font-size:13px;margin-bottom:6px;color:${type === "delivery" ? "#1d4ed8" : "#5b21b6"};">
+        <i class="fas fa-${type === "delivery" ? "motorcycle" : "bag-shopping"}"></i> ${escapeHtml(orderTypeLabel(type))}
+      </div>
+      ${rows.map(([label, value]) => `<div style="font-size:13px;color:#444;margin-bottom:3px;"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</div>`).join("")}
+      ${callButton}
+    </div>`;
+}
+
 function renderOrdersList(targetEl, orders) {
   if (!targetEl) return;
   bindOrderListActions(targetEl);
@@ -5800,8 +5992,10 @@ function renderOrdersList(targetEl, orders) {
             <h4>${escapeHtml(displayCustomerName(o))}</h4>
             <span>${escapeHtml(displayCustomerPhone(o) || "-")}</span>
           </div>
-          <div class="table-badge">${o.businessMode === "vendor" || o.orderMode === "token" ? `Token ${escapeHtml(o.tokenNo || `T-${o.tokenNumber || "-"}`)}` : `Table ${escapeHtml(o.tableNo || "-")}`}</div>
+          <div class="table-badge">${escapeHtml(orderCardDestination(o))}</div>
         </div>
+
+        ${orderFulfilmentBlock(o)}
 
         <div class="order-items">
           ${(o.items || []).map(item => `
@@ -6555,6 +6749,14 @@ removeRestaurantLogoBtn?.addEventListener("click", markRestaurantLogoRemoved);
 createManualBillBtn?.addEventListener("click", () => guardedAction(createManualBillBtn, createManualBill, { loadingText: "Saving...", timeoutMs: 30000 }));
 manualUpiBtn?.addEventListener("click", openManualUpi);
 clearCartBtn?.addEventListener("click", resetManualBillForm);
+
+manualOrderTypeTabsEl?.addEventListener("click", event => {
+  const button = event.target.closest("[data-order-type]");
+  if (!button) return;
+  setManualOrderType(button.dataset.orderType);
+});
+manualDeliveryFeeEl?.addEventListener("input", renderManualTotals);
+applyManualOrderTypeUi();
 
 printKotFromBillingBtn?.addEventListener("click", () => {
   if (!manualCart.length) return alert("No items in current bill.");
