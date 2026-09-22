@@ -84,7 +84,11 @@ const panelRouteFor = business => {
     "juice shop": "./cafe-token-panel.html",
     "tea stall": "./cafe-token-panel.html"
   };
-  return routes[type] || "./admin-dashboard.html";
+  // The id MUST ride in the link. Without it the panel falls back to
+  // whatever business this browser last signed into, so every row in the
+  // table opened the same one — and a super admin's session clears the staff
+  // session, so that fallback is never the business that was clicked.
+  return `${routes[type] || "./admin-dashboard.html"}?restaurantId=${encodeURIComponent(business.id)}`;
 };
 const businessTypes = ["Restaurant","Cafe","Street Vendor","Hotel","Cloud Kitchen","Food Court","Bakery","Sweet Shop","Dhaba","Fast Food","Juice Shop","Tea Stall"];
 function renderSuperReset() {
@@ -351,7 +355,11 @@ async function loadData() { try { const [restaurantDocs,businessDocs,settingsDoc
 // Static markup still uses legacy IDs and class names. Change only visible text
 // nodes, never script/style content or Firebase field/collection names.
 function applyBusinessTerminology() {
-  const replacements = [[/Add Restaurant/g,"Add Business"],[/Create restaurant/g,"Create business"],[/Restaurant Details/g,"Business Details"],[/Restaurant details/g,"Business details"],[/Restaurant Name/g,"Business Name"],[/Restaurant Type/g,"Business Type"],[/Restaurant Onboarding Sheet/g,"Business Onboarding Sheet"],[/Table-wise QR Generator/g,"Business QR Generator"],[/Restaurants/g,"Businesses"],[/restaurants/g,"businesses"]];
+  // Phrases only, never a bare /Restaurant/. "Restaurant" is also a VALUE in
+  // this console — it is one of the business types, printed in its own column
+  // and selected in the type picker — so a blanket rule would relabel every
+  // restaurant as a "Business" and make the type meaningless.
+  const replacements = [[/Add Restaurant/g,"Add Business"],[/Create restaurant/g,"Create business"],[/Restaurant Details/g,"Business Details"],[/Restaurant details/g,"Business details"],[/Restaurant Name/g,"Business Name"],[/Restaurant ID/g,"Business ID"],[/Restaurant Type/g,"Business Type"],[/Restaurant Onboarding Sheet/g,"Business Onboarding Sheet"],[/Table-wise QR Generator/g,"Business QR Generator"],[/restaurant name/g,"business name"],[/Restaurants/g,"Businesses"],[/restaurants/g,"businesses"]];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
