@@ -18,8 +18,8 @@ info:
 
     **Money.** Rupees, as a number, to 2 decimals.
 servers:
-  - url: https://api.scan2plate.com
-    description: Production
+  - url: https://scan2plate.onrender.com
+    description: Production (the deployed backend; the dashboard shows the live value)
   - url: http://localhost:5000
     description: Local development
 security:
