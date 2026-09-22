@@ -42,11 +42,41 @@ callers. Everything a customer does not need is now closed.
 | Restaurant profile | anyone — the public ordering site lists restaurants | owner (update), super admin (create/delete) |
 | `restaurants/{id}/private/*` | owner + super admin | owner + super admin |
 | Staff, salaries, attendance, payroll, expenses, purchases, inventory | restaurant staff | restaurant staff |
+| Any other subcollection | **owner only** | **owner only** |
 | Orders | anyone (customers track their own order) | anyone may **create**; only signed-in staff may update or delete |
 | Audit log | signed-in | append-only — **nobody** may edit or delete, including super admins |
 | Subscription plans, offers | anyone (the pricing page) | super admin |
 | `superAdmins` / `admins` | your own document only | **nobody from a client** |
 | Anything else | nobody | nobody — default deny |
+
+### Two access levels, and why the distinction matters
+
+**Owner** is the restaurant's `adminUid`, or a super admin. Only the owner may
+change `settings/general` (the UPI ID lives there), manage staff accounts, and
+read `private/`.
+
+**Staff** is the owner plus any `restaurants/{id}/users/{doc}` record whose
+`uid` is the caller's and whose status has not been revoked — managers,
+cashiers, kitchen. They can work the menu, orders, inventory, expenses and
+attendance, but they are not owners.
+
+Two traps were caught by the test suite while writing this, both of which would
+have reached production:
+
+1. **An owner-only `isStaffOf()` locked out every manager and cashier.** The
+   first draft only checked `adminUid`. Non-owner staff have their own Firebase
+   accounts, so the dashboard would have broken for all of them.
+
+2. **A staff-level `match /{document=**}` catch-all leaked `private/`.** A
+   recursive wildcard also matches `private/profile`, and Firestore grants
+   access when **any** matching rule allows it — so the catch-all quietly
+   overrode the owner-only rule above it. The catch-all is now owner-only.
+
+A third trap is worth naming because it is silent: the staff document id is
+derived from the e-mail with `replace()`, which takes a **regex**. An
+unescaped `.` matches every character and mangles the address, so every staff
+lookup fails and everyone is locked out. The dot is escaped as `\\.`, and a
+mutation test confirms three tests fail without it.
 
 ### 2. The onboarding sheet is super-admin only
 
