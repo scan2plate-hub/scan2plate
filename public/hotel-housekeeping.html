@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en-IN"><head>
+<meta name="robots" content="noindex, nofollow" /><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Housekeeping · Scan2Plate Hotel</title>
+<link rel="preconnect" href="https://www.gstatic.com">
+<style>
+/* Housekeeping works from a phone, standing in a corridor, often with one
+   hand and sometimes with gloves on. Every control is a full-width target;
+   nothing depends on hover; the room number is the biggest thing on screen
+   because that is what is being looked for. Section 54. */
+:root{
+  --hp:#0f766e;--hd:#0f172a;--hm:#64748b;--hl:#e2e8f0;--hbg:#f1f5f9;
+  --s-dirty:#d97706;--s-cleaning:#0891b2;--s-cleaned:#0284c7;
+  --s-inspected:#059669;--s-ooo:#dc2626;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--hbg);color:var(--hd);font:15px/1.5 Inter,system-ui,Arial,sans-serif;-webkit-text-size-adjust:100%}
+.hk-top{position:sticky;top:0;z-index:5;background:var(--hd);color:#fff;padding:14px 16px}
+.hk-top h1{margin:0;font-size:18px}
+.hk-top p{margin:3px 0 0;color:#94a3b8;font-size:12px}
+.hk-counts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 16px}
+.hk-count{background:#fff;border-radius:11px;padding:10px 8px;text-align:center}
+.hk-count b{display:block;font-size:20px}
+.hk-count span{font-size:10px;color:var(--hm);font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.hk-list{padding:4px 16px 90px}
+.hk-card{background:#fff;border-radius:13px;padding:14px;margin-bottom:11px;border-left:7px solid var(--hl)}
+.hk-card[data-status="DIRTY"]{border-left-color:var(--s-dirty)}
+.hk-card[data-status="ASSIGNED"]{border-left-color:var(--s-dirty)}
+.hk-card[data-status="CLEANING"]{border-left-color:var(--s-cleaning)}
+.hk-card[data-status="CLEANED"]{border-left-color:var(--s-cleaned)}
+.hk-card[data-status="INSPECTED"]{border-left-color:var(--s-inspected)}
+.hk-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.hk-room{font-size:27px;font-weight:900;line-height:1.1}
+.hk-status{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--hm)}
+.hk-meta{color:var(--hm);font-size:12px;margin-top:5px}
+.hk-actions{display:grid;gap:8px;margin-top:12px}
+.hk-btn{border:0;border-radius:11px;background:var(--hp);color:#fff;padding:15px;font:inherit;font-weight:800;cursor:pointer;width:100%;min-height:50px}
+.hk-btn:active{transform:scale(.99)}
+.hk-btn.ghost{background:#fff;color:var(--hd);border:1.5px solid var(--hl)}
+.hk-btn.warn{background:#fff;color:var(--s-ooo);border:1.5px solid #fecaca}
+.hk-btn[disabled]{opacity:.45}
+.hk-empty{padding:50px 20px;text-align:center;color:var(--hm)}
+.hk-note{color:var(--hm);font-size:12px;margin-top:8px}
+.hk-blocked{background:#fef2f2;color:#991b1b;border-radius:9px;padding:9px 11px;font-size:12px;font-weight:700;margin-top:10px}
+.hk-bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--hl);display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 16px}
+dialog{border:0;border-radius:15px;padding:0;width:min(440px,94vw)}
+dialog::backdrop{background:rgba(15,23,42,.55)}
+.hk-dialog-body{padding:18px}
+.hk-field{margin-bottom:12px}
+.hk-field label{display:block;font-size:12px;font-weight:750;margin-bottom:5px;color:var(--hm)}
+.hk-field select,.hk-field textarea,.hk-field input{width:100%;padding:12px;border:1px solid var(--hl);border-radius:10px;font:inherit}
+.hk-dialog-foot{padding:0 18px 18px;display:grid;gap:8px}
+.hk-busy{opacity:.55;pointer-events:none}
+@media (min-width:760px){
+  .hk-list{max-width:760px;margin:0 auto}
+  .hk-counts{max-width:760px;margin:0 auto}
+  .hk-bar{position:static;max-width:760px;margin:0 auto 20px}
+}
+</style>
+</head>
+<body>
+<header class="hk-top">
+  <h1 id="hkTitle">Housekeeping</h1>
+  <p id="hkSubtitle">Loading…</p>
+</header>
+
+<div class="hk-counts" id="hkCounts"></div>
+<div class="hk-list" id="hkList"><div class="hk-empty">Loading rooms…</div></div>
+
+<div class="hk-bar">
+  <button class="hk-btn ghost" id="hkRefresh" type="button">Refresh</button>
+  <button class="hk-btn ghost" id="hkFrontDesk" type="button">Front Desk</button>
+</div>
+
+<dialog id="hkIssueDialog">
+  <form method="dialog">
+    <div class="hk-dialog-body">
+      <h3 style="margin:0 0 14px">Report a problem</h3>
+      <p class="hk-note" id="hkIssueRoom" style="margin-top:0"></p>
+      <div class="hk-field"><label for="hkIssueCategory">What is wrong?</label>
+        <select id="hkIssueCategory"></select></div>
+      <div class="hk-field"><label for="hkIssuePriority">How urgent?</label>
+        <select id="hkIssuePriority">
+          <option value="low">Low</option>
+          <option value="normal" selected>Normal</option>
+          <option value="high">High</option>
+          <option value="critical">Critical — room cannot be used</option>
+        </select></div>
+      <div class="hk-field"><label for="hkIssueNotes">Details</label>
+        <textarea id="hkIssueNotes" rows="3" placeholder="What did you find?"></textarea></div>
+      <p class="hk-note">Marking a problem critical takes the room out of service straight away, unless a guest is already in it.</p>
+    </div>
+    <div class="hk-dialog-foot">
+      <button class="hk-btn" id="hkIssueSend" type="button">Send to maintenance</button>
+      <button class="hk-btn ghost" value="cancel" type="submit">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="./js/hotel-housekeeping-board.js?v=s2p-20260922d"></script>
+</body></html>

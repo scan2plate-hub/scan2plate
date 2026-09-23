@@ -33,5 +33,11 @@ form?.addEventListener("submit",async event=>{ event.preventDefault(); const ema
   // webhook confirms the payment.
   if(expired(business)){ localStorage.setItem("scan2plate_user",JSON.stringify({uid:credential.user.uid,email,restaurantId:business.id,role:"expired"})); localStorage.setItem("scan2plate_last_restaurant_id",business.id); return window.location.assign("./renew.html"); }
   const role=String(profile.role||"staff").toLowerCase(), registeredType=canonical(business.businessType||"Restaurant"), registeredPanel=canonical(business.panelType||"RestaurantAdmin").replaceAll(" ",""); const kitchen=selected==="kitchen", staff=selected==="staff"; const staffRoles=["staff","employee","manager","cashier","kitchen","waiter"]; const matches=(kitchen&&role==="kitchen")||(staff&&staffRoles.includes(role))||(!kitchen&&!staff&&(selected===registeredType||panelByType[selected]===registeredPanel)); if(!matches){await signOut(auth);mismatchModal?.classList.add("open");return;}
-  const session=saveSession(credential,profile,business); if(staff) await auditLogin(session); if(staff)return window.location.assign("./admin-dashboard.html"); window.location.assign(routeByType[selected]||routeByType.restaurant);
+  const session=saveSession(credential,profile,business); if(staff) await auditLogin(session);
+  // A hotel's staff do not belong on the restaurant dashboard. The hotel panel
+  // forwards them by role — reception to the front desk, housekeeping to the
+  // board — which is the difference between a cleaner's shift starting on
+  // their room list and starting on a sales screen they cannot use.
+  if(staff) return window.location.assign(canonical(business.businessType||"")==="hotel" ? "./hotel-room-panel.html" : "./admin-dashboard.html");
+  window.location.assign(routeByType[selected]||routeByType.restaurant);
 } catch(error) { console.error("Login error",error); if(selected==="super admin") debugSuperAdminLogin({email,selectedBusinessType:typeEl?.value || "Super Admin",loginSuccess:false,roleFound:false,redirectUrl:""}); showMessage(selected==="super admin"?friendlyAuthError(error):(error?.message||"Login failed. Please try again.")); } finally { setLoading(false); } });

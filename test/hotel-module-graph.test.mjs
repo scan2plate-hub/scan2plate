@@ -86,10 +86,14 @@ test("EVERY name imported by a hotel module is actually exported", async () => {
     }
   }
   assert.deepEqual(broken, [], "an unresolvable import kills the whole page, silently");
-  // Stated, not hidden: these imports were not verified because the target
-  // module loads Firebase from a CDN that Node's loader cannot fetch.
-  assert.deepEqual(skipped, ["hotel-front-desk.js -> firebase.js"],
-    "if this list grows, coverage shrank and the message should say so");
+  // Page modules import firebase.js, which loads the SDK from a CDN that
+  // Node's loader cannot fetch — so their import of `db`/`auth` is the one
+  // thing here that cannot be verified. Listed exactly, so the list growing
+  // is a visible loss of coverage rather than a silent one.
+  assert.deepEqual(skipped.sort(), [
+    "hotel-front-desk.js -> firebase.js",
+    "hotel-housekeeping-board.js -> firebase.js"
+  ], "if this list grows, coverage shrank and this line should say why");
 });
 
 test("every hotel module's relative imports are version-stamped", () => {
@@ -113,10 +117,45 @@ test("the hotel graph shares the codebase's single version token", () => {
   assert.equal(tokens.size, 1, `expected one token, found: ${[...tokens].join(", ")}`);
 });
 
-test("the front desk page loads its controller with a version token", () => {
-  const html = readFileSync(`${import.meta.dirname}/../public/hotel-front-desk.html`, "utf8");
-  assert.match(html, /src="\.\/js\/hotel-front-desk\.js\?v=s2p-[a-z0-9-]+"/);
-  assert.match(html, /type="module"/);
+test("every hotel page loads its controller with a version token", () => {
+  [
+    ["hotel-front-desk.html", "hotel-front-desk.js"],
+    ["hotel-housekeeping.html", "hotel-housekeeping-board.js"]
+  ].forEach(([page, controller]) => {
+    const html = readFileSync(`${import.meta.dirname}/../public/${page}`, "utf8");
+    assert.match(html, new RegExp(`src="\\./js/${controller.replace(".", "\\.")}\\?v=s2p-[a-z0-9-]+"`), page);
+    assert.match(html, /type="module"/, page);
+  });
+});
+
+test("SECTION 27: the housekeeping board loads no financial data at all", () => {
+  // "Housekeeping should NOT see financial reports" is structural here, not
+  // a hidden nav item: there is no folio, rate, payment or revenue on this
+  // page to hide, because none of it is fetched.
+  const source = sourceOf("hotel-housekeeping-board.js");
+  ["hotel_folios", "hotelPayments", "hotelInvoices", "hotel_rate_plans", "hotel_reservations"]
+    .forEach(collectionName => {
+      assert.ok(!source.includes(collectionName), `the board must not read ${collectionName}`);
+    });
+  assert.ok(!source.includes("hotel-folio.js"), "and must not import the folio service");
+});
+
+test("the hotel panel routes by job rather than dumping everyone on one screen", () => {
+  const html = readFileSync(`${import.meta.dirname}/../public/hotel-room-panel.html`, "utf8");
+  assert.match(html, /hotel-housekeeping\.html/, "housekeeping has its own board");
+  assert.match(html, /hotel-front-desk\.html/, "everyone else goes to the front desk");
+  assert.ok(!html.includes("cafe-token-panel"), "a hotel is no longer sent to counter billing");
+});
+
+test("both hotel pages bind exactly one delegated click listener", () => {
+  // Re-rendering replaces markup constantly. Per-button listeners would
+  // either be lost or accumulate — the duplicate-listener fault in §47.
+  ["hotel-front-desk.js", "hotel-housekeeping-board.js"].forEach(file => {
+    const code = codeOf(file);
+    const listeners = code.match(/document\.body\.addEventListener\(/g) || [];
+    assert.equal(listeners.length, 1, `${file} must delegate from one listener`);
+    assert.match(code, /event\.target\.closest\(/, `${file} must resolve actions by delegation`);
+  });
 });
 
 test("the front desk never reloads the page to navigate or save", () => {
@@ -129,15 +168,6 @@ test("the front desk never reloads the page to navigate or save", () => {
   assert.doesNotMatch(code, /window\.location\.href\s*=/, "nor navigate away mid-task");
   // The one navigation that IS correct: no business in the session at all.
   assert.match(code, /location\.replace\("\.\/admin-login\.html"\)/);
-});
-
-test("the front desk binds its click handling once, not per render", () => {
-  // Re-rendering replaces markup constantly. Per-button listeners would
-  // either be lost or accumulate — the duplicate-listener fault in §47.
-  const source = sourceOf("hotel-front-desk.js");
-  const bodyListeners = codeOf("hotel-front-desk.js").match(/document\.body\.addEventListener\(/g) || [];
-  assert.equal(bodyListeners.length, 1, "exactly one delegated click listener");
-  assert.match(source, /event\.target\.closest\(/, "actions are resolved by delegation");
 });
 
 test("every element the controller looks up exists in the page", () => {
