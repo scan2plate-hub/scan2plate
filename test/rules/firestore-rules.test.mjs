@@ -54,6 +54,8 @@ await env.withSecurityRulesDisabled(async ctx => {
   await setDoc(doc(db, "restaurants", RID2, "hotel_rooms", "201"), { roomNumber: "201", status: "AVAILABLE" });
   await setDoc(doc(db, "restaurants", RID2, "hotel_reservations", "bk9"), { roomId: "201", checkIn: "2026-10-01", checkOut: "2026-10-03" });
   await setDoc(doc(db, "restaurants", RID2, "hotel_guests", "g9"), { name: "Their Guest" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_room_nights", "101__2026-10-01"), { roomId: "101", stayDate: "2026-10-01", reservationId: "bk1", bookingId: "BK1" });
+  await setDoc(doc(db, "restaurants", RID2, "hotel_room_nights", "201__2026-10-01"), { roomId: "201", stayDate: "2026-10-01", reservationId: "bk9" });
 });
 
 const anon  = env.unauthenticatedContext().firestore();
@@ -337,4 +339,22 @@ test("adding hotel collections did not open anything for restaurants", async () 
   await assertFails(getDocs(collection(other, "restaurants", RID, "staff")));
   await assertFails(getDocs(collection(anon, "restaurants", RID, "expenses")));
   await assertSucceeds(getDoc(doc(anon, "restaurants", RID, "menu", "item1")));
+});
+
+test("room night locks are readable publicly but writable only by the hotel's staff", async () => {
+  // The public booking engine needs to show what is free without a login.
+  await assertSucceeds(getDoc(doc(anon, "restaurants", RID, "hotel_room_nights", "101__2026-10-01")));
+  await assertSucceeds(getDocs(collection(anon, "restaurants", RID, "hotel_room_nights")));
+  // But nobody outside the hotel may take, move or release a hold — that
+  // would let a stranger block every room in the property, or free a night
+  // a paying guest is standing in.
+  await assertFails(setDoc(doc(anon, "restaurants", RID, "hotel_room_nights", "101__2026-11-01"), { roomId: "101" }));
+  await assertFails(deleteDoc(doc(anon, "restaurants", RID, "hotel_room_nights", "101__2026-10-01")));
+  await assertFails(deleteDoc(doc(other, "restaurants", RID, "hotel_room_nights", "101__2026-10-01")));
+  await assertSucceeds(setDoc(doc(staff, "restaurants", RID, "hotel_room_nights", "101__2026-11-01"), { roomId: "101" }));
+});
+
+test("a hotel cannot release or take a hold at another hotel", async () => {
+  await assertFails(deleteDoc(doc(staff, "restaurants", RID2, "hotel_room_nights", "201__2026-10-01")));
+  await assertFails(setDoc(doc(staff, "restaurants", RID2, "hotel_room_nights", "201__2026-12-01"), { roomId: "201" }));
 });

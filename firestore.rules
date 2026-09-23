@@ -179,6 +179,25 @@ service cloud.firestore {
          Firestore rules are per-document, so a single guest record with
          "sensitive fields" could not be half-readable.
       */
+      /*
+         One document per room per night, at a deterministic id, created
+         inside the transaction that books the stay. This is what actually
+         prevents a double booking: a client transaction cannot run a query,
+         so it cannot re-check availability, but it CAN read these by id —
+         and Firestore permits only one document per id, so two receptionists
+         racing for the same night are two writes to the same path.
+
+         Staff-level, because taking and releasing a hold is the front desk's
+         job. Readable without signing in, because the booking engine in
+         section 20 must show a public calendar of what is free; a lock
+         carries only the booking reference and the guest's name for the
+         desk's own display, never contact details or payment information.
+      */
+      match /hotel_room_nights/{docId} {
+        allow get, list: if true;
+        allow write: if isStaffOf(rid);
+      }
+
       match /hotel_rooms/{docId}         { allow read, write: if isStaffOf(rid); }
       match /hotel_room_types/{docId}    { allow read, write: if isStaffOf(rid); }
       match /hotel_reservations/{docId}  { allow read, write: if isStaffOf(rid); }
