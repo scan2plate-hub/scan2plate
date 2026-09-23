@@ -257,3 +257,20 @@ test("the night audit reads the property's clock, never the browser's", () => {
   assert.ok(!/new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/.test(page),
     "and never straight from the browser's own date");
 });
+
+test("the hotel pages and services do not creep into the restaurant dashboard", () => {
+  // The specification's first instruction. admin.js may load ONE hotel
+  // module, lazily and behind a business-type check; a static import of any
+  // of them would put hotel code into every restaurant's bundle.
+  const admin = codeOf("admin.js");
+  const staticImports = [...admin.matchAll(/from\s+["']\.\/(hotel-[a-z-]+)\.js/g)].map(match => match[1]);
+  assert.deepEqual(staticImports, [], "no hotel module may be statically imported by admin.js");
+});
+
+test("the POS bridge is the only hotel module admin.js may reach, and only lazily", () => {
+  const admin = codeOf("admin.js");
+  const dynamic = [...admin.matchAll(/import\(\s*["']\.\/(hotel-[a-z-]+)\.js/g)].map(match => match[1]);
+  dynamic.forEach(moduleName => {
+    assert.equal(moduleName, "hotel-pos-bridge", `admin.js must not load ${moduleName}`);
+  });
+});
