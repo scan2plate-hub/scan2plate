@@ -45,7 +45,29 @@ export const MODULES = {
   customOrders: "Custom Orders",
   roomService: "Room Service",
   whatsapp: "WhatsApp Alerts",
-  advancedReports: "Advanced Reports"
+  advancedReports: "Advanced Reports",
+
+  // Hotel PMS. Additive: no existing business type lists any of these, so
+  // no restaurant, cafe, vendor or other mode changes behaviour by their
+  // existence. supportsModule() is what gates them, and it answers false
+  // for every type that does not name them.
+  frontDesk: "Front Desk",
+  reservations: "Reservations",
+  bookingCalendar: "Booking Calendar",
+  housekeeping: "Housekeeping",
+  maintenance: "Maintenance",
+  guestCrm: "Guest CRM",
+  folios: "Guest Folios",
+  ratePlans: "Rate Management",
+  nightAudit: "Night Audit",
+  cashierShifts: "Cashier Shifts",
+  bookingEngine: "Booking Engine",
+  channelManager: "Channel Manager",
+  banquet: "Banquet & Events",
+  corporate: "Corporate & Agents",
+  lostFound: "Lost & Found",
+  linen: "Linen",
+  minibar: "Minibar"
 };
 
 // Settings groups a business type can show. The Settings screen renders only
@@ -66,7 +88,17 @@ export const SETTINGS_GROUPS = {
   salon: "Services & Appointments",
   onlineOrders: "Online Orders & Delivery",
   notifications: "Notifications",
-  subscription: "Subscription"
+  subscription: "Subscription",
+
+  // Hotel PMS settings groups.
+  hotelProfile: "Hotel Profile",
+  hotelRooms: "Rooms & Room Types",
+  hotelRates: "Rates & Tariffs",
+  hotelPolicies: "Hotel Policies",
+  hotelHousekeeping: "Housekeeping",
+  hotelNightAudit: "Night Audit",
+  hotelBookingEngine: "Booking Engine",
+  hotelChannelManager: "Channel Manager"
 };
 
 // Groups every business gets, whatever its type.
@@ -115,10 +147,31 @@ const TYPES = [
     settings: [...COMMON_SETTINGS, "kitchen", "menu", "inventory", "onlineOrders"]
   },
   {
+    /*
+      A hotel runs a property, and also runs restaurants inside it. Both halves
+      are listed: the PMS modules, and the F&B modules it shares with every
+      other food business. Nothing here is subtracted from any other type —
+      the PMS module ids appear on this type alone.
+    */
     id: "hotel",
     label: "Hotel",
-    modules: [...COMMON_MODULES, "liveOrders", "rooms", "roomService", "kot", "menu", "inventory", "payroll"],
-    settings: [...COMMON_SETTINGS, "rooms", "kitchen", "menu", "inventory"]
+    modules: [
+      ...COMMON_MODULES,
+      // Property management
+      "frontDesk", "reservations", "bookingCalendar", "rooms", "roomService",
+      "housekeeping", "maintenance", "guestCrm", "folios", "ratePlans",
+      "nightAudit", "cashierShifts", "lostFound", "linen", "minibar",
+      "banquet", "corporate", "bookingEngine", "channelManager",
+      // Food and beverage, reusing the existing restaurant modules unchanged
+      "liveOrders", "kot", "kitchenDisplay", "tables", "menu", "inventory",
+      "qrOrdering", "payroll", "advancedReports"
+    ],
+    settings: [
+      ...COMMON_SETTINGS,
+      "hotelProfile", "hotelRooms", "hotelRates", "hotelPolicies",
+      "hotelHousekeeping", "hotelNightAudit", "hotelBookingEngine",
+      "hotelChannelManager", "rooms", "kitchen", "menu", "inventory"
+    ]
   },
   {
     id: "hostel",

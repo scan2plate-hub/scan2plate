@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en-IN"><head>
+<meta name="robots" content="noindex, nofollow" /><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Front Desk · Scan2Plate Hotel</title>
+<link rel="stylesheet" href="./css/style.css">
+<link rel="preconnect" href="https://www.gstatic.com">
+<style>
+/* Reception works standing up, often one-handed, often while someone waits.
+   Big targets, high contrast, and room status legible at a glance from a
+   metre away — the grid is read far more often than it is clicked. */
+:root{
+  --hp:#0f766e;--hp-dark:#115e59;--hd:#0f172a;--hm:#64748b;--hl:#e2e8f0;--hbg:#f8fafc;
+  --s-available:#16a34a;--s-occupied:#2563eb;--s-reserved:#7c3aed;--s-dirty:#d97706;
+  --s-cleaning:#0891b2;--s-inspected:#059669;--s-ooo:#dc2626;--s-blocked:#475569;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--hbg);color:var(--hd);font:14px/1.5 Inter,system-ui,Arial,sans-serif}
+.hx-app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.hx-side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:16px 10px;background:var(--hd);color:#fff}
+.hx-brand{display:flex;gap:10px;align-items:center;padding:4px 8px 18px;font-size:17px;font-weight:900}
+.hx-brand small{display:block;color:#94a3b8;font-size:10px;font-weight:700;letter-spacing:.06em}
+.hx-nav{display:grid;gap:2px}
+.hx-nav .hx-group{color:#64748b;font-size:10px;font-weight:800;letter-spacing:.08em;padding:14px 10px 4px}
+.hx-nav button{border:0;border-radius:9px;background:transparent;color:#cbd5e1;text-align:left;padding:10px 11px;font:inherit;font-weight:700;cursor:pointer;width:100%}
+.hx-nav button:hover{background:#1e293b;color:#fff}
+.hx-nav button.active{background:var(--hp);color:#fff}
+.hx-main{min-width:0;display:flex;flex-direction:column}
+.hx-top{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 22px;background:#fff;border-bottom:1px solid var(--hl);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.hx-top h1{margin:0;font-size:20px}
+.hx-top p{margin:2px 0 0;color:var(--hm);font-size:12px}
+.hx-actions{display:flex;gap:8px;flex-wrap:wrap}
+.hx-btn{border:0;border-radius:9px;background:var(--hp);color:#fff;padding:10px 14px;font:inherit;font-weight:750;cursor:pointer}
+.hx-btn:hover{background:var(--hp-dark)}
+.hx-btn.ghost{background:#fff;color:var(--hd);border:1px solid var(--hl)}
+.hx-btn.ghost:hover{background:#f1f5f9}
+.hx-btn.sm{padding:6px 10px;font-size:12px}
+.hx-btn[disabled]{opacity:.5;cursor:not-allowed}
+.hx-body{padding:20px 22px;flex:1}
+.hx-section{display:none}
+.hx-section.active{display:block}
+.hx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:12px;margin-bottom:20px}
+.hx-card{background:#fff;border:1px solid var(--hl);border-radius:13px;padding:14px}
+.hx-card b{display:block;font-size:26px;line-height:1.2;margin-top:4px}
+.hx-card span{color:var(--hm);font-size:11px;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.hx-card small{display:block;color:var(--hm);font-size:11px;margin-top:4px}
+.hx-panel{background:#fff;border:1px solid var(--hl);border-radius:13px;margin-bottom:18px;overflow:hidden}
+.hx-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--hl);flex-wrap:wrap}
+.hx-panel-head h2{margin:0;font-size:15px}
+.hx-panel-body{padding:14px 16px}
+/* Room grid */
+.hx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.hx-room{border:2px solid var(--hl);border-left-width:6px;border-radius:11px;padding:11px;background:#fff;text-align:left;cursor:pointer;font:inherit;min-height:92px}
+.hx-room:hover{box-shadow:0 4px 14px rgba(15,23,42,.1)}
+.hx-room b{display:block;font-size:17px}
+.hx-room em{display:block;font-style:normal;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-top:3px}
+.hx-room small{display:block;color:var(--hm);font-size:11px;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hx-room[data-status="AVAILABLE"]{border-left-color:var(--s-available)} .hx-room[data-status="AVAILABLE"] em{color:var(--s-available)}
+.hx-room[data-status="OCCUPIED"]{border-left-color:var(--s-occupied)} .hx-room[data-status="OCCUPIED"] em{color:var(--s-occupied)}
+.hx-room[data-status="RESERVED"]{border-left-color:var(--s-reserved)} .hx-room[data-status="RESERVED"] em{color:var(--s-reserved)}
+.hx-room[data-status="DIRTY"]{border-left-color:var(--s-dirty)} .hx-room[data-status="DIRTY"] em{color:var(--s-dirty)}
+.hx-room[data-status="CLEANING"]{border-left-color:var(--s-cleaning)} .hx-room[data-status="CLEANING"] em{color:var(--s-cleaning)}
+.hx-room[data-status="INSPECTED"]{border-left-color:var(--s-inspected)} .hx-room[data-status="INSPECTED"] em{color:var(--s-inspected)}
+.hx-room[data-status="OUT_OF_ORDER"],.hx-room[data-status="OUT_OF_SERVICE"]{border-left-color:var(--s-ooo);background:#fef2f2} .hx-room[data-status="OUT_OF_ORDER"] em,.hx-room[data-status="OUT_OF_SERVICE"] em{color:var(--s-ooo)}
+.hx-room[data-status="BLOCKED"]{border-left-color:var(--s-blocked);background:#f8fafc} .hx-room[data-status="BLOCKED"] em{color:var(--s-blocked)}
+.hx-room .hx-warn{color:var(--s-ooo);font-weight:800;font-size:10px}
+.hx-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--hm);margin-bottom:12px}
+.hx-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+/* Tables */
+.hx-table{width:100%;border-collapse:collapse;font-size:13px}
+.hx-table th{text-align:left;padding:9px 10px;border-bottom:2px solid var(--hl);color:var(--hm);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.hx-table td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.hx-table tr:last-child td{border-bottom:0}
+.hx-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#f1f5f9;color:var(--hm)}
+.hx-tag.ok{background:#dcfce7;color:#166534} .hx-tag.warn{background:#fef3c7;color:#92400e} .hx-tag.info{background:#dbeafe;color:#1e40af}
+/* Calendar */
+.hx-cal-wrap{overflow-x:auto}
+.hx-cal{border-collapse:separate;border-spacing:0;font-size:12px;min-width:100%}
+.hx-cal th,.hx-cal td{border-bottom:1px solid var(--hl);padding:0}
+.hx-cal thead th{position:sticky;top:0;background:#f8fafc;padding:7px 4px;font-size:10px;color:var(--hm);white-space:nowrap;min-width:46px;z-index:2}
+.hx-cal thead th.wk{background:#f1f5f9;color:var(--hd)}
+.hx-cal th.hx-cal-room{position:sticky;left:0;background:#fff;text-align:left;padding:7px 11px;min-width:104px;z-index:3;font-size:12px;border-right:1px solid var(--hl)}
+.hx-cal-cell{height:36px;border-right:1px solid #f1f5f9}
+.hx-cal-cell.free{cursor:pointer}
+.hx-cal-cell.free:hover{background:#ecfdf5}
+.hx-cal-cell.unsellable{background:repeating-linear-gradient(45deg,#fef2f2,#fef2f2 5px,#fee2e2 5px,#fee2e2 10px)}
+.hx-cal-block{background:var(--s-occupied);color:#fff;height:26px;margin:5px 0;border-radius:5px;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;cursor:pointer}
+.hx-cal-block.start{margin-left:5px;border-top-left-radius:5px;border-bottom-left-radius:5px}
+.hx-cal-block.cont{border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-1px}
+.hx-cal-block[data-status="CHECKED_IN"]{background:var(--s-available)}
+.hx-cal-block[data-status="TENTATIVE"],.hx-cal-block[data-status="PENDING"]{background:var(--s-dirty)}
+/* Dialogs */
+dialog{border:0;border-radius:15px;padding:0;max-width:min(560px,94vw);width:100%;box-shadow:0 24px 60px rgba(15,23,42,.28)}
+dialog::backdrop{background:rgba(15,23,42,.5)}
+.hx-dialog-head{padding:16px 20px;border-bottom:1px solid var(--hl);display:flex;justify-content:space-between;align-items:center}
+.hx-dialog-head h3{margin:0;font-size:16px}
+.hx-dialog-body{padding:18px 20px;max-height:66vh;overflow-y:auto}
+.hx-dialog-foot{padding:14px 20px;border-top:1px solid var(--hl);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.hx-field{margin-bottom:13px}
+.hx-field label{display:block;font-size:12px;font-weight:750;margin-bottom:5px;color:var(--hm)}
+.hx-field input,.hx-field select,.hx-field textarea{width:100%;padding:10px;border:1px solid var(--hl);border-radius:9px;font:inherit;background:#fff}
+.hx-field input:focus,.hx-field select:focus{outline:2px solid var(--hp);outline-offset:-1px}
+.hx-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hx-quote{background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:12px;margin-top:6px;font-size:13px}
+.hx-quote b{font-size:19px;display:block;margin-top:3px}
+.hx-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:9px;padding:11px;font-size:13px;font-weight:600;margin-bottom:12px}
+.hx-empty{padding:34px;text-align:center;color:var(--hm)}
+.hx-note{color:var(--hm);font-size:12px}
+.hx-busy{opacity:.55;pointer-events:none}
+/* Tablet and phone. Housekeeping and the owner both work from a phone. */
+@media (max-width:900px){
+  .hx-app{grid-template-columns:1fr}
+  .hx-side{position:static;height:auto;padding:10px}
+  .hx-nav{display:flex;overflow-x:auto;gap:6px}
+  .hx-nav .hx-group{display:none}
+  .hx-nav button{white-space:nowrap;width:auto}
+  .hx-body{padding:14px}
+  .hx-row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="hx-app">
+  <aside class="hx-side">
+    <div class="hx-brand"><div>Scan2Plate<small id="hxPropertyName">HOTEL FRONT DESK</small></div></div>
+    <nav class="hx-nav" id="hxNav">
+      <div class="hx-group">FRONT DESK</div>
+      <button data-section="dashboard" class="active" type="button">Dashboard</button>
+      <button data-section="rooms" type="button">Room Status</button>
+      <button data-section="arrivals" type="button">Arrivals &amp; Departures</button>
+      <button data-section="calendar" type="button">Booking Calendar</button>
+      <button data-section="reservations" type="button">Reservations</button>
+    </nav>
+  </aside>
+
+  <main class="hx-main">
+    <header class="hx-top">
+      <div>
+        <h1 id="hxTitle">Dashboard</h1>
+        <p id="hxSubtitle">Loading…</p>
+      </div>
+      <div class="hx-actions">
+        <button class="hx-btn" id="hxWalkIn" type="button">+ Walk-in</button>
+        <button class="hx-btn ghost" id="hxNewBooking" type="button">+ Reservation</button>
+      </div>
+    </header>
+
+    <div class="hx-body">
+      <section class="hx-section active" data-section="dashboard">
+        <div class="hx-cards" id="hxStats"></div>
+        <div class="hx-panel">
+          <div class="hx-panel-head"><h2>Arriving today</h2><span class="hx-note" id="hxArrivalCount"></span></div>
+          <div id="hxArrivalsMini"></div>
+        </div>
+        <div class="hx-panel">
+          <div class="hx-panel-head"><h2>Departing today</h2><span class="hx-note" id="hxDepartureCount"></span></div>
+          <div id="hxDeparturesMini"></div>
+        </div>
+      </section>
+
+      <section class="hx-section" data-section="rooms">
+        <div class="hx-legend" id="hxLegend"></div>
+        <div class="hx-grid" id="hxRoomGrid"></div>
+      </section>
+
+      <section class="hx-section" data-section="arrivals">
+        <div class="hx-panel">
+          <div class="hx-panel-head"><h2>Arrivals</h2></div>
+          <div id="hxArrivals"></div>
+        </div>
+        <div class="hx-panel">
+          <div class="hx-panel-head"><h2>Departures</h2></div>
+          <div id="hxDepartures"></div>
+        </div>
+        <div class="hx-panel">
+          <div class="hx-panel-head"><h2>In house</h2></div>
+          <div id="hxInHouse"></div>
+        </div>
+      </section>
+
+      <section class="hx-section" data-section="calendar">
+        <div class="hx-panel">
+          <div class="hx-panel-head">
+            <h2 id="hxCalRange">Booking calendar</h2>
+            <div class="hx-actions">
+              <button class="hx-btn ghost sm" id="hxCalPrev" type="button">&larr; Earlier</button>
+              <button class="hx-btn ghost sm" id="hxCalToday" type="button">Today</button>
+              <button class="hx-btn ghost sm" id="hxCalNext" type="button">Later &rarr;</button>
+            </div>
+          </div>
+          <div class="hx-cal-wrap" id="hxCalendar"></div>
+        </div>
+      </section>
+
+      <section class="hx-section" data-section="reservations">
+        <div class="hx-panel">
+          <div class="hx-panel-head">
+            <h2>Reservations</h2>
+            <select id="hxResFilter" style="padding:7px 10px;border:1px solid var(--hl);border-radius:8px;font:inherit">
+              <option value="upcoming">Current &amp; upcoming</option>
+              <option value="CHECKED_IN">In house</option>
+              <option value="CONFIRMED">Confirmed</option>
+              <option value="CHECKED_OUT">Departed</option>
+              <option value="CANCELLED">Cancelled</option>
+              <option value="NO_SHOW">No-show</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div id="hxReservations"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="hxBookingDialog">
+  <form method="dialog" id="hxBookingForm">
+    <div class="hx-dialog-head"><h3 id="hxBookingTitle">New reservation</h3></div>
+    <div class="hx-dialog-body">
+      <div class="hx-error" id="hxBookingError" hidden></div>
+      <div class="hx-row">
+        <div class="hx-field"><label for="hxGuestName">Guest name</label><input id="hxGuestName" required autocomplete="name"></div>
+        <div class="hx-field"><label for="hxGuestPhone">Mobile</label><input id="hxGuestPhone" inputmode="tel" autocomplete="tel"></div>
+      </div>
+      <div class="hx-row">
+        <div class="hx-field"><label for="hxCheckIn">Check-in</label><input id="hxCheckIn" type="date" required></div>
+        <div class="hx-field"><label for="hxCheckOut">Check-out</label><input id="hxCheckOut" type="date" required></div>
+      </div>
+      <div class="hx-row">
+        <div class="hx-field"><label for="hxAdults">Adults</label><input id="hxAdults" type="number" min="1" value="1"></div>
+        <div class="hx-field"><label for="hxChildren">Children</label><input id="hxChildren" type="number" min="0" value="0"></div>
+      </div>
+      <div class="hx-field"><label for="hxRoom">Room</label><select id="hxRoom" required></select></div>
+      <div class="hx-field"><label for="hxSource">Booking source</label><select id="hxSource"></select></div>
+      <div class="hx-field"><label for="hxNotes">Notes / special requests</label><textarea id="hxNotes" rows="2"></textarea></div>
+      <div class="hx-quote" id="hxQuote">Pick dates and a room to see the tariff.</div>
+    </div>
+    <div class="hx-dialog-foot">
+      <button class="hx-btn ghost" value="cancel" type="submit">Cancel</button>
+      <button class="hx-btn" id="hxBookingSave" value="save" type="submit">Save booking</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="hxCheckoutDialog">
+  <form method="dialog">
+    <div class="hx-dialog-head"><h3 id="hxCheckoutTitle">Check out</h3></div>
+    <div class="hx-dialog-body" id="hxCheckoutBody"></div>
+    <div class="hx-dialog-foot">
+      <button class="hx-btn ghost" value="close" type="submit">Close</button>
+      <button class="hx-btn" id="hxCheckoutConfirm" type="button">Check out</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="hxRoomDialog">
+  <form method="dialog">
+    <div class="hx-dialog-head"><h3 id="hxRoomTitle">Room</h3></div>
+    <div class="hx-dialog-body" id="hxRoomBody"></div>
+    <div class="hx-dialog-foot"><button class="hx-btn ghost" value="close" type="submit">Close</button></div>
+  </form>
+</dialog>
+
+<script type="module" src="./js/hotel-front-desk.js?v=s2p-20260922d"></script>
+</body></html>
