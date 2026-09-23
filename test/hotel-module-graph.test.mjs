@@ -92,8 +92,14 @@ test("EVERY name imported by a hotel module is actually exported", async () => {
   // is a visible loss of coverage rather than a silent one.
   assert.deepEqual(skipped.sort(), [
     "hotel-front-desk.js -> firebase.js",
-    "hotel-housekeeping-board.js -> firebase.js"
-  ], "if this list grows, coverage shrank and this line should say why");
+    "hotel-housekeeping-board.js -> firebase.js",
+    "hotel-setup-page.js -> firebase.js",
+    // plan-limits.js itself imports firebase.js, so it is unloadable for the
+    // same reason. Its own behaviour is covered by plan-limits.test.mjs,
+    // which stubs the SDK through a loader hook.
+    "hotel-setup-page.js -> plan-limits.js",
+    "hotel-night-audit-page.js -> firebase.js"
+  ].sort(), "if this list grows, coverage shrank and this line should say why");
 });
 
 test("every hotel module's relative imports are version-stamped", () => {
@@ -120,7 +126,9 @@ test("the hotel graph shares the codebase's single version token", () => {
 test("every hotel page loads its controller with a version token", () => {
   [
     ["hotel-front-desk.html", "hotel-front-desk.js"],
-    ["hotel-housekeeping.html", "hotel-housekeeping-board.js"]
+    ["hotel-housekeeping.html", "hotel-housekeeping-board.js"],
+    ["hotel-setup.html", "hotel-setup-page.js"],
+    ["hotel-night-audit.html", "hotel-night-audit-page.js"]
   ].forEach(([page, controller]) => {
     const html = readFileSync(`${import.meta.dirname}/../public/${page}`, "utf8");
     assert.match(html, new RegExp(`src="\\./js/${controller.replace(".", "\\.")}\\?v=s2p-[a-z0-9-]+"`), page);
@@ -150,7 +158,7 @@ test("the hotel panel routes by job rather than dumping everyone on one screen",
 test("both hotel pages bind exactly one delegated click listener", () => {
   // Re-rendering replaces markup constantly. Per-button listeners would
   // either be lost or accumulate — the duplicate-listener fault in §47.
-  ["hotel-front-desk.js", "hotel-housekeeping-board.js"].forEach(file => {
+  ["hotel-front-desk.js", "hotel-housekeeping-board.js", "hotel-setup-page.js", "hotel-night-audit-page.js"].forEach(file => {
     const code = codeOf(file);
     const listeners = code.match(/document\.body\.addEventListener\(/g) || [];
     assert.equal(listeners.length, 1, `${file} must delegate from one listener`);
@@ -170,10 +178,42 @@ test("the front desk never reloads the page to navigate or save", () => {
   assert.match(code, /location\.replace\("\.\/admin-login\.html"\)/);
 });
 
+test("SECTION 51: setup checks room limits through the CENTRAL plan check", () => {
+  // Not a second opinion about entitlements. plan-limits.js already caches
+  // per page and fails open; a local copy of that logic would eventually
+  // disagree with the rest of the product about what a plan includes.
+  const page = codeOf("hotel-setup-page.js");
+  assert.match(page, /from "\.\/plan-limits\.js/, "the page must use the shared limit module");
+  assert.match(page, /checkLimitFor\("maxRooms"/, "and ask it about rooms");
+  // The service must not reach for limits itself — it is handed the answer,
+  // so the page owns the single lookup. Comments are stripped first: the
+  // service's own prose EXPLAINS why it does not import plan-limits, and
+  // that explanation must not be what satisfies the test.
+  const service = codeOf("hotel-setup.js");
+  assert.ok(!service.includes("plan-limits"), "the service must not acquire its own opinion");
+  assert.ok(!service.includes("checkLimit"), "nor call the limit check itself");
+});
+
+test("RULE 18: nothing in setup deletes a room", () => {
+  // A hard delete would leave last year's invoices pointing at nothing.
+  // Rate plans CAN be deleted — they price the future, not the past.
+  const service = codeOf("hotel-setup.js");
+  assert.match(service, /transaction\.delete\(planRef/, "a rate rule is deletable");
+  assert.ok(!/transaction\.delete\(roomRef/.test(service), "a room is never deleted, only retired");
+  assert.match(service, /active: false/, "retiring is a flag, so the document survives");
+});
+
 test("every element the controller looks up exists in the page", () => {
   // A typo'd id is a silent no-op: the button simply never works.
-  const html = readFileSync(`${import.meta.dirname}/../public/hotel-front-desk.html`, "utf8");
-  const source = sourceOf("hotel-front-desk.js");
+  [["hotel-front-desk.html", "hotel-front-desk.js"],
+   ["hotel-housekeeping.html", "hotel-housekeeping-board.js"],
+   ["hotel-setup.html", "hotel-setup-page.js"],
+   ["hotel-night-audit.html", "hotel-night-audit-page.js"]].forEach(([page, controller]) => {
+    checkIds(readFileSync(`${import.meta.dirname}/../public/${page}`, "utf8"), sourceOf(controller), page);
+  });
+});
+
+function checkIds(html, source, label) {
   const missing = [];
   // Two ways an id reaches the DOM here: $("id") directly, and paint("id", …)
   // which looks it up on the caller's behalf. Checking only the first leaves
@@ -191,5 +231,46 @@ test("every element the controller looks up exists in the page", () => {
       if (!has(match[1])) missing.push(match[1]);
     }
   });
-  assert.deepEqual([...new Set(missing)], [], "the controller reaches for ids the page does not have");
+  assert.deepEqual([...new Set(missing)], [], `${label}: the controller reaches for ids the page does not have`);
+}
+
+test("SECTION 25: no hotel page closes the day on a timer", () => {
+  // The single most important negative requirement in the specification.
+  // Closing a day charges rooms, releases inventory and writes a record
+  // that can never be edited — none of it may happen because a browser tab
+  // was left open past midnight in the wrong timezone.
+  ["hotel-night-audit.js", "hotel-night-audit-page.js"].forEach(file => {
+    const code = codeOf(file);
+    ["setInterval", "setTimeout", "requestIdleCallback"].forEach(scheduler => {
+      assert.ok(!code.includes(scheduler), `${file} must not schedule anything`);
+    });
+  });
+  // And the close is a manager's deliberate act, gated on their role.
+  assert.match(codeOf("hotel-night-audit.js"), /normalizeHotelRole\(actor\?\.role\)/);
+});
+
+test("the night audit reads the property's clock, never the browser's", () => {
+  // Rule 20. A hotel in Kolkata closes on Kolkata's clock whether the
+  // manager is in Kolkata, London, or on a phone set to the wrong zone.
+  const page = codeOf("hotel-night-audit-page.js");
+  assert.match(page, /propertyToday|expectedAuditDate/, "the day comes from the property helper");
+  assert.ok(!/new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/.test(page),
+    "and never straight from the browser's own date");
+});
+
+test("the hotel pages and services do not creep into the restaurant dashboard", () => {
+  // The specification's first instruction. admin.js may load ONE hotel
+  // module, lazily and behind a business-type check; a static import of any
+  // of them would put hotel code into every restaurant's bundle.
+  const admin = codeOf("admin.js");
+  const staticImports = [...admin.matchAll(/from\s+["']\.\/(hotel-[a-z-]+)\.js/g)].map(match => match[1]);
+  assert.deepEqual(staticImports, [], "no hotel module may be statically imported by admin.js");
+});
+
+test("the POS bridge is the only hotel module admin.js may reach, and only lazily", () => {
+  const admin = codeOf("admin.js");
+  const dynamic = [...admin.matchAll(/import\(\s*["']\.\/(hotel-[a-z-]+)\.js/g)].map(match => match[1]);
+  dynamic.forEach(moduleName => {
+    assert.equal(moduleName, "hotel-pos-bridge", `admin.js must not load ${moduleName}`);
+  });
 });

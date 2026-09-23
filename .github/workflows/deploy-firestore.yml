@@ -47,6 +47,48 @@ jobs:
         with:
           node-version: "20"
 
+      # Fail FIRST, and legibly, when the credential is missing.
+      #
+      # Without this the run does a full npm install, 52 emulator rules tests
+      # and the SEO gates — half a minute of green ticks — and then dies on
+      # google-github-actions/auth with "must specify exactly one of
+      # workload_identity_provider or credentials_json", which reads like a
+      # broken workflow rather than an unset secret. Three runs were spent
+      # that way.
+      - name: Check the deploy credential is present
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error title=FIREBASE_SERVICE_ACCOUNT is not set::This repository has no deploy credential, so nothing can be deployed."
+            echo ""
+            echo "To fix it, once:"
+            echo "  1. Firebase console -> Project settings -> Service accounts"
+            echo "     -> Generate new private key. A .json file downloads."
+            echo "  2. This repo -> Settings -> Secrets and variables -> Actions"
+            echo "     -> New repository secret"
+            echo "       Name:  FIREBASE_SERVICE_ACCOUNT"
+            echo "       Value: the ENTIRE contents of that file, from { to }"
+            echo "  3. Re-run this workflow."
+            echo ""
+            echo "Two things that commonly go wrong:"
+            echo "  - pasting the file PATH instead of the file CONTENTS"
+            echo "  - creating an ENVIRONMENT secret rather than a REPOSITORY"
+            echo "    secret. This workflow names no environment, so an"
+            echo "    environment-scoped secret never reaches it."
+            echo ""
+            echo "The key needs the Firebase Rules Admin and Firebase Hosting"
+            echo "Admin roles. The default Firebase Admin SDK service account"
+            echo "already has both."
+            exit 1
+          fi
+          # Catch a pasted path or a truncated copy before the deploy starts.
+          if ! printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | head -c 1 | grep -q '{'; then
+            echo "::error title=FIREBASE_SERVICE_ACCOUNT does not look like JSON::The secret should be the whole service-account file, starting with a { — not a path to it."
+            exit 1
+          fi
+          echo "Deploy credential present."
+
       - run: npm install
 
       # The gate. These 36 tests run the rules that are about to be

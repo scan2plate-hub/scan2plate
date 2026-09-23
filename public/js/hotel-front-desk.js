@@ -143,8 +143,25 @@ function showSection(name) {
 
 $("hxNav").addEventListener("click", event => {
   const button = event.target.closest("button[data-section]");
-  if (button) showSection(button.dataset.section);
+  if (button) return showSection(button.dataset.section);
+  // The two other hotel screens. Separate pages rather than sections,
+  // because housekeeping is a phone screen and setup is a sit-down job;
+  // neither belongs in the front desk's live-listener graph.
+  if (event.target.id === "hxSetupLink") location.assign("./hotel-setup.html");
+  if (event.target.id === "hxHousekeepingLink") location.assign("./hotel-housekeeping.html");
+  if (event.target.id === "hxNightAuditLink") location.assign("./hotel-night-audit.html");
 });
+
+/* An empty property looks broken. It is not — it is unconfigured, and
+   saying so with a way out beats a grid with nothing in it. */
+function noticeIfUnconfigured() {
+  if (state.rooms.length || !state.loaded) return;
+  paint("hxRoomGrid", `<div class="hx-empty">
+    <p><strong>No rooms yet.</strong></p>
+    <p>Add your rooms and tariffs before taking bookings.</p>
+    <button class="hx-btn" id="hxSetupLink" type="button" style="margin-top:12px">Set up rooms &amp; tariffs</button>
+  </div>`);
+}
 
 /* ---------------------------------------------------------
    RENDER
@@ -169,7 +186,7 @@ function render() {
   // same cached state the moment they are opened, which costs nothing and
   // keeps an idle tab off the render path entirely.
   if (state.section === "dashboard") renderDashboard(grid, lists);
-  if (state.section === "rooms") renderRooms(grid);
+  if (state.section === "rooms") { renderRooms(grid); noticeIfUnconfigured(); }
   if (state.section === "arrivals") renderArrivals(lists);
   if (state.section === "calendar") renderCalendar(grid);
   if (state.section === "reservations") renderReservations();
@@ -369,6 +386,7 @@ async function guarded(label, work) {
 }
 
 document.body.addEventListener("click", event => {
+  if (event.target.id === "hxSetupLink") { location.assign("./hotel-setup.html"); return; }
   // One delegated listener for the whole page. Re-rendering replaces markup
   // constantly, so a second listener here would be the accumulating-handler
   // fault section 47 names — and the checkout controls are rendered markup.
