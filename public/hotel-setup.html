@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en-IN"><head>
+<meta name="robots" content="noindex, nofollow" /><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Property Setup · Scan2Plate Hotel</title>
+<link rel="preconnect" href="https://www.gstatic.com">
+<style>
+/* Setup is done once, sitting down, usually by the owner with a floor plan
+   in front of them. So: wide forms, a visible checklist of what is still
+   missing, and bulk entry as the default — a 40-room property should not be
+   typing 40 forms. */
+:root{
+  --hp:#0f766e;--hp-dark:#115e59;--hd:#0f172a;--hm:#64748b;--hl:#e2e8f0;--hbg:#f8fafc;
+  --ok:#16a34a;--warn:#d97706;--bad:#dc2626;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--hbg);color:var(--hd);font:14px/1.5 Inter,system-ui,Arial,sans-serif}
+.su-top{background:#fff;border-bottom:1px solid var(--hl);padding:16px 22px;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+.su-top h1{margin:0;font-size:19px}
+.su-top p{margin:3px 0 0;color:var(--hm);font-size:12px}
+.su-wrap{max-width:1000px;margin:0 auto;padding:20px 22px 70px}
+.su-btn{border:0;border-radius:9px;background:var(--hp);color:#fff;padding:10px 15px;font:inherit;font-weight:750;cursor:pointer}
+.su-btn:hover{background:var(--hp-dark)}
+.su-btn.ghost{background:#fff;color:var(--hd);border:1px solid var(--hl)}
+.su-btn.ghost:hover{background:#f1f5f9}
+.su-btn.sm{padding:6px 10px;font-size:12px}
+.su-btn.danger{background:#fff;color:var(--bad);border:1px solid #fecaca}
+.su-btn[disabled]{opacity:.5;cursor:not-allowed}
+.su-checklist{background:#fff;border:1px solid var(--hl);border-radius:13px;padding:16px;margin-bottom:20px}
+.su-checklist h2{margin:0 0 12px;font-size:15px}
+.su-step{display:flex;gap:10px;align-items:center;padding:7px 0;font-size:13px}
+.su-step i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:900;flex:none;background:#f1f5f9;color:var(--hm)}
+.su-step.done i{background:#dcfce7;color:var(--ok)}
+.su-step.done span{color:var(--hm)}
+.su-ready{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px;font-weight:700;margin-top:10px}
+.su-tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.su-tabs button{border:1px solid var(--hl);border-radius:9px;background:#fff;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer}
+.su-tabs button.active{background:var(--hd);color:#fff;border-color:var(--hd)}
+.su-panel{background:#fff;border:1px solid var(--hl);border-radius:13px;margin-bottom:18px;overflow:hidden}
+.su-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--hl);flex-wrap:wrap}
+.su-panel-head h2{margin:0;font-size:15px}
+.su-panel-body{padding:16px}
+.su-section{display:none}
+.su-section.active{display:block}
+.su-table{width:100%;border-collapse:collapse;font-size:13px}
+.su-table th{text-align:left;padding:9px 10px;border-bottom:2px solid var(--hl);color:var(--hm);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.su-table td{padding:10px;border-bottom:1px solid #f1f5f9}
+.su-table tr.retired td{opacity:.55}
+.su-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.su-field{margin-bottom:12px}
+.su-field label{display:block;font-size:12px;font-weight:750;margin-bottom:5px;color:var(--hm)}
+.su-field input,.su-field select,.su-field textarea{width:100%;padding:10px;border:1px solid var(--hl);border-radius:9px;font:inherit;background:#fff}
+.su-field input:focus,.su-field select:focus{outline:2px solid var(--hp);outline-offset:-1px}
+.su-hint{color:var(--hm);font-size:12px;margin-top:4px}
+.su-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:9px;padding:11px;font-size:13px;font-weight:600;margin-bottom:12px}
+.su-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:9px;padding:11px;font-size:13px;margin-bottom:10px}
+.su-empty{padding:34px;text-align:center;color:var(--hm)}
+.su-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#f1f5f9;color:var(--hm)}
+.su-tag.ok{background:#dcfce7;color:#166534}
+.su-busy{opacity:.55;pointer-events:none}
+dialog{border:0;border-radius:15px;padding:0;max-width:min(580px,94vw);width:100%}
+dialog::backdrop{background:rgba(15,23,42,.5)}
+.su-dialog-head{padding:16px 20px;border-bottom:1px solid var(--hl)}
+.su-dialog-head h3{margin:0;font-size:16px}
+.su-dialog-body{padding:18px 20px;max-height:66vh;overflow-y:auto}
+.su-dialog-foot{padding:14px 20px;border-top:1px solid var(--hl);display:flex;gap:8px;justify-content:flex-end}
+@media (max-width:760px){ .su-wrap{padding:14px} .su-row{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<header class="su-top">
+  <div><h1>Property Setup</h1><p id="suSubtitle">Loading…</p></div>
+  <div style="display:flex;gap:8px"><button class="su-btn ghost" id="suFrontDesk" type="button">Front Desk</button></div>
+</header>
+
+<div class="su-wrap">
+  <div class="su-checklist" id="suChecklist"></div>
+
+  <div class="su-tabs" id="suTabs">
+    <button data-section="rooms" class="active" type="button">Rooms</button>
+    <button data-section="types" type="button">Room Types</button>
+    <button data-section="rates" type="button">Tariffs</button>
+  </div>
+
+  <section class="su-section active" data-section="rooms">
+    <div class="su-panel">
+      <div class="su-panel-head">
+        <h2>Add rooms</h2>
+        <span class="su-hint">Add a whole floor at once — 101 to 110, and so on.</span>
+      </div>
+      <div class="su-panel-body">
+        <div class="su-error" id="suBulkError" hidden></div>
+        <div class="su-row">
+          <div class="su-field"><label for="suFrom">From</label><input id="suFrom" value="101" inputmode="numeric"></div>
+          <div class="su-field"><label for="suTo">To</label><input id="suTo" value="110" inputmode="numeric"></div>
+          <div class="su-field"><label for="suPrefix">Prefix</label><input id="suPrefix" placeholder="none"></div>
+          <div class="su-field"><label for="suFloor">Floor</label><input id="suFloor" value="1"></div>
+          <div class="su-field"><label for="suBulkType">Room type</label><select id="suBulkType"></select></div>
+        </div>
+        <p class="su-hint" id="suBulkPreview"></p>
+        <button class="su-btn" id="suBulkAdd" type="button">Add these rooms</button>
+      </div>
+    </div>
+
+    <div class="su-panel">
+      <div class="su-panel-head">
+        <h2>Rooms</h2>
+        <label style="font-size:12px;color:var(--hm)"><input type="checkbox" id="suShowRetired"> Show retired</label>
+      </div>
+      <div id="suRooms"></div>
+    </div>
+  </section>
+
+  <section class="su-section" data-section="types">
+    <div class="su-panel">
+      <div class="su-panel-head">
+        <h2>Room types</h2>
+        <button class="su-btn sm" id="suAddType" type="button">+ Room type</button>
+      </div>
+      <div id="suTypes"></div>
+    </div>
+    <div class="su-panel" id="suStarterPanel">
+      <div class="su-panel-head"><h2>Start from the usual set</h2></div>
+      <div class="su-panel-body">
+        <p class="su-hint" style="margin-top:0">Adds Single, Double, Twin, Deluxe and Suite with no prices yet, so you only fill in the rates.</p>
+        <button class="su-btn ghost" id="suAddStarters" type="button">Add the starter types</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="su-section" data-section="rates">
+    <div class="su-panel">
+      <div class="su-panel-head">
+        <h2>Tariffs</h2>
+        <button class="su-btn sm" id="suAddRate" type="button">+ Tariff rule</button>
+      </div>
+      <div class="su-panel-body" id="suRateWarnings"></div>
+      <div id="suRates"></div>
+    </div>
+  </section>
+</div>
+
+<dialog id="suTypeDialog">
+  <form method="dialog">
+    <div class="su-dialog-head"><h3 id="suTypeTitle">Room type</h3></div>
+    <div class="su-dialog-body">
+      <div class="su-error" id="suTypeError" hidden></div>
+      <div class="su-field"><label for="suTypeName">Name</label><input id="suTypeName" required></div>
+      <div class="su-row">
+        <div class="su-field"><label for="suTypeRate">Base rate per night (₹)</label><input id="suTypeRate" type="number" min="0" step="1"></div>
+        <div class="su-field"><label for="suTypeMaxAdults">Maximum adults</label><input id="suTypeMaxAdults" type="number" min="1" value="2"></div>
+        <div class="su-field"><label for="suTypeMaxChildren">Maximum children</label><input id="suTypeMaxChildren" type="number" min="0" value="1"></div>
+      </div>
+      <div class="su-row">
+        <div class="su-field"><label for="suTypeIncluded">Adults included in the rate</label><input id="suTypeIncluded" type="number" min="1" value="2"></div>
+        <div class="su-field"><label for="suTypeExtraAdult">Extra adult (₹/night)</label><input id="suTypeExtraAdult" type="number" min="0" value="0"></div>
+        <div class="su-field"><label for="suTypeExtraChild">Extra child (₹/night)</label><input id="suTypeExtraChild" type="number" min="0" value="0"></div>
+      </div>
+      <div class="su-field"><label for="suTypeBeds">Bed type</label><input id="suTypeBeds" placeholder="queen, twin, king…"></div>
+      <div class="su-field"><label for="suTypeDescription">Description</label><textarea id="suTypeDescription" rows="2"></textarea></div>
+    </div>
+    <div class="su-dialog-foot">
+      <button class="su-btn ghost" value="cancel" type="submit">Cancel</button>
+      <button class="su-btn" id="suTypeSave" type="button">Save room type</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="suRoomDialog">
+  <form method="dialog">
+    <div class="su-dialog-head"><h3 id="suRoomTitle">Room</h3></div>
+    <div class="su-dialog-body">
+      <div class="su-error" id="suRoomError" hidden></div>
+      <div class="su-row">
+        <div class="su-field"><label for="suRoomNumber">Room number</label><input id="suRoomNumber" required></div>
+        <div class="su-field"><label for="suRoomFloor">Floor</label><input id="suRoomFloor"></div>
+        <div class="su-field"><label for="suRoomType">Room type</label><select id="suRoomType"></select></div>
+      </div>
+      <div class="su-field"><label for="suRoomRate">Rate override (₹/night)</label><input id="suRoomRate" type="number" min="0" placeholder="Leave blank to use the room type's rate"></div>
+      <div class="su-field"><label for="suRoomDescription">Description</label><textarea id="suRoomDescription" rows="2"></textarea></div>
+      <p class="su-hint">Cleaning status is managed by housekeeping and is not changed here.</p>
+    </div>
+    <div class="su-dialog-foot">
+      <button class="su-btn ghost" value="cancel" type="submit">Cancel</button>
+      <button class="su-btn" id="suRoomSave" type="button">Save room</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="suRateDialog">
+  <form method="dialog">
+    <div class="su-dialog-head"><h3 id="suRateTitle">Tariff rule</h3></div>
+    <div class="su-dialog-body">
+      <div class="su-error" id="suRateError" hidden></div>
+      <div class="su-row">
+        <div class="su-field"><label for="suRateName">Name</label><input id="suRateName" placeholder="Diwali" required></div>
+        <div class="su-field"><label for="suRateKind">Kind</label><select id="suRateKind"></select></div>
+        <div class="su-field"><label for="suRateAmount">Rate per night (₹)</label><input id="suRateAmount" type="number" min="0"></div>
+      </div>
+      <div class="su-row">
+        <div class="su-field"><label for="suRateType">Applies to</label><select id="suRateType"></select></div>
+        <div class="su-field"><label for="suRateFrom">From</label><input id="suRateFrom" type="date"></div>
+        <div class="su-field"><label for="suRateTo">To</label><input id="suRateTo" type="date"></div>
+      </div>
+      <div class="su-field"><label for="suRatePriority">Priority</label><input id="suRatePriority" type="number">
+        <p class="su-hint">Higher wins when two rules apply to the same night. The kind sets a sensible default.</p></div>
+      <div class="su-field"><label>Only on these days</label>
+        <div id="suRateDays" style="display:flex;gap:10px;flex-wrap:wrap;font-size:13px"></div></div>
+    </div>
+    <div class="su-dialog-foot">
+      <button class="su-btn ghost" value="cancel" type="submit">Cancel</button>
+      <button class="su-btn" id="suRateSave" type="button">Save tariff</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="./js/hotel-setup-page.js?v=s2p-20260922d"></script>
+</body></html>
