@@ -121,34 +121,6 @@
       ]
     },
     {
-      "collectionGroup": "hotel_payments",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "folioId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "hotel_payments",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "businessDate",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "method",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "hotel_housekeeping",
       "queryScope": "COLLECTION",
       "fields": [
@@ -273,6 +245,62 @@
         {
           "fieldPath": "stayDate",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "hotelPayments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "folioId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "hotelPayments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "restaurantId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "businessDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "hotelInvoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "restaurantId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "invoiceSerial",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "hotelInvoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "restaurantId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "businessDate",
+          "order": "DESCENDING"
         }
       ]
     }

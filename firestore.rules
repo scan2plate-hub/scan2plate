@@ -203,9 +203,11 @@ service cloud.firestore {
       match /hotel_reservations/{docId}  { allow read, write: if isStaffOf(rid); }
       match /hotel_guests/{docId}        { allow read, write: if isStaffOf(rid); }
       match /hotel_guest_documents/{docId} { allow read, write: if isOwnerOf(rid); }
-      match /hotel_folios/{docId}        { allow read, write: if isStaffOf(rid); }
       match /hotel_folio_items/{docId}   { allow read, write: if isStaffOf(rid); }
-      match /hotel_payments/{docId}      { allow read, write: if isStaffOf(rid); }
+      // The working account for a stay: charges arrive, get discounted and
+      // get voided all day. The INVOICE it produces is immutable and lives
+      // top level — see hotelInvoices below for why it cannot live here.
+      match /hotel_folios/{docId}        { allow read, write: if isStaffOf(rid); }
       match /hotel_services/{docId}      { allow read, write: if isStaffOf(rid); }
       match /hotel_housekeeping/{docId}  { allow read, write: if isStaffOf(rid); }
       match /hotel_maintenance/{docId}   { allow read, write: if isStaffOf(rid); }
@@ -268,6 +270,29 @@ service cloud.firestore {
        than a rule. Isolation is by the restaurantId on the document, which
        is how orders and auditLogs have always worked.
     */
+
+    match /hotelPayments/{paymentId} {
+      // Rule 12. The two-step write in hotel-folio.js stops a failed payment
+      // counting; this stops a counted one being rewritten afterwards. A
+      // payment still awaiting its outcome stays editable, because settling
+      // it IS an edit; once it says success, it is finished. A refund is a
+      // new document, never a change to the payment it reverses (rule 13).
+      allow get, list: if signedIn() && isStaffOf(resource.data.restaurantId);
+      allow create: if signedIn() && isStaffOf(request.resource.data.restaurantId);
+      allow update: if signedIn() && isStaffOf(resource.data.restaurantId)
+        && resource.data.get('status', 'pending') != 'success';
+      allow delete: if false;
+    }
+
+    match /hotelInvoices/{invoiceId} {
+      // Rules 15 and 16. The document handed to the guest: written once at
+      // checkout and never changed, because it is a fact about a moment.
+      // Everything it needs is copied onto it, so it still renders after the
+      // guest record and the staff account that raised it are gone (rule 17).
+      allow get, list: if signedIn() && isStaffOf(resource.data.restaurantId);
+      allow create: if signedIn() && isStaffOf(request.resource.data.restaurantId);
+      allow update, delete: if false;
+    }
 
     match /hotelNightAudits/{auditId} {
       // The record that a business day was closed and reconciled. Created

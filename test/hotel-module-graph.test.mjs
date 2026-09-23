@@ -148,10 +148,17 @@ test("every element the controller looks up exists in the page", () => {
   // Two ways an id reaches the DOM here: $("id") directly, and paint("id", …)
   // which looks it up on the caller's behalf. Checking only the first leaves
   // every rendered panel unverified — which is most of the page.
+  // Ids come from two places and BOTH count: the static page, and markup the
+  // controller renders itself (a payment field inside the checkout dialog
+  // exists only once that dialog is drawn). Checking against the page alone
+  // would report every rendered control as missing and be switched off.
+  const renderedIds = new Set([...source.matchAll(/id="([A-Za-z0-9_]+)"/g)].map(match => match[1]));
+  const has = id => html.includes(`id="${id}"`) || renderedIds.has(id);
+
   const patterns = [/\$\("([A-Za-z0-9_]+)"\)/g, /paint\("([A-Za-z0-9_]+)"/g];
   patterns.forEach(pattern => {
     for (const match of source.matchAll(pattern)) {
-      if (!html.includes(`id="${match[1]}"`)) missing.push(match[1]);
+      if (!has(match[1])) missing.push(match[1]);
     }
   });
   assert.deepEqual([...new Set(missing)], [], "the controller reaches for ids the page does not have");

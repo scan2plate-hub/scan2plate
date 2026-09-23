@@ -46,7 +46,12 @@ await env.withSecurityRulesDisabled(async ctx => {
   await setDoc(doc(db, "restaurants", RID, "hotel_reservations", "bk1"), { roomId: "101", checkIn: "2026-10-01", checkOut: "2026-10-03" });
   await setDoc(doc(db, "restaurants", RID, "hotel_guests", "g1"), { name: "A Guest", phone: "+919000000000" });
   await setDoc(doc(db, "restaurants", RID, "hotel_guest_documents", "g1"), { passportNumber: "Z1234567", idScanUrl: "https://example.invalid/scan.jpg" });
-  await setDoc(doc(db, "restaurants", RID, "hotel_folios", "f1"), { reservationId: "bk1", balance: 3000 });
+  await setDoc(doc(db, "restaurants", RID, "hotel_folios", "f1"), { reservationId: "bk1", balance: 3000, status: "open" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_folios", "f2"), { reservationId: "bk2", status: "closed", invoiceNumber: "INV/00001", guestName: "A Guest" });
+  await setDoc(doc(db, "hotelPayments", "pay1"), { restaurantId: RID, folioId: "f1", amount: 3000, status: "success" });
+  await setDoc(doc(db, "hotelPayments", "pay2"), { restaurantId: RID, folioId: "f1", amount: 500, status: "pending" });
+  await setDoc(doc(db, "hotelPayments", "pay9"), { restaurantId: RID2, folioId: "f9", amount: 100, status: "pending" });
+  await setDoc(doc(db, "hotelInvoices", "INV_00001"), { restaurantId: RID, folioId: "f2", invoiceNumber: "INV/00001", guestName: "A Guest", totals: { total: 2500 } });
   await setDoc(doc(db, "restaurants", RID, "hotel_corporate", "c1"), { name: "Acme", contractRate: 1900, commissionPercent: 12 });
   await setDoc(doc(db, "hotelNightAudits", "na1"), { restaurantId: RID, businessDate: "2026-10-01", roomRevenue: 50000 });
   await setDoc(doc(db, "hotelAuditLogs", "hal1"), { restaurantId: RID, action: "check_in", userId: STAFF_UID });
@@ -357,4 +362,34 @@ test("room night locks are readable publicly but writable only by the hotel's st
 test("a hotel cannot release or take a hold at another hotel", async () => {
   await assertFails(deleteDoc(doc(staff, "restaurants", RID2, "hotel_room_nights", "201__2026-10-01")));
   await assertFails(setDoc(doc(staff, "restaurants", RID2, "hotel_room_nights", "201__2026-12-01"), { roomId: "201" }));
+});
+
+test("RULE 12: a settled payment can never be edited or deleted", async () => {
+  // The two-step write stops a failed payment counting. This stops a counted
+  // one being rewritten afterwards — by anyone, owner and super admin alike.
+  await assertFails(updateDoc(doc(staff, "hotelPayments", "pay1"), { amount: 1 }));
+  await assertFails(updateDoc(doc(owner, "hotelPayments", "pay1"), { status: "failed" }));
+  await assertFails(updateDoc(doc(sup, "hotelPayments", "pay1"), { amount: 1 }));
+  await assertFails(deleteDoc(doc(owner, "hotelPayments", "pay1")));
+  // A payment still awaiting its outcome must remain settleable — settling
+  // it IS an edit, and refusing that would make the two-step write unusable.
+  await assertSucceeds(updateDoc(doc(staff, "hotelPayments", "pay2"), { status: "success" }));
+});
+
+test("RULES 15 and 16: an invoice is written once and never changed", async () => {
+  await assertSucceeds(getDoc(doc(staff, "hotelInvoices", "INV_00001")));
+  await assertFails(updateDoc(doc(staff, "hotelInvoices", "INV_00001"), { invoiceNumber: "INV/99999" }));
+  await assertFails(updateDoc(doc(owner, "hotelInvoices", "INV_00001"), { totals: { total: 1 } }));
+  await assertFails(updateDoc(doc(sup, "hotelInvoices", "INV_00001"), { totals: { total: 1 } }));
+  await assertFails(deleteDoc(doc(owner, "hotelInvoices", "INV_00001")));
+  await assertSucceeds(setDoc(doc(staff, "hotelInvoices", "INV_00002"),
+    { restaurantId: RID, invoiceNumber: "INV/00002", totals: { total: 100 } }));
+});
+
+test("one hotel cannot read or forge another's payments and invoices", async () => {
+  await assertFails(getDoc(doc(staff, "hotelPayments", "pay9")));
+  await assertFails(updateDoc(doc(staff, "hotelPayments", "pay9"), { status: "success" }));
+  await assertFails(setDoc(doc(staff, "hotelInvoices", "forged"), { restaurantId: RID2, invoiceNumber: "X" }));
+  await assertFails(getDocs(collection(anon, "hotelPayments")));
+  await assertFails(getDoc(doc(other, "restaurants", RID, "hotel_folios", "f1")));
 });

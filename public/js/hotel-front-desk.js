@@ -26,7 +26,7 @@
 ========================================================= */
 import { db, auth } from "./firebase.js?v=s2p-20260922d";
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, runTransaction, serverTimestamp
+  collection, doc, getDoc, getDocs, onSnapshot, query, where, runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   installAppSafety, registerCleanup, readValidatedLocal, getBusinessDate,
@@ -39,6 +39,9 @@ import {
 } from "./hotel-core.js?v=s2p-20260922d";
 import { createHotelStore, roomGrid, todayLists, calendarGrid } from "./hotel-store.js?v=s2p-20260922d";
 import { createReservationService, ReservationError } from "./hotel-reservations.js?v=s2p-20260922d";
+import {
+  createFolioService, checkoutSummary, PAYMENT_METHODS, FolioError
+} from "./hotel-folio.js?v=s2p-20260922d";
 
 installAppSafety({ pageName: "Hotel Front Desk", stuckTimeoutMs: 16000 });
 
@@ -88,10 +91,12 @@ const store = createHotelStore({
   onError: (error, context) => devError("hotel store", { ...context, code: error?.code, message: error?.message })
 });
 
-const reservations = createReservationService({
-  db, restaurantId,
-  firestore: { doc, collection, runTransaction, serverTimestamp }
-});
+const firestoreApi = { doc, collection, runTransaction, serverTimestamp };
+const reservations = createReservationService({ db, restaurantId, firestore: firestoreApi });
+const folios = createFolioService({ db, restaurantId, firestore: firestoreApi });
+
+/** The folio id for a stay. Derived, so it needs no lookup and no index. */
+const folioIdFor = reservationId => `FOL_${reservationId}`;
 
 /* ---------------------------------------------------------
    RENDER GUARD
@@ -364,17 +369,46 @@ async function guarded(label, work) {
 }
 
 document.body.addEventListener("click", event => {
+  // One delegated listener for the whole page. Re-rendering replaces markup
+  // constantly, so a second listener here would be the accumulating-handler
+  // fault section 47 names — and the checkout controls are rendered markup.
+  if (handleCheckoutClick(event)) return;
+
   const checkInId = event.target.closest("[data-check-in]")?.dataset.checkIn;
-  if (checkInId) return guarded("check-in", () => reservations.checkIn(checkInId, { actor }));
+  if (checkInId) return guarded("check-in", async () => {
+    const booking = state.reservations.find(row => String(row.id) === String(checkInId));
+    await reservations.checkIn(checkInId, { actor });
+    // The folio opens WITH the check-in, not at the first charge, so the
+    // restaurant has somewhere to post to from the moment the guest has a
+    // room. Opening is idempotent, so a retry cannot create a second one.
+    await folios.openFolio({
+      folioId: folioIdFor(checkInId),
+      reservationId: checkInId,
+      guestId: booking?.guestId || "",
+      guestName: booking?.guestName || "",
+      roomId: booking?.roomId || "",
+      businessDate: state.businessDate,
+      actor
+    });
+    // The room nights themselves are the first charge. Posted per night, at
+    // the rate agreed when the booking was made, so a stay spanning a rate
+    // change bills what was quoted rather than today's price.
+    for (const night of booking?.nightlyRates || []) {
+      await folios.postCharge({
+        folioId: folioIdFor(checkInId),
+        chargeId: `room_${checkInId}_${night.stayDate}`,
+        kind: "room",
+        description: `Room ${roomNumberOf(booking.roomId)} · ${night.stayDate}`,
+        quantity: 1, rate: night.amount,
+        taxPercent: Number(state.settings.roomTaxPercent || 0),
+        businessDate: night.stayDate,
+        actor
+      });
+    }
+  });
 
   const checkOutId = event.target.closest("[data-check-out]")?.dataset.checkOut;
-  if (checkOutId) return guarded("check-out", async () => {
-    // Phase 4 posts the folio here. Until the folio screen exists this
-    // deliberately says so rather than silently checking a guest out with
-    // charges unaccounted for — rule 3.
-    if (!confirm("Check this guest out?\n\nFolio settlement arrives with the billing screen; for now this records the departure and frees the room.")) return;
-    await reservations.checkOut(checkOutId, { actor });
-  });
+  if (checkOutId) return openCheckoutDialog(checkOutId);
 
   const cancelId = event.target.closest("[data-cancel]")?.dataset.cancel;
   if (cancelId) return guarded("cancel", async () => {
@@ -588,6 +622,155 @@ async function saveBooking() {
         return;
       }
       throw failure;
+    }
+  });
+}
+
+/* ---------------------------------------------------------
+   CHECKOUT
+
+   Section 11: show every charge, take the money, raise the
+   invoice, then mark the room DIRTY and raise a housekeeping
+   task. Rule 4 says the room becomes dirty; the room is never
+   made available here, because only housekeeping's own workflow
+   may do that.
+--------------------------------------------------------- */
+let checkoutContext = null;
+
+async function openCheckoutDialog(reservationId) {
+  const booking = state.reservations.find(row => String(row.id) === String(reservationId));
+  if (!booking) return;
+  const folioId = folioIdFor(reservationId);
+
+  await guarded("folio load", async () => {
+    // Read once, on open. The folio is not listened to: a checkout takes
+    // seconds and a live listener for it would be a third stream for data
+    // one screen looks at once.
+    const [items, paid] = await Promise.all([
+      getDocs(query(collection(db, "restaurants", restaurantId, "hotel_folio_items"), where("folioId", "==", folioId))),
+      getDocs(query(collection(db, "hotelPayments"), where("folioId", "==", folioId)))
+    ]);
+    const charges = items.docs.map(item => ({ id: item.id, ...item.data() }));
+    const payments = paid.docs.map(item => ({ id: item.id, ...item.data() }));
+    checkoutContext = { reservationId, folioId, booking, charges, payments };
+    renderCheckout();
+    $("hxCheckoutDialog").showModal();
+  });
+}
+
+function renderCheckout() {
+  const { booking, charges, payments } = checkoutContext;
+  const summary = checkoutSummary(charges, payments);
+  checkoutContext.summary = summary;
+
+  $("hxCheckoutTitle").textContent = `Check out · Room ${roomNumberOf(booking.roomId)}`;
+  const lines = summary.lines.map(line =>
+    `<tr><td>${esc(line.label)}</td><td style="text-align:right">${esc(money(line.amount))}</td></tr>`).join("");
+  const settled = summary.payments.map(payment =>
+    `<tr><td class="hx-note">${esc(payment.method || "")} ${esc(payment.reference || "")}</td>
+      <td style="text-align:right" class="hx-note">${esc(money(payment.amount))}</td></tr>`).join("");
+
+  paint("hxCheckoutBody", `
+    <p class="hx-note">${esc(booking.guestName || "Guest")} · ${esc(formatDate(booking.checkIn))} → ${esc(formatDate(booking.checkOut))}</p>
+    <table class="hx-table"><tbody>
+      ${lines || `<tr><td colspan="2" class="hx-note">No charges posted.</td></tr>`}
+      ${summary.discount ? `<tr><td>Discount</td><td style="text-align:right">−${esc(money(summary.discount))}</td></tr>` : ""}
+      ${summary.tax ? `<tr><td>Tax</td><td style="text-align:right">${esc(money(summary.tax))}</td></tr>` : ""}
+      <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${esc(money(summary.total))}</strong></td></tr>
+      ${settled}
+      ${summary.refunded ? `<tr><td>Refunded</td><td style="text-align:right">${esc(money(summary.refunded))}</td></tr>` : ""}
+      <tr><td><strong>Balance</strong></td><td style="text-align:right"><strong>${esc(money(summary.balance))}</strong></td></tr>
+    </tbody></table>
+    ${summary.unsettledAttempts ? `<div class="hx-error" style="margin-top:12px">${summary.unsettledAttempts} payment attempt${summary.unsettledAttempts === 1 ? "" : "s"} did not go through. The balance above excludes ${summary.unsettledAttempts === 1 ? "it" : "them"}.</div>` : ""}
+    ${summary.balance > 0 ? `
+      <div class="hx-row" style="margin-top:14px">
+        <div class="hx-field"><label for="hxPayAmount">Amount to collect</label>
+          <input id="hxPayAmount" type="number" min="0" step="0.01" value="${esc(summary.balance)}"></div>
+        <div class="hx-field"><label for="hxPayMethod">Method</label>
+          <select id="hxPayMethod">${PAYMENT_METHODS.map(method =>
+            `<option value="${esc(method)}">${esc(method.replace(/_/g, " "))}</option>`).join("")}</select></div>
+      </div>
+      <button class="hx-btn" id="hxTakePayment" type="button">Record payment</button>
+      <p class="hx-note" style="margin-top:10px">Recorded as pending first, then confirmed. A payment that does not go through never reduces the balance.</p>
+    ` : `<p class="hx-note" style="margin-top:14px">Folio settled. Ready to check out.</p>`}`);
+
+  $("hxCheckoutConfirm").textContent = summary.balance > 0 ? "Check out on credit" : "Check out";
+  $("hxCheckoutConfirm").disabled = false;
+}
+
+async function handleCheckoutClick(event) {
+  if (event.target.id === "hxTakePayment") {
+    const amount = Number($("hxPayAmount").value || 0);
+    const method = $("hxPayMethod").value;
+    const paymentId = `PAY_${Date.now().toString(36).toUpperCase()}`;
+    await guarded("payment", async () => {
+      const { folioId } = checkoutContext;
+      await folios.beginPayment({ folioId, paymentId, amount, method, actor, businessDate: state.businessDate });
+      // Cash and UPI at the desk are confirmed by the person taking them.
+      // A gateway payment would confirm from its own webhook instead — the
+      // two-step write is the same either way, which is the point of it.
+      const received = confirm(`Confirm ${money(amount)} received by ${method.replace(/_/g, " ")}?\n\nChoose Cancel if it did not go through.`);
+      await folios.settlePayment({
+        folioId, paymentId, outcome: received, actor,
+        failureReason: received ? "" : "Not received at the desk"
+      });
+      const paid = await getDocs(query(collection(db, "hotelPayments"), where("folioId", "==", folioId)));
+      checkoutContext.payments = paid.docs.map(item => ({ id: item.id, ...item.data() }));
+      renderCheckout();
+    });
+    return true;
+  }
+
+  if (event.target.id === "hxCheckoutConfirm") {
+    const { reservationId, folioId, charges, payments, summary, booking } = checkoutContext;
+    if (summary.balance > 0 && !confirm(
+      `${money(summary.balance)} is still outstanding.\n\nCheck out on credit? This is recorded against the invoice.`)) return;
+
+    await guarded("checkout", async () => {
+      try {
+        const invoice = await folios.closeFolio({
+          folioId, charges, payments, actor,
+          allowCredit: summary.balance > 0,
+          businessDate: state.businessDate,
+          invoiceFormat: {
+            prefix: state.settings.invoicePrefix || "INV",
+            width: Number(state.settings.invoiceWidth || 5)
+          }
+        });
+        await reservations.checkOut(reservationId, { actor, onCredit: summary.balance > 0 });
+
+        // RULE 4. The room becomes DIRTY and housekeeping is told. It is
+        // never made AVAILABLE here — only housekeeping's own workflow may
+        // do that, which is what stops a room being resold uncleaned.
+        await markRoomDirty(booking.roomId, reservationId);
+
+        $("hxCheckoutDialog").close();
+        alert(`Checked out. Invoice ${invoice.invoiceNumber}.`);
+      } catch (failure) {
+        if (failure instanceof FolioError) { alert(failure.message); return; }
+        throw failure;
+      }
+    });
+    return true;
+  }
+  return false;
+}
+
+async function markRoomDirty(roomId, reservationId) {
+  if (!roomId) return;
+  const taskId = `HK_${reservationId}`;
+  await runTransaction(db, async transaction => {
+    const roomRef = doc(db, "restaurants", restaurantId, "hotel_rooms", String(roomId));
+    const taskRef = doc(db, "restaurants", restaurantId, "hotel_housekeeping", taskId);
+    const existing = await transaction.get(taskRef);
+    transaction.set(roomRef, { status: ROOM_STATUS.DIRTY, updatedAt: serverTimestamp() }, { merge: true });
+    if (!existing.exists()) {
+      transaction.set(taskRef, {
+        restaurantId, roomId: String(roomId), reservationId: String(reservationId),
+        type: "departure_clean", status: "DIRTY",
+        businessDate: state.businessDate,
+        createdAt: serverTimestamp()
+      });
     }
   });
 }
