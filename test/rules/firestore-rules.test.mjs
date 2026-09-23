@@ -40,6 +40,20 @@ await env.withSecurityRulesDisabled(async ctx => {
   await setDoc(doc(db, "offers", "o1"), { code: "FREE100", discountValue: 100 });
   await setDoc(doc(db, "subscriptions", "sub1"), { restaurantId: RID, status: "active" });
   await setDoc(doc(db, "auditLogs", "log1"), { action: "staff_login" });
+
+  // A hotel, its own records, and a SECOND hotel to prove isolation.
+  await setDoc(doc(db, "restaurants", RID, "hotel_rooms", "101"), { roomNumber: "101", status: "AVAILABLE" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_reservations", "bk1"), { roomId: "101", checkIn: "2026-10-01", checkOut: "2026-10-03" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_guests", "g1"), { name: "A Guest", phone: "+919000000000" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_guest_documents", "g1"), { passportNumber: "Z1234567", idScanUrl: "https://example.invalid/scan.jpg" });
+  await setDoc(doc(db, "restaurants", RID, "hotel_folios", "f1"), { reservationId: "bk1", balance: 3000 });
+  await setDoc(doc(db, "restaurants", RID, "hotel_corporate", "c1"), { name: "Acme", contractRate: 1900, commissionPercent: 12 });
+  await setDoc(doc(db, "hotelNightAudits", "na1"), { restaurantId: RID, businessDate: "2026-10-01", roomRevenue: 50000 });
+  await setDoc(doc(db, "hotelAuditLogs", "hal1"), { restaurantId: RID, action: "check_in", userId: STAFF_UID });
+  await setDoc(doc(db, "hotelNightAudits", "na9"), { restaurantId: RID2, businessDate: "2026-10-01" });
+  await setDoc(doc(db, "restaurants", RID2, "hotel_rooms", "201"), { roomNumber: "201", status: "AVAILABLE" });
+  await setDoc(doc(db, "restaurants", RID2, "hotel_reservations", "bk9"), { roomId: "201", checkIn: "2026-10-01", checkOut: "2026-10-03" });
+  await setDoc(doc(db, "restaurants", RID2, "hotel_guests", "g9"), { name: "Their Guest" });
 });
 
 const anon  = env.unauthenticatedContext().firestore();
@@ -231,3 +245,96 @@ test("a collection nobody wrote a rule for is closed", async () => {
 });
 
 test.after(async () => { await env.cleanup(); });
+
+/* ================= hotel PMS =================
+
+   Section 45: hotel data is isolated by business, sensitive guest
+   documents are not exposed to unauthorised staff, and the records that
+   close the books cannot be rewritten afterwards.
+============================================================ */
+
+test("hotel front-desk records are readable and writable by the hotel's own staff", async () => {
+  for (const name of ["hotel_rooms", "hotel_reservations", "hotel_guests", "hotel_folios"]) {
+    await assertSucceeds(getDocs(collection(staff, "restaurants", RID, name)));
+  }
+  await assertSucceeds(setDoc(doc(staff, "restaurants", RID, "hotel_reservations", "bk-new"),
+    { roomId: "101", checkIn: "2026-11-01", checkOut: "2026-11-03" }));
+  await assertSucceeds(updateDoc(doc(staff, "restaurants", RID, "hotel_rooms", "101"), { status: "OCCUPIED" }));
+});
+
+test("ONE HOTEL CANNOT READ ANOTHER HOTEL'S DATA", async () => {
+  // The whole of section 45 in one test. Staff of RID are strangers at RID2.
+  for (const name of ["hotel_rooms", "hotel_reservations", "hotel_guests"]) {
+    await assertFails(getDocs(collection(staff, "restaurants", RID2, name)));
+    await assertFails(getDoc(doc(staff, "restaurants", RID2, name, name === "hotel_rooms" ? "201" : name === "hotel_guests" ? "g9" : "bk9")));
+  }
+  await assertFails(setDoc(doc(staff, "restaurants", RID2, "hotel_reservations", "hijack"), { roomId: "201" }));
+});
+
+test("a signed-out stranger cannot read any hotel record", async () => {
+  for (const name of ["hotel_rooms", "hotel_reservations", "hotel_guests", "hotel_folios", "hotel_corporate"]) {
+    await assertFails(getDocs(collection(anon, "restaurants", RID, name)));
+  }
+  await assertFails(getDoc(doc(anon, "restaurants", RID, "hotel_guest_documents", "g1")));
+});
+
+test("a signed-in stranger cannot read a hotel's guests or bookings", async () => {
+  await assertFails(getDocs(collection(other, "restaurants", RID, "hotel_guests")));
+  await assertFails(getDoc(doc(other, "restaurants", RID, "hotel_reservations", "bk1")));
+});
+
+test("SECTION 9: staff see the guest, but NOT the guest's passport", async () => {
+  // A receptionist needs the guest's name and phone to do their job. Nobody
+  // below the owner needs their passport number or ID scan, which is why the
+  // two live in different collections — Firestore rules are per document, so
+  // one record with "sensitive fields" could not be half-readable.
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "hotel_guests", "g1")));
+  await assertFails(getDoc(doc(staff, "restaurants", RID, "hotel_guest_documents", "g1")));
+  await assertFails(getDocs(collection(staff, "restaurants", RID, "hotel_guest_documents")));
+  await assertSucceeds(getDoc(doc(owner, "restaurants", RID, "hotel_guest_documents", "g1")));
+});
+
+test("commercial terms are owner-level, not front-desk", async () => {
+  // A corporate contract rate and an agent's commission are what the hotel
+  // sells at, not what it sells. A receptionist has no business rewriting them.
+  await assertFails(getDoc(doc(staff, "restaurants", RID, "hotel_corporate", "c1")));
+  await assertFails(setDoc(doc(staff, "restaurants", RID, "hotel_corporate", "c2"), { name: "Forged", contractRate: 1 }));
+  await assertSucceeds(getDoc(doc(owner, "restaurants", RID, "hotel_corporate", "c1")));
+});
+
+test("a closed night audit can never be edited or deleted", async () => {
+  // A closing that can be rewritten afterwards is not a closing. This is the
+  // test that forced these two collections out of restaurants/{rid}: under
+  // that path the owner-level catch-all granted write, and `if false` on the
+  // subcollection could not take it away.
+  await assertSucceeds(getDoc(doc(staff, "hotelNightAudits", "na1")));
+  await assertFails(updateDoc(doc(owner, "hotelNightAudits", "na1"), { roomRevenue: 1 }));
+  await assertFails(deleteDoc(doc(owner, "hotelNightAudits", "na1")));
+  await assertFails(updateDoc(doc(sup, "hotelNightAudits", "na1"), { roomRevenue: 1 }),
+    "not even a super admin rewrites a closed day");
+  // Creating tomorrow's close is the owner's to do.
+  await assertSucceeds(setDoc(doc(owner, "hotelNightAudits", "na2"), { restaurantId: RID, businessDate: "2026-10-02" }));
+  // And one hotel cannot read another's closed books.
+  await assertFails(getDoc(doc(staff, "hotelNightAudits", "na9")));
+});
+
+test("SECTION 43: hotel audit entries are append-only", async () => {
+  // Staff generate the trail by working; nobody may go back and change it.
+  await assertSucceeds(setDoc(doc(staff, "hotelAuditLogs", "hal2"),
+    { restaurantId: RID, action: "check_out", userId: STAFF_UID }));
+  await assertFails(updateDoc(doc(staff, "hotelAuditLogs", "hal1"), { action: "tampered" }));
+  await assertFails(updateDoc(doc(owner, "hotelAuditLogs", "hal1"), { action: "tampered" }));
+  await assertFails(deleteDoc(doc(owner, "hotelAuditLogs", "hal1")));
+  await assertFails(updateDoc(doc(sup, "hotelAuditLogs", "hal1"), { action: "tampered" }));
+  // A staff member cannot forge an entry against a hotel they do not work at.
+  await assertFails(setDoc(doc(staff, "hotelAuditLogs", "forged"), { restaurantId: RID2, action: "check_in" }));
+});
+
+test("adding hotel collections did not open anything for restaurants", async () => {
+  // The regression that matters most: every existing business type must be
+  // exactly as locked down as it was before the hotel rules were added.
+  await assertFails(getDoc(doc(anon, "restaurants", RID, "private", "profile")));
+  await assertFails(getDocs(collection(other, "restaurants", RID, "staff")));
+  await assertFails(getDocs(collection(anon, "restaurants", RID, "expenses")));
+  await assertSucceeds(getDoc(doc(anon, "restaurants", RID, "menu", "item1")));
+});

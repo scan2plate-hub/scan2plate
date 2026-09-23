@@ -153,11 +153,73 @@ service cloud.firestore {
         allow list, delete: if isStaffOf(rid);
       }
 
+      /* ---------------- hotel PMS ----------------
+
+         Every hotel record lives under restaurants/{rid}, so isolation by
+         business is structural: there is no path by which one hotel can
+         name another hotel's document. That is section 45's requirement,
+         and it is why these are subcollections rather than top-level
+         collections keyed by a businessId field, which would rely on every
+         query remembering to filter.
+
+         Without these rules the owner-only catch-all below would still
+         apply, and a receptionist could not open the front desk. They are
+         staff-level because the front desk, housekeeping and maintenance
+         are staff jobs; the finer question of WHICH staff member may do
+         WHAT is enforced above this, in the app's permission layer, and
+         below it by the fields each role is allowed to write.
+
+         GUEST IDENTITY DOCUMENTS ARE SPLIT OUT. hotel_guests holds what
+         reception needs to serve someone — name, phone, email, stay
+         history. Passport numbers, visa details and uploaded ID scans go
+         to hotel_guest_documents, which is owner-level, because section 9
+         requires that sensitive guest documents are not exposed to
+         unauthorised staff and a housekeeper has no reason to read a
+         guest's passport. Splitting the collection is what enforces that:
+         Firestore rules are per-document, so a single guest record with
+         "sensitive fields" could not be half-readable.
+      */
+      match /hotel_rooms/{docId}         { allow read, write: if isStaffOf(rid); }
+      match /hotel_room_types/{docId}    { allow read, write: if isStaffOf(rid); }
+      match /hotel_reservations/{docId}  { allow read, write: if isStaffOf(rid); }
+      match /hotel_guests/{docId}        { allow read, write: if isStaffOf(rid); }
+      match /hotel_guest_documents/{docId} { allow read, write: if isOwnerOf(rid); }
+      match /hotel_folios/{docId}        { allow read, write: if isStaffOf(rid); }
+      match /hotel_folio_items/{docId}   { allow read, write: if isStaffOf(rid); }
+      match /hotel_payments/{docId}      { allow read, write: if isStaffOf(rid); }
+      match /hotel_services/{docId}      { allow read, write: if isStaffOf(rid); }
+      match /hotel_housekeeping/{docId}  { allow read, write: if isStaffOf(rid); }
+      match /hotel_maintenance/{docId}   { allow read, write: if isStaffOf(rid); }
+      match /hotel_lost_found/{docId}    { allow read, write: if isStaffOf(rid); }
+      match /hotel_rate_plans/{docId}    { allow read, write: if isStaffOf(rid); }
+      match /hotel_linen/{docId}         { allow read, write: if isStaffOf(rid); }
+      match /hotel_minibar/{docId}       { allow read, write: if isStaffOf(rid); }
+      match /hotel_banquets/{docId}      { allow read, write: if isStaffOf(rid); }
+      match /hotel_cashier_shifts/{docId}{ allow read, write: if isStaffOf(rid); }
+
+      // Owner-level only. Corporate rate contracts and agent commissions are
+      // commercial terms, and a night audit is the property's closed books:
+      // neither is a receptionist's to read, let alone rewrite.
+      match /hotel_corporate/{docId}     { allow read, write: if isOwnerOf(rid); }
+      match /hotel_channels/{docId}      { allow read, write: if isOwnerOf(rid); }
+
+      // The two immutable hotel collections are NOT here. They cannot be:
+      // see the note above the catch-all below.
+
       // Anything not named above is owner-only, NOT staff-level. A recursive
       // wildcard also matches private/, and Firestore grants access when ANY
       // matching rule allows it — so a staff-level catch-all here would hand
       // every cashier the owner's contact details. Every subcollection staff
       // actually use is listed explicitly above.
+      //
+      // THE SAME "ANY RULE WINS" BEHAVIOUR MAKES APPEND-ONLY IMPOSSIBLE HERE.
+      // This wildcard grants the owner write on every path beneath the
+      // restaurant, so a subcollection declaring `allow update: if false`
+      // would still be editable: the grant here is enough on its own, and a
+      // deny cannot cancel it. Night audits and hotel audit logs therefore
+      // live in TOP-LEVEL collections keyed by restaurantId, alongside the
+      // existing auditLogs and orders, which is the only place a rule that
+      // denies everyone can actually hold. A rules test asserts it.
       match /{document=**} {
         allow read, write: if isOwnerOf(rid);
       }
@@ -178,6 +240,32 @@ service cloud.firestore {
     }
 
     /* ---------------- audit log ---------------- */
+
+    /* ---------------- hotel: the records that close the books ----------------
+
+       Top level, not under restaurants/{rid}, and deliberately so — the
+       recursive catch-all there grants the owner write on everything
+       beneath it, which would quietly make "append-only" a comment rather
+       than a rule. Isolation is by the restaurantId on the document, which
+       is how orders and auditLogs have always worked.
+    */
+
+    match /hotelNightAudits/{auditId} {
+      // The record that a business day was closed and reconciled. Created
+      // once by the property's owner; never altered afterwards, because a
+      // closing that can be rewritten later is not a closing.
+      allow get, list: if signedIn() && isStaffOf(resource.data.restaurantId);
+      allow create: if isOwnerOf(request.resource.data.restaurantId);
+      allow update, delete: if false;
+    }
+
+    match /hotelAuditLogs/{logId} {
+      // Section 43. Staff generate the trail by doing their jobs; the owner
+      // reads it; nobody edits it, super admin included.
+      allow create: if signedIn() && isStaffOf(request.resource.data.restaurantId);
+      allow get, list: if signedIn() && isOwnerOf(resource.data.restaurantId);
+      allow update, delete: if false;
+    }
 
     match /auditLogs/{logId} {
       // Append-only. The customer app writes login and order events.
