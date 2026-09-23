@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en-IN"><head>
+<meta name="robots" content="noindex, nofollow" /><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Night Audit · Scan2Plate Hotel</title>
+<link rel="preconnect" href="https://www.gstatic.com">
+<style>
+/* Run once a night, by a manager, usually tired. So: what is blocking, what
+   needs acknowledging, the day's numbers, and one button — in that order,
+   with nothing to hunt for. */
+:root{--hp:#0f766e;--hp-dark:#115e59;--hd:#0f172a;--hm:#64748b;--hl:#e2e8f0;--hbg:#f8fafc;--bad:#dc2626;--warn:#d97706;--ok:#16a34a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--hbg);color:var(--hd);font:14px/1.5 Inter,system-ui,Arial,sans-serif}
+.na-top{background:var(--hd);color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+.na-top h1{margin:0;font-size:19px}
+.na-top p{margin:3px 0 0;color:#94a3b8;font-size:12px}
+.na-wrap{max-width:900px;margin:0 auto;padding:20px 22px 60px}
+.na-btn{border:0;border-radius:9px;background:var(--hp);color:#fff;padding:11px 16px;font:inherit;font-weight:750;cursor:pointer}
+.na-btn:hover{background:var(--hp-dark)}
+.na-btn.ghost{background:#fff;color:var(--hd);border:1px solid var(--hl)}
+.na-btn.big{width:100%;padding:16px;font-size:15px}
+.na-btn[disabled]{opacity:.5;cursor:not-allowed}
+.na-panel{background:#fff;border:1px solid var(--hl);border-radius:13px;margin-bottom:16px;overflow:hidden}
+.na-panel-head{padding:13px 16px;border-bottom:1px solid var(--hl);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.na-panel-head h2{margin:0;font-size:15px}
+.na-panel-body{padding:16px}
+.na-block{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px;margin-bottom:10px;font-weight:650}
+.na-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;margin-bottom:10px}
+.na-warn label{display:flex;gap:9px;align-items:flex-start;cursor:pointer;font-size:13px}
+.na-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:12px;font-weight:700}
+.na-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.na-stat{background:#f8fafc;border:1px solid var(--hl);border-radius:11px;padding:12px}
+.na-stat span{color:var(--hm);font-size:11px;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.na-stat b{display:block;font-size:22px;margin-top:4px}
+.na-table{width:100%;border-collapse:collapse;font-size:13px}
+.na-table td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
+.na-table td:last-child{text-align:right;font-weight:700}
+.na-field{margin-bottom:12px}
+.na-field label{display:block;font-size:12px;font-weight:750;margin-bottom:5px;color:var(--hm)}
+.na-field input,.na-field textarea{width:100%;padding:10px;border:1px solid var(--hl);border-radius:9px;font:inherit}
+.na-hint{color:var(--hm);font-size:12px}
+.na-busy{opacity:.55;pointer-events:none}
+@media (max-width:700px){.na-wrap{padding:14px}}
+</style>
+</head>
+<body>
+<header class="na-top">
+  <div><h1>Night Audit</h1><p id="naSubtitle">Loading…</p></div>
+  <button class="na-btn ghost" id="naFrontDesk" type="button">Front Desk</button>
+</header>
+
+<div class="na-wrap">
+  <div class="na-panel">
+    <div class="na-panel-head"><h2>Before closing</h2><span class="na-hint" id="naDate"></span></div>
+    <div class="na-panel-body" id="naChecks"></div>
+  </div>
+
+  <div class="na-panel">
+    <div class="na-panel-head"><h2>Room charges for tonight</h2></div>
+    <div class="na-panel-body" id="naCharges"></div>
+  </div>
+
+  <div class="na-panel">
+    <div class="na-panel-head"><h2>The day</h2></div>
+    <div class="na-panel-body">
+      <div class="na-grid" id="naStats"></div>
+      <div style="margin-top:16px"><table class="na-table" id="naBreakdown"></table></div>
+    </div>
+  </div>
+
+  <div class="na-panel">
+    <div class="na-panel-head"><h2>Close the day</h2></div>
+    <div class="na-panel-body">
+      <div class="na-field"><label for="naNotes">Notes for the record (optional)</label>
+        <textarea id="naNotes" rows="2" placeholder="Anything tomorrow should know"></textarea></div>
+      <button class="na-btn big" id="naClose" type="button">Close the day</button>
+      <p class="na-hint" style="margin-bottom:0">Once closed, this day's record can never be edited. Room charges post first and can be re-run safely.</p>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./js/hotel-night-audit-page.js?v=s2p-20260922d"></script>
+</body></html>

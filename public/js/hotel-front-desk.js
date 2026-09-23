@@ -149,6 +149,7 @@ $("hxNav").addEventListener("click", event => {
   // neither belongs in the front desk's live-listener graph.
   if (event.target.id === "hxSetupLink") location.assign("./hotel-setup.html");
   if (event.target.id === "hxHousekeepingLink") location.assign("./hotel-housekeeping.html");
+  if (event.target.id === "hxNightAuditLink") location.assign("./hotel-night-audit.html");
 });
 
 /* An empty property looks broken. It is not — it is unconfigured, and

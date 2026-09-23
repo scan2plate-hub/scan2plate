@@ -52,6 +52,8 @@ await env.withSecurityRulesDisabled(async ctx => {
   await setDoc(doc(db, "hotelPayments", "pay2"), { restaurantId: RID, folioId: "f1", amount: 500, status: "pending" });
   await setDoc(doc(db, "hotelPayments", "pay9"), { restaurantId: RID2, folioId: "f9", amount: 100, status: "pending" });
   await setDoc(doc(db, "hotelInvoices", "INV_00001"), { restaurantId: RID, folioId: "f2", invoiceNumber: "INV/00001", guestName: "A Guest", totals: { total: 2500 } });
+  await setDoc(doc(db, "restaurants", RID, "hotel_cashier_shifts", "S1"), { status: "ACTIVE", openingCash: 1000, cashierUid: STAFF_UID });
+  await setDoc(doc(db, "restaurants", RID2, "hotel_cashier_shifts", "S9"), { status: "ACTIVE", openingCash: 500 });
   await setDoc(doc(db, "restaurants", RID, "hotel_corporate", "c1"), { name: "Acme", contractRate: 1900, commissionPercent: 12 });
   await setDoc(doc(db, "hotelNightAudits", "na1"), { restaurantId: RID, businessDate: "2026-10-01", roomRevenue: 50000 });
   await setDoc(doc(db, "hotelAuditLogs", "hal1"), { restaurantId: RID, action: "check_in", userId: STAFF_UID });
@@ -392,4 +394,26 @@ test("one hotel cannot read or forge another's payments and invoices", async () 
   await assertFails(setDoc(doc(staff, "hotelInvoices", "forged"), { restaurantId: RID2, invoiceNumber: "X" }));
   await assertFails(getDocs(collection(anon, "hotelPayments")));
   await assertFails(getDoc(doc(other, "restaurants", RID, "hotel_folios", "f1")));
+});
+
+test("SECTION 26: a cashier shift is the hotel's own, and nobody else's", async () => {
+  await assertSucceeds(getDoc(doc(staff, "restaurants", RID, "hotel_cashier_shifts", "S1")));
+  await assertSucceeds(updateDoc(doc(staff, "restaurants", RID, "hotel_cashier_shifts", "S1"), { status: "CLOSED" }));
+  // A cashier at one property cannot read or touch another's drawer.
+  await assertFails(getDoc(doc(staff, "restaurants", RID2, "hotel_cashier_shifts", "S9")));
+  await assertFails(updateDoc(doc(staff, "restaurants", RID2, "hotel_cashier_shifts", "S9"), { openingCash: 0 }));
+  await assertFails(getDocs(collection(anon, "restaurants", RID, "hotel_cashier_shifts")));
+});
+
+test("SECTION 25: a closed day is created once and can never be rewritten", async () => {
+  // The audit is written at the top level precisely so this deny holds —
+  // under restaurants/{rid} the owner-level catch-all would grant write.
+  await assertSucceeds(setDoc(doc(owner, "hotelNightAudits", `${RID}_2026-10-05`),
+    { restaurantId: RID, businessDate: "2026-10-05", occupancy: 62 }));
+  await assertFails(updateDoc(doc(owner, "hotelNightAudits", `${RID}_2026-10-05`), { occupancy: 99 }));
+  await assertFails(updateDoc(doc(sup, "hotelNightAudits", `${RID}_2026-10-05`), { occupancy: 99 }));
+  await assertFails(deleteDoc(doc(owner, "hotelNightAudits", `${RID}_2026-10-05`)));
+  // Staff may read the day that was closed; another property may not.
+  await assertSucceeds(getDoc(doc(staff, "hotelNightAudits", `${RID}_2026-10-05`)));
+  await assertFails(setDoc(doc(staff, "hotelNightAudits", "forged"), { restaurantId: RID2, businessDate: "2026-10-05" }));
 });

@@ -97,8 +97,9 @@ test("EVERY name imported by a hotel module is actually exported", async () => {
     // plan-limits.js itself imports firebase.js, so it is unloadable for the
     // same reason. Its own behaviour is covered by plan-limits.test.mjs,
     // which stubs the SDK through a loader hook.
-    "hotel-setup-page.js -> plan-limits.js"
-  ], "if this list grows, coverage shrank and this line should say why");
+    "hotel-setup-page.js -> plan-limits.js",
+    "hotel-night-audit-page.js -> firebase.js"
+  ].sort(), "if this list grows, coverage shrank and this line should say why");
 });
 
 test("every hotel module's relative imports are version-stamped", () => {
@@ -126,7 +127,8 @@ test("every hotel page loads its controller with a version token", () => {
   [
     ["hotel-front-desk.html", "hotel-front-desk.js"],
     ["hotel-housekeeping.html", "hotel-housekeeping-board.js"],
-    ["hotel-setup.html", "hotel-setup-page.js"]
+    ["hotel-setup.html", "hotel-setup-page.js"],
+    ["hotel-night-audit.html", "hotel-night-audit-page.js"]
   ].forEach(([page, controller]) => {
     const html = readFileSync(`${import.meta.dirname}/../public/${page}`, "utf8");
     assert.match(html, new RegExp(`src="\\./js/${controller.replace(".", "\\.")}\\?v=s2p-[a-z0-9-]+"`), page);
@@ -156,7 +158,7 @@ test("the hotel panel routes by job rather than dumping everyone on one screen",
 test("both hotel pages bind exactly one delegated click listener", () => {
   // Re-rendering replaces markup constantly. Per-button listeners would
   // either be lost or accumulate — the duplicate-listener fault in §47.
-  ["hotel-front-desk.js", "hotel-housekeeping-board.js", "hotel-setup-page.js"].forEach(file => {
+  ["hotel-front-desk.js", "hotel-housekeeping-board.js", "hotel-setup-page.js", "hotel-night-audit-page.js"].forEach(file => {
     const code = codeOf(file);
     const listeners = code.match(/document\.body\.addEventListener\(/g) || [];
     assert.equal(listeners.length, 1, `${file} must delegate from one listener`);
@@ -205,7 +207,8 @@ test("every element the controller looks up exists in the page", () => {
   // A typo'd id is a silent no-op: the button simply never works.
   [["hotel-front-desk.html", "hotel-front-desk.js"],
    ["hotel-housekeeping.html", "hotel-housekeeping-board.js"],
-   ["hotel-setup.html", "hotel-setup-page.js"]].forEach(([page, controller]) => {
+   ["hotel-setup.html", "hotel-setup-page.js"],
+   ["hotel-night-audit.html", "hotel-night-audit-page.js"]].forEach(([page, controller]) => {
     checkIds(readFileSync(`${import.meta.dirname}/../public/${page}`, "utf8"), sourceOf(controller), page);
   });
 });
@@ -230,3 +233,27 @@ function checkIds(html, source, label) {
   });
   assert.deepEqual([...new Set(missing)], [], `${label}: the controller reaches for ids the page does not have`);
 }
+
+test("SECTION 25: no hotel page closes the day on a timer", () => {
+  // The single most important negative requirement in the specification.
+  // Closing a day charges rooms, releases inventory and writes a record
+  // that can never be edited — none of it may happen because a browser tab
+  // was left open past midnight in the wrong timezone.
+  ["hotel-night-audit.js", "hotel-night-audit-page.js"].forEach(file => {
+    const code = codeOf(file);
+    ["setInterval", "setTimeout", "requestIdleCallback"].forEach(scheduler => {
+      assert.ok(!code.includes(scheduler), `${file} must not schedule anything`);
+    });
+  });
+  // And the close is a manager's deliberate act, gated on their role.
+  assert.match(codeOf("hotel-night-audit.js"), /normalizeHotelRole\(actor\?\.role\)/);
+});
+
+test("the night audit reads the property's clock, never the browser's", () => {
+  // Rule 20. A hotel in Kolkata closes on Kolkata's clock whether the
+  // manager is in Kolkata, London, or on a phone set to the wrong zone.
+  const page = codeOf("hotel-night-audit-page.js");
+  assert.match(page, /propertyToday|expectedAuditDate/, "the day comes from the property helper");
+  assert.ok(!/new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/.test(page),
+    "and never straight from the browser's own date");
+});
