@@ -24,6 +24,7 @@ import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-
 import { resolveBusinessType } from "./business-types.js?v=s2p-20260922d";
 import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260922d";
 import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-20260922d";
+import { CLOSED_WORKFLOW_STATUSES, openBillForTable, tableSelectionPlan } from "./table-bills.js?v=s2p-20260922d";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -1854,8 +1855,8 @@ function isOrderCompleted(order = {}) {
 // operational actions (Accept/Preparing/Ready/Reject/+10 min/KOT) no longer
 // apply, independent of payment status (a pre-paid online order that hasn't
 // been accepted yet is NOT workflow-closed, so this must key off status only).
-const CLOSED_WORKFLOW_STATUSES = ["completed", "served", "delivered", "cancelled", "rejected"];
-
+// The list itself lives in table-bills.js, so the Tables grid, the Quick
+// Billing picker and this all agree on what "still running" means.
 function isOrderWorkflowClosed(order = {}) {
   return CLOSED_WORKFLOW_STATUSES.includes(String(order.status || "pending").toLowerCase());
 }
@@ -4495,13 +4496,14 @@ function bindTableGridActions() {
    taps on "+". This is a tap-to-pick grid that also shows
    which tables already have a running bill, so the counter
    never has to leave Quick Billing to find out.
+
+   Tapping a table marked Running opens that bill, items and
+   all. It used to change only the number and leave the cart
+   empty, which made the Running label something to work
+   around rather than something to use.
 --------------------------------------------------------- */
 function tableHasOpenBill(tableNo) {
-  const wanted = String(tableNo).padStart(2, "0");
-  return (allOrders || []).some(order =>
-    String(order.tableNo || order.tableNumber || "").padStart(2, "0") === wanted
-    && !isOrderWorkflowClosed(order)
-    && String(order.paymentStatus || "").toLowerCase() !== "paid");
+  return openBillForTable(allOrders, tableNo) !== null;
 }
 
 function selectedManualTable() {
@@ -4519,8 +4521,36 @@ function renderTablePicker() {
   }).join("");
 }
 
-function setManualTable(tableNo, { closePanel = true } = {}) {
+/**
+ * Pick a table.
+ *
+ * loadOpenBill is off by default and on only for a deliberate tap on a chip
+ * in the picker. Stepping through tables with the +/- buttons passes over
+ * every table in between, and each one must stay a number change — loading a
+ * bill on the way past would be unusable.
+ */
+async function setManualTable(tableNo, { closePanel = true, loadOpenBill = false } = {}) {
   const value = String(tableNo).padStart(2, "0");
+
+  if (loadOpenBill) {
+    const plan = tableSelectionPlan({
+      orders: allOrders,
+      tableNo: value,
+      editingOrderDocId,
+      cart: manualCart
+    });
+    // Refusing the prompt changes nothing at all: the counter keeps the cart
+    // it was warned about rather than silently landing on another table.
+    if (plan.action === "load") {
+      if (plan.confirmMessage && !confirm(plan.confirmMessage)) return;
+      if (tablePickLabelEl) tablePickLabelEl.textContent = `Table ${value}`;
+      if (closePanel) tablePickPanelEl?.classList.add("hidden");
+      await loadOrderIntoManualBill(plan.orderDocId);
+      renderTablePicker();
+      return;
+    }
+  }
+
   renderTableNumberOptions(value);
   if (tablePickLabelEl) tablePickLabelEl.textContent = `Table ${value}`;
   if (closePanel) tablePickPanelEl?.classList.add("hidden");
@@ -6958,7 +6988,7 @@ applyManualOrderTypeUi();
 tablePickBtnEl?.addEventListener("click", () => toggleTablePicker());
 tablePickGridEl?.addEventListener("click", event => {
   const chip = event.target.closest("[data-pick-table]");
-  if (chip) setManualTable(chip.dataset.pickTable);
+  if (chip) setManualTable(chip.dataset.pickTable, { loadOpenBill: true });
 });
 tableDecBtn?.addEventListener("click", () => stepManualTable(-1));
 tableIncBtn?.addEventListener("click", () => stepManualTable(1));
