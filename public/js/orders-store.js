@@ -16,19 +16,19 @@
      - performs the one-shot "refresh the ID token and
        resubscribe" recovery that a stale token needs.
 ========================================================= */
-import { db, auth } from "./firebase.js";
+import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
 import {
   collection,
   query,
   where,
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { createCoalescedRunner, registerCleanup, devError } from "./common.js?v=freeze-fix-20260816";
+import { createCoalescedRunner, registerCleanup, devError } from "./common.js?v=s2p-dfe397943ce9";
 // The offline billing app syncs into its own subcollection. Mapping those
 // orders into the dashboard's shape HERE means the order list, the reports
 // and the best-selling chart all pick them up without any of them learning
 // a second schema.
-import { toDashboardOrder } from "./offline-pos-view.js?v=s2p-20260922d";
+import { toDashboardOrder } from "./offline-pos-view.js?v=s2p-dfe397943ce9";
 
 const subscribers = new Set();
 const errorHandlers = new Set();

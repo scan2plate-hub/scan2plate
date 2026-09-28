@@ -24,24 +24,24 @@
 
    Nothing here calls location.reload().
 ========================================================= */
-import { db, auth } from "./firebase.js?v=s2p-20260922d";
+import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query, where, runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   installAppSafety, registerCleanup, readValidatedLocal, getBusinessDate,
   resolveActiveRestaurantId, devError
-} from "./common.js?v=s2p-20260922d";
+} from "./common.js?v=s2p-dfe397943ce9";
 import {
   ROOM_STATUS, RESERVATION_STATUS, BOOKING_SOURCES, normalizeReservationStatus,
   propertyToday, nightsOf, addDays, asStayDate, validateStayDates, quoteStay,
   hotelKpis, frontDeskSnapshot, availableRooms, validateRoomAssignment
-} from "./hotel-core.js?v=s2p-20260922d";
-import { createHotelStore, roomGrid, todayLists, calendarGrid } from "./hotel-store.js?v=s2p-20260922d";
-import { createReservationService, ReservationError } from "./hotel-reservations.js?v=s2p-20260922d";
+} from "./hotel-core.js?v=s2p-dfe397943ce9";
+import { createHotelStore, roomGrid, todayLists, calendarGrid } from "./hotel-store.js?v=s2p-dfe397943ce9";
+import { createReservationService, ReservationError } from "./hotel-reservations.js?v=s2p-dfe397943ce9";
 import {
   createFolioService, checkoutSummary, PAYMENT_METHODS, FolioError
-} from "./hotel-folio.js?v=s2p-20260922d";
+} from "./hotel-folio.js?v=s2p-dfe397943ce9";
 
 installAppSafety({ pageName: "Hotel Front Desk", stuckTimeoutMs: 16000 });
 

@@ -1,7 +1,7 @@
-import { auth, db } from "./firebase.js";
+import { auth, db } from "./firebase.js?v=s2p-dfe397943ce9";
 import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, getDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { debugSuperAdminLogin, friendlyAuthError, resolveSuperAdminRole, saveSuperAdminSession } from "./super-admin-auth.js";
+import { debugSuperAdminLogin, friendlyAuthError, resolveSuperAdminRole, saveSuperAdminSession } from "./super-admin-auth.js?v=s2p-dfe397943ce9";
 
 const $ = id => document.getElementById(id);
 const form = $("loginForm"), emailEl = $("email"), passwordEl = $("password"), typeEl = $("businessType"), loginButton = $("loginButton"), messageEl = $("loginMessage"), mismatchModal = $("typeMismatchModal");

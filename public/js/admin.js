@@ -1,4 +1,4 @@
-import { app, db, auth } from "./firebase.js";
+import { app, db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
 import {
   collection,
   doc,
@@ -16,15 +16,15 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { mountSafeReset } from "./safe-reset.js";
-import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js";
-import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList, resolveActiveRestaurantId } from "./common.js?v=freeze-fix-20260816";
-import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=fast-refresh-20260916";
-import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-20260922d";
-import { resolveBusinessType } from "./business-types.js?v=s2p-20260922d";
-import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-20260922d";
-import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-20260922d";
-import { CLOSED_WORKFLOW_STATUSES, openBillForTable, tableSelectionPlan } from "./table-bills.js?v=s2p-20260922d";
+import { mountSafeReset } from "./safe-reset.js?v=s2p-dfe397943ce9";
+import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js?v=s2p-dfe397943ce9";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList, resolveActiveRestaurantId } from "./common.js?v=s2p-dfe397943ce9";
+import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=s2p-dfe397943ce9";
+import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-dfe397943ce9";
+import { resolveBusinessType } from "./business-types.js?v=s2p-dfe397943ce9";
+import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-dfe397943ce9";
+import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-dfe397943ce9";
+import { CLOSED_WORKFLOW_STATUSES, openBillForTable, tableSelectionPlan } from "./table-bills.js?v=s2p-dfe397943ce9";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -7383,7 +7383,7 @@ try {
     // Subscription panel, the plans for THIS business type, and the offer
     // popup. Imported lazily and not awaited, so a slow plan read can never
     // delay the dashboard itself.
-    import("./business-subscription.js?v=s2p-20260922d").then(module => module.mountBusinessSubscription({
+    import("./business-subscription.js?v=s2p-dfe397943ce9").then(module => module.mountBusinessSubscription({
       businessId: restaurantId,
       businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
       businessName: restaurantSettings.restaurantName || "",

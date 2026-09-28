@@ -18,12 +18,12 @@
 import {
   pricingFor, currentSubscription, watchSubscription, loadPlan, promotableOffer, loadBusiness,
   isOfferDismissed, dismissOffer, startSubscription, cancelSubscription, openRazorpayCheckout
-} from "./subscription-client.js?v=s2p-20260922d";
-import { businessTypeLabel } from "./business-types.js?v=s2p-20260922d";
+} from "./subscription-client.js?v=s2p-dfe397943ce9";
+import { businessTypeLabel } from "./business-types.js?v=s2p-dfe397943ce9";
 import {
   formatMoney, statusLabel, statusTone, toDate, isEntitled, graceEndsAt, limitLabel, planAllowsFeature,
   legacySubscriptionFrom
-} from "./subscription-core.js?v=s2p-20260922d";
+} from "./subscription-core.js?v=s2p-dfe397943ce9";
 
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")

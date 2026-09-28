@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
 import {
   collection,
   getDocs,
@@ -7,7 +7,7 @@ import {
   addDoc,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { calculateOrderTotals, normalizeCustomerPhone, installAppSafety, guardedAction } from "./common.js";
+import { calculateOrderTotals, normalizeCustomerPhone, installAppSafety, guardedAction } from "./common.js?v=s2p-dfe397943ce9";
 
 installAppSafety({ pageName: "Customer Order Workflow", stuckTimeoutMs: 18000 });
 

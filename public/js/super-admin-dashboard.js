@@ -1,9 +1,9 @@
-import { auth, db } from "./firebase.js";
-import { mergeRestaurantProfile, ownerEmailOf, ownerNameOf } from "./restaurant-private.js?v=s2p-20260922d";
+import { auth, db } from "./firebase.js?v=s2p-dfe397943ce9";
+import { mergeRestaurantProfile, ownerEmailOf, ownerNameOf } from "./restaurant-private.js?v=s2p-dfe397943ce9";
 import { signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, getDoc, updateDoc, setDoc, doc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { escapeHtml, fmtCurrency } from "./common.js";
-import { mountSafeReset } from "./safe-reset.js";
+import { escapeHtml, fmtCurrency } from "./common.js?v=s2p-dfe397943ce9";
+import { mountSafeReset } from "./safe-reset.js?v=s2p-dfe397943ce9";
 
 const $ = selector => document.querySelector(selector);
 const logoutBtn = $("#logoutBtn");

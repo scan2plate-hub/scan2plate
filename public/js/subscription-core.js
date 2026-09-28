@@ -10,7 +10,7 @@
    Money is handled in whole rupees at this layer and converted to
    paise only at the Razorpay boundary, to avoid float drift.
 ========================================================= */
-import { normalizeBusinessType, businessTypeOf } from "./business-types.js?v=s2p-20260922d";
+import { normalizeBusinessType, businessTypeOf } from "./business-types.js?v=s2p-dfe397943ce9";
 
 export const BILLING_CYCLES = ["monthly", "yearly"];
 

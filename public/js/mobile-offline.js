@@ -12,11 +12,11 @@
 // OfflineNav plugin (see mobile/android/.../OfflineNavPlugin.java) - the
 // Android equivalent of the desktop app's "Continue Billing Offline" window
 // switch.
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
 import { collection, doc, getDoc, getDocs, addDoc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { registerCleanup, devError } from "./common.js";
-import { buildSyncPlan } from "./mobile-offline-core.js";
-import { cacheRestaurant, replaceMenuCache, replaceTablesCache, listPendingOrders, markSynced, markSyncFailed } from "./mobile-offline-db.js";
+import { registerCleanup, devError } from "./common.js?v=s2p-dfe397943ce9";
+import { buildSyncPlan } from "./mobile-offline-core.js?v=s2p-dfe397943ce9";
+import { cacheRestaurant, replaceMenuCache, replaceTablesCache, listPendingOrders, markSynced, markSyncFailed } from "./mobile-offline-db.js?v=s2p-dfe397943ce9";
 
 function isCapacitorNative() {
   return Boolean(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());

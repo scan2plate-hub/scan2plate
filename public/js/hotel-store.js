@@ -150,7 +150,7 @@ export function createHotelStore({ db, restaurantId, firestore, onError = () => 
 import {
   normalizeRoomStatus, normalizeReservationStatus, reservationHoldsRoom,
   RESERVATION_STATUS, ROOM_STATUS, asStayDate, isSellableRoom
-} from "./hotel-core.js?v=s2p-20260922d";
+} from "./hotel-core.js?v=s2p-dfe397943ce9";
 
 /**
  * The room grid: every room with the booking currently in it, if any.

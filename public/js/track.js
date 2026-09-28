@@ -1,4 +1,4 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
 import {
   collection,
   doc,
@@ -8,7 +8,7 @@ import {
   query,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { calculateOrderTotals, installAppSafety, withTimeout, registerCleanup, guardedAction } from "./common.js";
+import { calculateOrderTotals, installAppSafety, withTimeout, registerCleanup, guardedAction } from "./common.js?v=s2p-dfe397943ce9";
 
 installAppSafety({ pageName: "Track Order", stuckTimeoutMs: 15000 });
 

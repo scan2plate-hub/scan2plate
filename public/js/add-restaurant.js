@@ -1,10 +1,10 @@
-import { db } from "./firebase.js";
-import { splitRestaurantPayload } from "./restaurant-private.js?v=s2p-20260922d";
-import { firebaseConfig } from "./firebase-config.js";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
+import { splitRestaurantPayload } from "./restaurant-private.js?v=s2p-dfe397943ce9";
+import { firebaseConfig } from "./firebase-config.js?v=s2p-dfe397943ce9";
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, deleteUser } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { qs, toast } from "./common.js";
+import { qs, toast } from "./common.js?v=s2p-dfe397943ce9";
 
 const el = id => qs(`#${id}`);
 const restaurantId = el("restaurantId"), restaurantName = el("restaurantName"), ownerName = el("ownerName"), phone = el("phone"), email = el("email"), plan = el("plan"), amount = el("amount"), status = el("status"), expiryDate = el("expiryDate"), tableCount = el("tableCount"), address = el("address"), adminName = el("adminName"), adminEmail = el("adminEmail"), saveRestaurantBtn = el("saveRestaurantBtn"), msg = el("msg");

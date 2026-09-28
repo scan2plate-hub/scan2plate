@@ -9,10 +9,11 @@
     "build:sitemap": "node scripts/build-sitemap.mjs",
     "build:schema": "node scripts/build-schema.mjs",
     "seo:check": "node scripts/seo-audit.mjs && node scripts/validate-schema.mjs && node scripts/validate-sitemap.mjs && node scripts/page-similarity.mjs",
-    "predeploy": "npm run build:blog && npm run build:schema && npm run sync:copies && npm run build:sitemap && npm run seo:check",
+    "predeploy": "npm run build:blog && npm run build:schema && npm run sync:copies && npm run build:sitemap && npm run seo:check && npm run stamp:cache -- --check",
     "sync:copies": "node scripts/sync-directory-copies.mjs",
     "build:blog": "node scripts/build-blog.mjs",
-    "test:rules": "npx --no-install firebase emulators:exec --only firestore --project scan2serve-23bf6 \"node --test test/rules/firestore-rules.test.mjs\""
+    "test:rules": "npx --no-install firebase emulators:exec --only firestore --project scan2serve-23bf6 \"node --test test/rules/firestore-rules.test.mjs\"",
+    "stamp:cache": "node scripts/stamp-cache.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

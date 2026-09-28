@@ -35,7 +35,7 @@
 import {
   folioTotals, chargeAmounts, canCheckOut, round2, isSettledPayment,
   asStayDate, FOLIO_CHARGE_KINDS, normalizeHotelRole
-} from "./hotel-core.js?v=s2p-20260922d";
+} from "./hotel-core.js?v=s2p-dfe397943ce9";
 
 export const FOLIOS = "hotel_folios";
 export const FOLIO_ITEMS = "hotel_folio_items";
