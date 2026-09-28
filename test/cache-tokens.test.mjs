@@ -122,3 +122,44 @@ test("restamping is a no-op, so it never churns a diff on its own", () => {
   assert.equal(tokenFor(files), tokenFor(files));
   assert.deepEqual(staleFiles(files, tokenFor(files)).map(rel), []);
 });
+
+/* ---------------------------------------------------------
+   THE CACHE WINDOW ITSELF
+
+   The token decides whether a browser looks again. These
+   headers decide how long it waits before it would have
+   looked anyway, which is the blast radius of a bad deploy:
+   a mistake that ships is live for exactly this long for
+   anyone whose browser does not re-fetch.
+
+   They apply to Firebase Hosting only. GitHub Pages sets its
+   own headers and does not read this file.
+--------------------------------------------------------- */
+const hostingHeaders = JSON.parse(readFileSync(`${ROOT}/firebase.json`, "utf8")).hosting.headers;
+
+const cacheControlFor = source => hostingHeaders
+  .find(rule => rule.source === source)?.headers
+  .find(header => header.key === "Cache-Control")?.value;
+
+test("JS is cached for one day", () => {
+  assert.equal(cacheControlFor("**/*.js"), "public, max-age=86400");
+});
+
+test("no rule caches JS for longer than a day", () => {
+  // A second rule matching .js with a larger window would quietly undo the
+  // one above, and which rule wins is not obvious from reading the file.
+  for (const rule of hostingHeaders) {
+    if (rule.source === "**/*.js" || !/\bjs\b/.test(rule.source)) continue;
+    const value = rule.headers.find(header => header.key === "Cache-Control")?.value || "";
+    const maxAge = Number(value.match(/max-age=(\d+)/)?.[1] ?? 0);
+    assert.ok(maxAge <= 86400, `${rule.source} caches JS for ${maxAge}s`);
+  }
+});
+
+test("HTML is never cached, so a new token is always seen", () => {
+  // The entry point carries the token. An HTML page served from cache points
+  // at the old token, and the new JS is never requested at all — which is
+  // the whole failure this suite exists to prevent.
+  assert.match(cacheControlFor("**/*.html"), /max-age=0/);
+  assert.match(cacheControlFor("**/*.html"), /must-revalidate/);
+});
