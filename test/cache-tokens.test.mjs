@@ -145,14 +145,20 @@ test("JS is cached for one day", () => {
   assert.equal(cacheControlFor("**/*.js"), "public, max-age=86400");
 });
 
-test("no rule caches JS for longer than a day", () => {
-  // A second rule matching .js with a larger window would quietly undo the
-  // one above, and which rule wins is not obvious from reading the file.
+test("CSS is cached for one day", () => {
+  assert.equal(cacheControlFor("**/*.css"), "public, max-age=86400");
+});
+
+test("no rule caches code for longer than a day", () => {
+  // A second rule matching .js or .css with a larger window would quietly
+  // undo the two above, and which rule wins is not obvious from reading the
+  // file. Images and fonts are exempt: their names change when they do.
+  const ONE_DAY = 86400;
   for (const rule of hostingHeaders) {
-    if (rule.source === "**/*.js" || !/\bjs\b/.test(rule.source)) continue;
+    if (!/\b(?:js|css)\b/.test(rule.source)) continue;
     const value = rule.headers.find(header => header.key === "Cache-Control")?.value || "";
     const maxAge = Number(value.match(/max-age=(\d+)/)?.[1] ?? 0);
-    assert.ok(maxAge <= 86400, `${rule.source} caches JS for ${maxAge}s`);
+    assert.ok(maxAge <= ONE_DAY, `${rule.source} caches code for ${maxAge}s`);
   }
 });
 
