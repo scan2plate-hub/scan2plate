@@ -33,7 +33,7 @@
    button twice — or a retry after a dropped connection — posts
    once.
 ========================================================= */
-import { chargeFromPosOrder, roomsAcceptingCharges, FolioError } from "./hotel-folio.js?v=s2p-dfe397943ce9";
+import { chargeFromPosOrder, roomsAcceptingCharges, FolioError } from "./hotel-folio.js?v=s2p-2f2417669e1d";
 
 /**
  * Which rooms this bill may be charged to.

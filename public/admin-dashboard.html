@@ -821,6 +821,28 @@
           .s2p-table-chip.busy{border-color:#f3d9ae;background:#fff8ec;color:#a25500;}
           .s2p-table-chip.selected{outline:3px solid var(--primary,#e07c1a);outline-offset:-1px;}
           .s2p-table-chip:disabled{opacity:.4;cursor:not-allowed;}
+
+          /* Categories run down the side, the way the left navigation does,
+             so a category keeps the same position however long the list is. */
+          .s2p-picker{display:grid;grid-template-columns:186px minmax(0,1fr);gap:14px;align-items:start;}
+          .s2p-cat-list{display:flex;flex-direction:column;gap:4px;max-height:min(70vh,620px);overflow:auto;padding-right:4px;}
+          .s2p-cat-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;
+            padding:10px 12px;border:none;border-radius:10px;background:transparent;color:var(--text-2,#555);
+            font-size:13.5px;font-weight:700;text-align:left;cursor:pointer;line-height:1.25;}
+          .s2p-cat-btn:hover{background:var(--surface-2,#f4f5f7);color:var(--text,#111);}
+          .s2p-cat-btn.active{background:var(--primary,#e07c1a);color:#fff;}
+          .s2p-cat-btn .s2p-cat-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+          .s2p-cat-btn .s2p-cat-count{flex:none;font-size:11px;font-weight:800;opacity:.72;
+            background:rgba(0,0,0,.07);border-radius:999px;padding:1px 7px;}
+          .s2p-cat-btn.active .s2p-cat-count{background:rgba(255,255,255,.24);opacity:1;}
+
+          /* A phone has no room for a fixed column, so it scrolls sideways
+             instead — the same list, not a different one. */
+          @media (max-width:860px){
+            .s2p-picker{grid-template-columns:minmax(0,1fr);}
+            .s2p-cat-list{flex-direction:row;overflow-x:auto;max-height:none;padding-bottom:4px;}
+            .s2p-cat-btn{width:auto;flex:none;border:1.5px solid var(--border,#e5e7eb);}
+          }
         </style>
         <div class="grid-60-40">
           <div class="card">
@@ -830,8 +852,10 @@
                 <input class="form-input" id="manualMenuSearch" type="search" placeholder="Search menu item..." style="min-width:min(260px,100%);flex:1;" />
                 <button class="btn btn-sm btn-outline" id="clearManualMenuSearchBtn" type="button">X</button>
               </div>
-              <div class="tab-pills" id="manualCategoryTabs"><button class="tab-pill active" data-category="all">All</button></div>
-              <div class="menu-grid" id="manualMenuPicker"></div>
+              <div class="s2p-picker">
+                <nav class="s2p-cat-list" id="manualCategoryTabs" aria-label="Menu categories"></nav>
+                <div class="menu-grid" id="manualMenuPicker"></div>
+              </div>
             </div>
           </div>
           <div class="card">
@@ -948,6 +972,14 @@
                 <button class="btn btn-success" id="printKotNewItemsBtn" type="button"><i class="fas fa-print"></i> Print KOT: New Items</button>
                 <button class="btn btn-outline" id="printKotAllItemsBtn" type="button"><i class="fas fa-print"></i> Print KOT: All Items</button>
                 <button class="btn btn-outline" id="manualUpiBtn"><i class="fas fa-qrcode"></i> UPI QR</button>
+              </div>
+              <!-- Settling the bill: take the money, record how, then ask
+                   about paper. Hidden until the order is saved, because a
+                   bill has no number to print or settle before that. -->
+              <div class="btn-group hidden" id="manualSettleRow" style="margin-top:9px;">
+                <button class="btn btn-success" id="manualMarkPaidBtn" type="button"><i class="fas fa-indian-rupee-sign"></i> Mark Paid</button>
+                <button class="btn btn-outline" id="manualMarkUnpaidBtn" type="button"><i class="fas fa-rotate-left"></i> Mark Unpaid</button>
+                <button class="btn btn-outline" id="manualPrintBillBtn" type="button"><i class="fas fa-receipt"></i> Print Bill</button>
               </div>
               <div id="manualBillMsg" class="notice-box info hidden"><i class="fas fa-info-circle"></i><span></span></div>
               <div id="manualUpiQrWrap" class="upi-qr-section hidden">
@@ -1595,12 +1627,12 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
-  <script type="module" src="./js/admin.js?v=s2p-dfe397943ce9"></script>
-  <script type="module" src="./js/admin-modules.js?v=s2p-dfe397943ce9"></script>
+  <script type="module" src="./js/admin.js?v=s2p-2f2417669e1d"></script>
+  <script type="module" src="./js/admin-modules.js?v=s2p-2f2417669e1d"></script>
 
   <!-- Android offline billing: entirely inert outside the Capacitor app -
        see public/js/mobile-offline.js's top-of-file guard. -->
-  <script type="module" src="./js/mobile-offline.js?v=s2p-dfe397943ce9"></script>
+  <script type="module" src="./js/mobile-offline.js?v=s2p-2f2417669e1d"></script>
 
   <script>
     document.addEventListener("DOMContentLoaded", function () {

@@ -10,18 +10,18 @@
    then the one button. A manager running this at 2am should not
    have to hunt for the reason it will not close.
 ========================================================= */
-import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection, doc, getDoc, getDocs, query, where, orderBy, limit,
   runTransaction, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   installAppSafety, readValidatedLocal, resolveActiveRestaurantId, devError, getBusinessDate
-} from "./common.js?v=s2p-dfe397943ce9";
-import { propertyToday, round2, normalizeHotelRole } from "./hotel-core.js?v=s2p-dfe397943ce9";
+} from "./common.js?v=s2p-2f2417669e1d";
+import { propertyToday, round2, normalizeHotelRole } from "./hotel-core.js?v=s2p-2f2417669e1d";
 import {
   createNightAuditService, AuditError, auditReadiness, auditTotals, expectedAuditDate
-} from "./hotel-night-audit.js?v=s2p-dfe397943ce9";
+} from "./hotel-night-audit.js?v=s2p-2f2417669e1d";
 
 installAppSafety({ pageName: "Night Audit", stuckTimeoutMs: 20000 });
 

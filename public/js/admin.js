@@ -1,4 +1,4 @@
-import { app, db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { app, db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection,
   doc,
@@ -16,15 +16,17 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signOut, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { mountSafeReset } from "./safe-reset.js?v=s2p-dfe397943ce9";
-import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js?v=s2p-dfe397943ce9";
-import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList, resolveActiveRestaurantId } from "./common.js?v=s2p-dfe397943ce9";
-import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=s2p-dfe397943ce9";
-import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-dfe397943ce9";
-import { resolveBusinessType } from "./business-types.js?v=s2p-dfe397943ce9";
-import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-dfe397943ce9";
-import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-dfe397943ce9";
-import { CLOSED_WORKFLOW_STATUSES, openBillForTable, tableSelectionPlan } from "./table-bills.js?v=s2p-dfe397943ce9";
+import { mountSafeReset } from "./safe-reset.js?v=s2p-2f2417669e1d";
+import { extractTextFromPdf, parseSupplierBillText, renderPdfFirstPage } from "./bill-import-service.js?v=s2p-2f2417669e1d";
+import { canAccessModule, resolveAllowedModules, getBackendBaseUrl, calculateOrderTotals, taxPercentFromSettings, getBusinessDate, normalizeResetTime, installAppSafety, registerCleanup, guardedAction, closeStaleOverlays, readValidatedLocal, debounce, setHtmlIfChanged, formatBillSerial, billDisplayNumber, allocateFromCounter, currencyFormatter, takeWindow, resetWindow, openWindowFully, showMoreMarkup, bindShowMore, reconcileKeyedList, resetKeyedList, resolveActiveRestaurantId } from "./common.js?v=s2p-2f2417669e1d";
+import { subscribeOrders, refreshOrders, getLoadedOrders } from "./orders-store.js?v=s2p-2f2417669e1d";
+import { applyBusinessTypeUi, typeSpecificSettingFields } from "./business-type-ui.js?v=s2p-2f2417669e1d";
+import { resolveBusinessType } from "./business-types.js?v=s2p-2f2417669e1d";
+import { loadPlanLimits, checkLimit, checkLimitFor } from "./plan-limits.js?v=s2p-2f2417669e1d";
+import { normalizeOrderType, orderTypeLabel, orderTypeOf, needsTable, needsDeliveryAddress, deliveryFeeFor, formatDeliveryAddress, orderDestinationText, validateOrderTypeDetails } from "./order-types.js?v=s2p-2f2417669e1d";
+import { CLOSED_WORKFLOW_STATUSES, openBillForTable, tableSelectionPlan } from "./table-bills.js?v=s2p-2f2417669e1d";
+import { ALL_CATEGORIES, categoryListModel, resolveSelectedCategory, itemMatches } from "./menu-categories.js?v=s2p-2f2417669e1d";
+import { PAYMENT_METHODS, billActionState, paymentMethodLabel } from "./billing-actions.js?v=s2p-2f2417669e1d";
 
 installAppSafety({ pageName: "Admin Dashboard", stuckTimeoutMs: 18000 });
 
@@ -495,6 +497,10 @@ const manualItemsTotalEl = document.getElementById("manualItemsTotal");
 const manualTaxTotalEl = document.getElementById("manualTaxTotal");
 const manualGrandTotalTextEl = document.getElementById("manualGrandTotalText");
 const manualCategoryTabsEl = document.getElementById("manualCategoryTabs");
+const manualSettleRowEl = document.getElementById("manualSettleRow");
+const manualMarkPaidBtn = document.getElementById("manualMarkPaidBtn");
+const manualMarkUnpaidBtn = document.getElementById("manualMarkUnpaidBtn");
+const manualPrintBillBtn = document.getElementById("manualPrintBillBtn");
 const menuCategoryTabsEl = document.getElementById("menuCategoryTabs");
 
 const printAllKotBtn = document.getElementById("printAllKotBtn");
@@ -2414,6 +2420,33 @@ function renderCategoryChips(container, categories, selected, clickHandler) {
   });
 }
 
+/**
+ * The same choice as renderCategoryChips, down the side instead of across.
+ *
+ * A separate function rather than a flag on that one: the Menu Items screen
+ * still wants pills, and the two differ in markup, not only in direction.
+ *
+ * One delegated listener on the container, re-bound only when the container
+ * changes, so repainting the list cannot stack handlers.
+ */
+function renderCategoryList(container, items, selected, clickHandler) {
+  if (!container) return;
+
+  container.innerHTML = categoryListModel(items, selected).map(entry => `
+    <button type="button" class="s2p-cat-btn${entry.active ? " active" : ""}"
+            data-category="${escapeHtml(entry.key)}"${entry.active ? ' aria-current="true"' : ""}>
+      <span class="s2p-cat-name">${escapeHtml(entry.label)}</span>
+      <span class="s2p-cat-count">${entry.count}</span>
+    </button>`).join("");
+
+  if (container.dataset.s2pCatBound === "true") return;
+  container.dataset.s2pCatBound = "true";
+  container.addEventListener("click", event => {
+    const button = event.target.closest("[data-category]");
+    if (button) clickHandler(button.dataset.category || ALL_CATEGORIES);
+  });
+}
+
 function setNotice(message = "", type = "info") {
   if (!manualBillMsgEl) return;
 
@@ -2686,7 +2719,15 @@ function handleRealtimeAdminAlerts(orders) {
 /* =========================================================
    PAYMENT MODAL
 ========================================================= */
-function showPaymentMethodModal(orderId) {
+/**
+ * Ask how the money arrived, then record it.
+ *
+ * `onPaid` lets a caller continue the sequence once the payment is saved —
+ * the billing screen uses it to offer a printed bill. Callers that pass
+ * nothing behave exactly as before, which is what the Tables and Orders
+ * screens still want.
+ */
+function showPaymentMethodModal(orderId, { onPaid } = {}) {
   const old = document.getElementById("paymentMethodModal");
   if (old) old.remove();
 
@@ -2717,10 +2758,8 @@ function showPaymentMethodModal(orderId) {
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <button class="pay-method-btn" data-method="cash">Cash</button>
-        <button class="pay-method-btn" data-method="upi">UPI</button>
-        <button class="pay-method-btn" data-method="card">Card</button>
-        <button class="pay-method-btn" data-method="other">Other</button>
+        ${PAYMENT_METHODS.map(method =>
+          `<button class="pay-method-btn" data-method="${escapeHtml(method.key)}">${escapeHtml(method.label)}</button>`).join("")}
       </div>
 
       <button id="closePaymentMethodModal" style="
@@ -2754,11 +2793,16 @@ function showPaymentMethodModal(orderId) {
     btn.addEventListener("click", () => guardedAction(btn, async () => {
       overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = true);
       btn.textContent = "Saving...";
-      const ok = await updatePaymentStatus(orderId, "paid", btn.dataset.method || "cash");
-      if (ok) overlay.remove();
-      else {
+      const method = btn.dataset.method || "cash";
+      const ok = await updatePaymentStatus(orderId, "paid", method);
+      if (ok) {
+        // Closed before the callback runs: whatever it opens should not
+        // appear behind this overlay.
+        overlay.remove();
+        await onPaid?.(method);
+      } else {
         overlay.querySelectorAll(".pay-method-btn").forEach(methodBtn => methodBtn.disabled = false);
-        btn.textContent = btn.dataset.method === "cash" ? "Cash" : btn.dataset.method === "upi" ? "UPI" : btn.dataset.method === "card" ? "Card" : "Other";
+        btn.textContent = paymentMethodLabel(method);
       }
     }, { timeoutMs: 20000, errorMessage: false }));
   });
@@ -4625,6 +4669,7 @@ function manualDeliveryFeeValue() {
 }
 
 function renderManualTotals() {
+  renderManualSettleRow();
   const itemsTotal = manualCart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
   const discountAmount = calculateDiscountAmount(itemsTotal, manualDiscount);
   const taxableAmount = Math.max(0, itemsTotal - discountAmount);
@@ -4783,6 +4828,92 @@ function addManualItem(id, variantName = "") {
   renderManualCart();
 }
 
+/* ---------------------------------------------------------
+   SETTLING THE BILL FROM THIS SCREEN
+
+   Hidden entirely until the order is saved. A disabled row
+   of buttons on a screen where nothing can yet be settled is
+   noise; the row appearing is itself the signal that the
+   order now exists.
+--------------------------------------------------------- */
+function renderManualSettleRow() {
+  if (!manualSettleRowEl) return;
+
+  const state = billActionState({
+    savedOrderId: editingOrderDocId,
+    cartCount: manualCart.length,
+    paymentStatus: manualPaymentStatusEl?.value
+  });
+
+  manualSettleRowEl.classList.toggle("hidden", !state.saved);
+  if (manualPrintBillBtn) manualPrintBillBtn.disabled = !state.canPrint;
+  if (manualMarkPaidBtn) {
+    manualMarkPaidBtn.disabled = !state.canMarkPaid;
+    manualMarkPaidBtn.innerHTML = state.paid
+      ? `<i class="fas fa-check"></i> Paid`
+      : `<i class="fas fa-indian-rupee-sign"></i> Mark Paid`;
+  }
+  if (manualMarkUnpaidBtn) manualMarkUnpaidBtn.classList.toggle("hidden", !state.canMarkUnpaid);
+}
+
+/**
+ * Ask about paper, once the money is already recorded.
+ *
+ * Resolves false on Escape, on the backdrop and on Cancel, because every way
+ * of dismissing this means "no slip" — the payment is saved either way, so
+ * the safe default here is the quiet one.
+ */
+function askPrintBill(summary = "") {
+  return new Promise(resolve => {
+    document.getElementById("printBillAskModal")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "printBillAskModal";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:999999;display:flex;align-items:center;justify-content:center;padding:18px;";
+    overlay.innerHTML = `
+      <div style="width:min(92vw,400px);background:#fff;border-radius:22px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.22);">
+        <div style="font-size:22px;font-weight:800;margin-bottom:6px;">Payment saved</div>
+        <div style="color:#666;font-size:14px;line-height:1.6;margin-bottom:18px;">
+          ${escapeHtml(summary)}Print a bill for the customer?
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <button type="button" data-print="no" style="border:none;background:#f3f4f6;color:#111;border-radius:14px;padding:14px 10px;font-size:15px;font-weight:800;cursor:pointer;">No, skip</button>
+          <button type="button" data-print="yes" style="border:none;background:#111827;color:#fff;border-radius:14px;padding:14px 10px;font-size:15px;font-weight:800;cursor:pointer;">Print bill</button>
+        </div>
+      </div>`;
+
+    const finish = answer => {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      resolve(answer);
+    };
+    const onKey = event => { if (event.key === "Escape") finish(false); };
+
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay) return finish(false);
+      const choice = event.target.closest("[data-print]")?.dataset.print;
+      if (choice) finish(choice === "yes");
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-print="yes"]')?.focus();
+  });
+}
+
+/** Open the printable bill for an order id, reading it fresh if needed. */
+async function openBillPreviewFor(orderDocId) {
+  let order = (allOrders || []).find(item => item.id === orderDocId);
+  if (!order) {
+    // The live listener has not caught up yet, which is normal straight
+    // after a write. Printing a stale total is worse than one extra read.
+    const snap = await getDoc(doc(db, "orders", orderDocId));
+    if (!snap.exists()) return showAdminToast("Order not found.", "danger");
+    order = { id: snap.id, ...snap.data() };
+  }
+  fillBillPreview(order);
+  billModal?.classList.add("active");
+}
+
 function renderManualCart() {
   if (!manualCartListEl) return;
 
@@ -4852,23 +4983,15 @@ function renderManualMenuPicker() {
     return;
   }
 
-  const categories = getUniqueCategories(manualMenuItems);
+  selectedManualCategory = resolveSelectedCategory(manualMenuItems, selectedManualCategory);
 
-  if (selectedManualCategory !== "all" && !categories.includes(selectedManualCategory)) {
-    selectedManualCategory = "all";
-  }
-
-  renderCategoryChips(manualCategoryTabsEl, categories, selectedManualCategory, category => {
+  renderCategoryList(manualCategoryTabsEl, manualMenuItems, selectedManualCategory, category => {
     selectedManualCategory = category;
     renderManualMenuPicker();
   });
 
-  const search = String(manualMenuSearchEl?.value || "").trim().toLowerCase();
-  const filteredItems = manualMenuItems.filter(item => {
-    const categoryOk = selectedManualCategory === "all" || normalizeCategory(item.category) === selectedManualCategory;
-    const text = `${item.name || ""} ${item.category || ""} ${item.description || ""}`.toLowerCase();
-    return categoryOk && (!search || text.includes(search));
-  });
+  const search = String(manualMenuSearchEl?.value || "");
+  const filteredItems = manualMenuItems.filter(item => itemMatches(item, selectedManualCategory, search));
 
   if (!filteredItems.length) {
     manualMenuPickerEl.innerHTML = `
@@ -6870,6 +6993,41 @@ createManualBillBtn?.addEventListener("click", () => guardedAction(createManualB
 manualUpiBtn?.addEventListener("click", openManualUpi);
 clearCartBtn?.addEventListener("click", resetManualBillForm);
 
+/* ---- settle the bill without leaving Quick Billing ----
+   Paid -> how the money arrived -> print or not. The payment is recorded
+   before the print is offered, so a cancelled print dialog or an empty
+   paper roll never loses the payment. */
+manualMarkPaidBtn?.addEventListener("click", () => {
+  if (!editingOrderDocId) return;
+  showPaymentMethodModal(editingOrderDocId, {
+    onPaid: async method => {
+      if (manualPaymentStatusEl) manualPaymentStatusEl.value = "paid";
+      if (manualPaymentMethodEl) manualPaymentMethodEl.value = method;
+      const { grandTotal } = renderManualTotals();
+      if (await askPrintBill(`${money(grandTotal)} by ${paymentMethodLabel(method)}. `)) {
+        await openBillPreviewFor(editingOrderDocId);
+      }
+    }
+  });
+});
+
+manualMarkUnpaidBtn?.addEventListener("click", () => guardedAction(manualMarkUnpaidBtn, async () => {
+  if (!editingOrderDocId) return;
+  if (!confirm("Mark this bill unpaid again?")) return;
+  if (await updatePaymentStatus(editingOrderDocId, "unpaid")) {
+    if (manualPaymentStatusEl) manualPaymentStatusEl.value = "unpaid";
+    renderManualSettleRow();
+  }
+}, { timeoutMs: 20000, errorMessage: false }));
+
+manualPrintBillBtn?.addEventListener("click", () => {
+  if (editingOrderDocId) openBillPreviewFor(editingOrderDocId);
+});
+
+// The status dropdown and the buttons describe the same fact, so moving
+// either one has to repaint the other.
+manualPaymentStatusEl?.addEventListener("change", renderManualSettleRow);
+
 /* =========================================================
    CONNECT OFFLINE POS
    ---------------------------------------------------------
@@ -7383,7 +7541,7 @@ try {
     // Subscription panel, the plans for THIS business type, and the offer
     // popup. Imported lazily and not awaited, so a slow plan read can never
     // delay the dashboard itself.
-    import("./business-subscription.js?v=s2p-dfe397943ce9").then(module => module.mountBusinessSubscription({
+    import("./business-subscription.js?v=s2p-2f2417669e1d").then(module => module.mountBusinessSubscription({
       businessId: restaurantId,
       businessType: restaurantSettings.businessType || currentUser.businessType || "restaurant",
       businessName: restaurantSettings.restaurantName || "",

@@ -15,7 +15,7 @@
    of the product uses (section 51). It fails open, so a slow or
    missing billing lookup can never stop a hotel adding a room.
 ========================================================= */
-import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query, where,
   runTransaction, writeBatch, serverTimestamp
@@ -23,15 +23,15 @@ import {
 import {
   installAppSafety, registerCleanup, readValidatedLocal,
   resolveActiveRestaurantId, devError
-} from "./common.js?v=s2p-dfe397943ce9";
-import { isSellableRoom, normalizeRoomStatus, RESERVATION_STATUS, normalizeReservationStatus } from "./hotel-core.js?v=s2p-dfe397943ce9";
-import { createHotelStore } from "./hotel-store.js?v=s2p-dfe397943ce9";
-import { loadPlanLimits, checkLimitFor } from "./plan-limits.js?v=s2p-dfe397943ce9";
+} from "./common.js?v=s2p-2f2417669e1d";
+import { isSellableRoom, normalizeRoomStatus, RESERVATION_STATUS, normalizeReservationStatus } from "./hotel-core.js?v=s2p-2f2417669e1d";
+import { createHotelStore } from "./hotel-store.js?v=s2p-2f2417669e1d";
+import { loadPlanLimits, checkLimitFor } from "./plan-limits.js?v=s2p-2f2417669e1d";
 import {
   createSetupService, SetupError, expandRoomNumbers, splitExistingRooms,
   setupReadiness, ratePlanWarnings, describeRatePlan, defaultPriorityFor,
   RATE_PLAN_KINDS, STARTER_ROOM_TYPES
-} from "./hotel-setup.js?v=s2p-dfe397943ce9";
+} from "./hotel-setup.js?v=s2p-2f2417669e1d";
 
 installAppSafety({ pageName: "Property Setup", stuckTimeoutMs: 16000 });
 

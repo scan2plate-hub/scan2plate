@@ -5,7 +5,7 @@
 <header class="top"><div class="container nav"><div class="brand"><img src="./assets/logo.PNG" alt="Scan2Plate Logo" class="app-logo">Restaurant Onboarding <span class="sub">Scan2Plate setup summary</span></div><div class="actions no-print"><a class="btn ghost" href="./super-admin-dashboard.html">Dashboard</a><a class="btn ghost" href="./qr-generator.html">QR Generator</a></div></div></header>
 <main class="container"><section class="hero no-print"><h1>Printable restaurant setup sheet</h1><p>Load business, plan, payment, location, and saved table QR details from Firestore.</p></section><section class="card load-card no-print"><div class="form"><div><label class="label" for="restaurantId">Restaurant ID</label><input id="restaurantId" class="input" placeholder="RST006"></div><button id="loadBtn" class="btn">Load Sheet</button></div><div id="msg" class="notice"></div></section><section id="sheetRoot" class="card sheet"></section></main>
 <script type="module">
-import {db,auth} from "./js/firebase.js?v=s2p-dfe397943ce9";import {doc,getDoc,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {db,auth} from "./js/firebase.js?v=s2p-2f2417669e1d";import {doc,getDoc,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* -------------------------------------------------------------
    This sheet prints a business's owner name, admin email, phone,

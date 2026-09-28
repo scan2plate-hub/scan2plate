@@ -37,7 +37,7 @@
 import {
   RESERVATION_STATUS, normalizeReservationStatus, asStayDate, nightsOf,
   round2, normalizeHotelRole
-} from "./hotel-core.js?v=s2p-dfe397943ce9";
+} from "./hotel-core.js?v=s2p-2f2417669e1d";
 
 export const GUESTS = "hotel_guests";
 export const GUEST_DOCUMENTS = "hotel_guest_documents";

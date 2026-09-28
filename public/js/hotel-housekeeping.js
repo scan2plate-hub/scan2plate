@@ -28,7 +28,7 @@
 ========================================================= */
 import {
   ROOM_STATUS, canChangeRoomStatus, normalizeRoomStatus, normalizeHotelRole, asStayDate
-} from "./hotel-core.js?v=s2p-dfe397943ce9";
+} from "./hotel-core.js?v=s2p-2f2417669e1d";
 
 export const HOUSEKEEPING = "hotel_housekeeping";
 export const MAINTENANCE = "hotel_maintenance";

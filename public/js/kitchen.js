@@ -1,4 +1,4 @@
-import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection,
   doc,
@@ -20,8 +20,8 @@ import {
   withTimeout,
   registerCleanup,
   guardedAction
-} from "./common.js?v=s2p-dfe397943ce9";
-import { orderTypeOf, orderTypeLabel, needsTable, formatDeliveryAddress } from "./order-types.js?v=s2p-dfe397943ce9";
+} from "./common.js?v=s2p-2f2417669e1d";
+import { orderTypeOf, orderTypeLabel, needsTable, formatDeliveryAddress } from "./order-types.js?v=s2p-2f2417669e1d";
 
 installAppSafety({ pageName: "Kitchen Dashboard", stuckTimeoutMs: 15000 });
 

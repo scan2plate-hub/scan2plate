@@ -28,11 +28,11 @@
 import {
   RESERVATION_STATUS, normalizeReservationStatus, validateStayDates,
   normalizeBookingSource, asStayDate, quoteStay, round2
-} from "./hotel-core.js?v=s2p-dfe397943ce9";
+} from "./hotel-core.js?v=s2p-2f2417669e1d";
 import {
   roomNightKeysFor, validateLockRequest, lockConflicts, describeLockConflicts,
   planRoomNightChange, roomNightLock, releasesLocks
-} from "./hotel-inventory.js?v=s2p-dfe397943ce9";
+} from "./hotel-inventory.js?v=s2p-2f2417669e1d";
 
 export const ROOM_NIGHTS = "hotel_room_nights";
 export const RESERVATIONS = "hotel_reservations";
