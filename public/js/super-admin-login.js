@@ -1,6 +1,6 @@
-import { auth } from "./firebase.js";
+import { auth } from "./firebase.js?v=s2p-dfe397943ce9";
 import { signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { qs, toast } from "./common.js";
-import { debugSuperAdminLogin, friendlyAuthError, resolveSuperAdminRole, saveSuperAdminSession } from "./super-admin-auth.js";
+import { qs, toast } from "./common.js?v=s2p-dfe397943ce9";
+import { debugSuperAdminLogin, friendlyAuthError, resolveSuperAdminRole, saveSuperAdminSession } from "./super-admin-auth.js?v=s2p-dfe397943ce9";
 const email = qs("#email"); const password = qs("#password"); const loginBtn = qs("#loginBtn"); const msg = qs("#msg");
 loginBtn?.addEventListener("click", async ()=>{try{const userEmail=email?.value.trim().toLowerCase(); const userPassword=password?.value.trim(); if(!userEmail||!userPassword){toast("Enter email and password"); return;} const cred=await signInWithEmailAndPassword(auth,userEmail,userPassword); const result=await resolveSuperAdminRole(cred.user,userEmail); debugSuperAdminLogin({email:userEmail,selectedBusinessType:"Super Admin",loginSuccess:true,roleFound:result.authorized,source:result.source,redirectUrl:result.authorized?"./super-admin-dashboard.html":""}); if(!result.authorized){await signOut(auth); toast("You are not authorized as Super Admin."); return;} saveSuperAdminSession(cred.user,result.profile); window.location.href="./super-admin-dashboard.html";}catch(e){console.error(e); debugSuperAdminLogin({email:email?.value,selectedBusinessType:"Super Admin",loginSuccess:false,roleFound:false,redirectUrl:""}); if(msg){msg.classList.remove("hidden"); msg.textContent=friendlyAuthError(e);}}});

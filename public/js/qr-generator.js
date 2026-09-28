@@ -1,6 +1,6 @@
-import { db } from "./firebase.js";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
 import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { qs, escapeHtml } from "./common.js";
+import { qs, escapeHtml } from "./common.js?v=s2p-dfe397943ce9";
 const restaurantIdEl=qs("#restaurantId"), startTableEl=qs("#startTable"), endTableEl=qs("#endTable"), generateBtn=qs("#generateBtn"), qrGrid=qs("#qrGrid"), msg=qs("#msg");
 const qrParams = new URLSearchParams(window.location.search);
 if (restaurantIdEl && qrParams.get("restaurantId")) restaurantIdEl.value = qrParams.get("restaurantId");

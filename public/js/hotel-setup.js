@@ -33,7 +33,7 @@
 import {
   ROOM_STATUS, normalizeRoomStatus, isSellableRoom, round2, asStayDate,
   overlappingRatePlans, dayKeyOf
-} from "./hotel-core.js?v=s2p-20260922d";
+} from "./hotel-core.js?v=s2p-dfe397943ce9";
 
 export const ROOMS = "hotel_rooms";
 export const ROOM_TYPES = "hotel_room_types";

@@ -15,9 +15,9 @@
    owner quietly exceeding what they bought; it is not what stops a
    determined attacker, which is Firestore rules and the backend.
 ========================================================= */
-import { db } from "./firebase.js?v=s2p-20260922d";
+import { db } from "./firebase.js?v=s2p-dfe397943ce9";
 import { collection, getDoc, getDocs, doc, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { planLimit, planAllowsFeature, isEntitled, UNLIMITED } from "./subscription-core.js?v=s2p-20260922d";
+import { planLimit, planAllowsFeature, isEntitled, UNLIMITED } from "./subscription-core.js?v=s2p-dfe397943ce9";
 
 let cached = { businessId: "", plan: null, subscription: null, loaded: false };
 
