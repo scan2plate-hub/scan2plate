@@ -15,21 +15,21 @@
    cleaner an "Inspect" button that then refuses them is how staff
    learn to distrust the software.
 ========================================================= */
-import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection, doc, getDoc, onSnapshot, runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   installAppSafety, registerCleanup, readValidatedLocal, getBusinessDate,
   resolveActiveRestaurantId, devError
-} from "./common.js?v=s2p-dfe397943ce9";
-import { propertyToday, normalizeHotelRole } from "./hotel-core.js?v=s2p-dfe397943ce9";
-import { createHotelStore } from "./hotel-store.js?v=s2p-dfe397943ce9";
+} from "./common.js?v=s2p-2f2417669e1d";
+import { propertyToday, normalizeHotelRole } from "./hotel-core.js?v=s2p-2f2417669e1d";
+import { createHotelStore } from "./hotel-store.js?v=s2p-2f2417669e1d";
 import {
   createHousekeepingService, HousekeepingError, canAdvanceTask, taskQueueFor,
   housekeepingSummary, normalizeTaskStatus, blockingTickets,
   MAINTENANCE_CATEGORIES, TASK_STATUS
-} from "./hotel-housekeeping.js?v=s2p-dfe397943ce9";
+} from "./hotel-housekeeping.js?v=s2p-2f2417669e1d";
 
 installAppSafety({ pageName: "Housekeeping", stuckTimeoutMs: 16000 });
 

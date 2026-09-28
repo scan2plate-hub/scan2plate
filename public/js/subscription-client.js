@@ -17,13 +17,13 @@
    the subscription panel and an offer popup costs one read of
    each collection rather than three.
 ========================================================= */
-import { db, auth } from "./firebase.js?v=s2p-dfe397943ce9";
+import { db, auth } from "./firebase.js?v=s2p-2f2417669e1d";
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { plansForBusinessType, bestOffer, quotePlan } from "./subscription-core.js?v=s2p-dfe397943ce9";
-import { businessTypeOf } from "./business-types.js?v=s2p-dfe397943ce9";
-import { getBackendBaseUrl } from "./common.js?v=s2p-dfe397943ce9";
+import { plansForBusinessType, bestOffer, quotePlan } from "./subscription-core.js?v=s2p-2f2417669e1d";
+import { businessTypeOf } from "./business-types.js?v=s2p-2f2417669e1d";
+import { getBackendBaseUrl } from "./common.js?v=s2p-2f2417669e1d";
 
 const cache = { plans: null, offers: null };
 

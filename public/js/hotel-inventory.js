@@ -38,7 +38,7 @@
    literal: the locks are deleted, and the night is immediately
    sellable again.
 ========================================================= */
-import { nightsOf, asStayDate, normalizeReservationStatus, reservationHoldsRoom, RESERVATION_STATUS } from "./hotel-core.js?v=s2p-dfe397943ce9";
+import { nightsOf, asStayDate, normalizeReservationStatus, reservationHoldsRoom, RESERVATION_STATUS } from "./hotel-core.js?v=s2p-2f2417669e1d";
 
 /** Separator chosen so it cannot occur in a date and is legal in a doc id. */
 const KEY_SEPARATOR = "__";

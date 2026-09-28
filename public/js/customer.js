@@ -1,4 +1,4 @@
-import { db } from './firebase.js?v=s2p-dfe397943ce9';
+import { db } from './firebase.js?v=s2p-2f2417669e1d';
 import {
   collection,
   doc,
@@ -38,7 +38,7 @@ import {
   readValidatedLocal,
   formatBillSerial,
   allocateFromCounter
-} from './common.js?v=s2p-dfe397943ce9';
+} from './common.js?v=s2p-2f2417669e1d';
 
 installAppSafety({ pageName: 'Customer Menu', stuckTimeoutMs: 16000 });
 

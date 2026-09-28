@@ -1,4 +1,4 @@
-import { db } from './firebase.js?v=s2p-dfe397943ce9';
+import { db } from './firebase.js?v=s2p-2f2417669e1d';
 import {
   collection,
   doc,
@@ -15,7 +15,7 @@ import {
   escapeHtml,
   calculateOrderTotals,
   billDisplayNumber
-} from './common.js?v=s2p-dfe397943ce9';
+} from './common.js?v=s2p-2f2417669e1d';
 
 const billRoot = qs('#billRoot');
 const orderId = getParam('orderId');

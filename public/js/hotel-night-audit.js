@@ -35,8 +35,8 @@ import {
   RESERVATION_STATUS, normalizeReservationStatus, reservationHoldsRoom,
   asStayDate, addDays, nightsOf, round2, hotelKpis, frontDeskSnapshot,
   isSettledPayment, isRefund, normalizeHotelRole, propertyToday
-} from "./hotel-core.js?v=s2p-dfe397943ce9";
-import { normalizeShiftStatus, SHIFT_STATUS } from "./hotel-cashier.js?v=s2p-dfe397943ce9";
+} from "./hotel-core.js?v=s2p-2f2417669e1d";
+import { normalizeShiftStatus, SHIFT_STATUS } from "./hotel-cashier.js?v=s2p-2f2417669e1d";
 
 export const NIGHT_AUDITS = "hotelNightAudits";
 export const FOLIO_ITEMS = "hotel_folio_items";
