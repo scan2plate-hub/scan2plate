@@ -1,0 +1,7 @@
+{
+  "version": "1.1.0",
+  "build": 2,
+  "notes": "Bill printed the way a restaurant bill reads: ITEM / BASE PRICE / QTY / T.VALUE, GST, round off and the payable amount. GST can be turned off per item for anything sold at MRP. Tables can be shifted, merged, joined and split. Order History opens on today's bills, numbered from 1. Menu and restaurant details can be pulled from the Scan2Plate website.",
+  "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
+  "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
+}
