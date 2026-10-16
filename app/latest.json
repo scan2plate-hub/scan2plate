@@ -1,7 +1,7 @@
 {
-  "version": "1.1.3",
-  "build": 5,
-  "notes": "Add an instruction to any item — no onion, less spicy, pack separately — and it prints under that dish on the KOT. Tapping the search box now starts a new search instead of adding to the last one.",
+  "version": "1.1.4",
+  "build": 6,
+  "notes": "The search box empties the moment you tap it, and again once you pick an item, so it is always ready for the next dish instead of still showing the last search.",
   "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
   "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
 }
