@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "build": 3,
-  "notes": "Shift, Merge, Join and Split are now on screen under the tables, and on the top bar — moving a bill between tables no longer means hunting for the button.",
+  "version": "1.1.2",
+  "build": 4,
+  "notes": "Your data now reaches Scan2Plate by itself — after every bill, when the app is closed, and every ten minutes. A reinstalled device is offered its menu, tables, cabins, settings and past bills back. Tables and cabins are backed up even if you have not changed them.",
   "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
   "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
 }
