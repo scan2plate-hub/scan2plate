@@ -1,7 +1,7 @@
 {
-  "version": "1.1.4",
-  "build": 6,
-  "notes": "The search box empties the moment you tap it, and again once you pick an item, so it is always ready for the next dish instead of still showing the last search.",
+  "version": "1.1.5",
+  "build": 7,
+  "notes": "Choose exactly what prints bold on the bill and the KOT — the name, the items, the totals, the payable amount, the kitchen instructions. The restaurant name now prints centred. Favourites can be dragged into the order you want, from the button beside the Favorites chip.",
   "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
   "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
 }
