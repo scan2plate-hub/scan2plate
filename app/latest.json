@@ -1,7 +1,7 @@
 {
-  "version": "1.1.2",
-  "build": 4,
-  "notes": "Your data now reaches Scan2Plate by itself — after every bill, when the app is closed, and every ten minutes. A reinstalled device is offered its menu, tables, cabins, settings and past bills back. Tables and cabins are backed up even if you have not changed them.",
+  "version": "1.1.3",
+  "build": 5,
+  "notes": "Add an instruction to any item — no onion, less spicy, pack separately — and it prints under that dish on the KOT. Tapping the search box now starts a new search instead of adding to the last one.",
   "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
   "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
 }
