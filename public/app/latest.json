@@ -1,7 +1,7 @@
 {
-  "version": "1.1.5",
-  "build": 7,
-  "notes": "Choose exactly what prints bold on the bill and the KOT — the name, the items, the totals, the payable amount, the kitchen instructions. The restaurant name now prints centred. Favourites can be dragged into the order you want, from the button beside the Favorites chip.",
+  "version": "1.1.6",
+  "build": 8,
+  "notes": "The order panel fits more items on screen — tighter rows and slightly smaller text, so a full cabin can be checked without scrolling.",
   "android_url": "https://scan2plate.com/app/scan2plate-billing.apk",
   "windows_url": "https://scan2plate.com/app/scan2plate-billing-windows.zip"
 }
