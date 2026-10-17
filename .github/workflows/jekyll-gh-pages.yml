@@ -33,7 +33,12 @@ jobs:
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@v1
         with:
-          source: ./public
+          # The repository root, which is what GitHub's own Pages build
+          # (Settings > Pages, "Deploy from a branch") also publishes. The
+          # two run on every push and the last one to finish wins, so they
+          # have to agree: while this said ./public, whichever finished
+          # last decided whether /app/... answered or 404'd.
+          source: ./
           destination: ./_site
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
